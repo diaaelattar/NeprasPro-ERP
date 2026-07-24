@@ -1,0 +1,123 @@
+/* ════════════════════════════════════════════════════════
+   Egypt Smart School ERP — EMIS Ministry Style Theme
+   Based on: student.emis.gov.eg portal design language
+   ════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap');
+
+:root {
+  --font-family: 'Cairo', system-ui, sans-serif;
+
+  /* ── EMIS Core Palette ── */
+  --bg-primary:   #f0f2f5;          /* صفحة الخلفية الرمادية الفاتحة */
+  --bg-secondary: #e8ecf1;
+  --bg-card:      #ffffff;          /* بطاقات بيضاء نظيفة */
+  --bg-input:     #ffffff;
+
+  /* ── نصوص ── */
+  --text-primary:   #1a2535;
+  --text-secondary: #4b5563;
+  --text-muted:     #9ca3af;
+
+  /* ── الأزرق الحكومي EMIS ── */
+  --primary:       #1a56a8;         /* الأزرق الرسمي */
+  --primary-hover: #154d99;
+  --primary-light: #dbeafe;
+  --primary-glow:  rgba(26, 86, 168, 0.15);
+
+  /* ── الحدود والظلال ── */
+  --border-color: #d1d5db;
+  --border-light: #e5e7eb;
+  --border-glow:  rgba(26, 86, 168, 0.3);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-lg:    0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+
+  /* ── حالات ── */
+  --success:       #059669;
+  --success-bg:    #d1fae5;
+  --success-glow:  rgba(5, 150, 105, 0.12);
+
+  --danger:        #dc2626;
+  --danger-bg:     #fee2e2;
+  --danger-glow:   rgba(220, 38, 38, 0.12);
+
+  --warning:       #d97706;
+  --warning-bg:    #fef3c7;
+
+  --info:          #0284c7;
+  --info-bg:       #e0f2fe;
+
+  /* ── Header & Sidebar (Dark Executive Blue) ── */
+  --header-bg:     #1a3c6e;         /* أزرق داكن رسمي للهيدر */
+  --header-text:   #ffffff;
+  --sidebar-bg:    #111c30;         /* كحلي ملكي داكن فخم جداً */
+  --sidebar-text:  #94a3b8;         /* رمادي أزرق ذو تباين عالٍ */
+  --sidebar-active-bg:   #1e293b;   /* خلفية داكنة نشطة */
+  --sidebar-active-text: #ffffff;   /* نص أبيض بالكامل */
+  --sidebar-active-border: #f59e0b; /* إطار ذهبي ملكي أنيق */
+  --sidebar-hover-bg: rgba(255,255,255,0.05);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+}
+
+/* Pulse animation for loading indicators */
+@keyframes pulseGlow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+.pulse-animation {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* ── Print Media Styles for Kashf Serry ── */
+#printable-secret-sheet {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-secret-sheet, #printable-secret-sheet * {
+    visibility: visible;
+  }
+  #printable-secret-sheet {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 20px;
+    background: #fff;
+    color: #000;
+  }
+}

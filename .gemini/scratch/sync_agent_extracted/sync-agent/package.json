@@ -1,0 +1,18 @@
+{
+  "name": "control-system-student-sync",
+  "version": "1.0.0",
+  "description": "Read-only sync agent that pulls student data from the existing شؤون الطلاب module (SQLite or Access file, and/or its API) into the new كنترول (control) system's PostgreSQL database.",
+  "main": "src/sync.js",
+  "scripts": {
+    "discover": "node src/discover-schema.js",
+    "sync:full": "node src/sync.js --mode=full",
+    "sync:delta": "node src/sync.js --mode=delta"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "odbc": "^2.4.9",
+    "axios": "^1.7.7",
+    "pg": "^8.12.0",
+    "dotenv": "^16.4.5"
+  }
+}
