@@ -2463,10 +2463,22 @@ function MarksEntryPanel({ term, mode, gradeId, examSubjects = [], secretSummary
                             id={`input-${idx}-${subj.id}`}
                             type="text"
                             disabled={isDisabled}
-                            value={isExcluded ? 'مستبعد' : cellData.mark}
-                            onChange={e => handleCellChange(st.control_student_id, subj.id, e.target.value)}
+                            value={isExcluded ? 'مستبعد' : cellData.is_exempt ? 'معفى' : cellData.mark}
+                            onChange={e => {
+                              if (e.target.value.trim() === 'معفى') {
+                                setMarksGrid(prev => ({
+                                  ...prev,
+                                  [st.control_student_id]: {
+                                    ...(prev[st.control_student_id] || {}),
+                                    [subj.id]: { mark: 'معفى', is_exempt: true, is_absent: false }
+                                  }
+                                }));
+                              } else {
+                                handleCellChange(st.control_student_id, subj.id, e.target.value);
+                              }
+                            }}
                             onKeyDown={e => handleKeyDown(e, idx, subj.id)}
-                            placeholder={isDisabled ? '-' : '0'}
+                            placeholder={isDisabled ? '-' : cellData.is_exempt ? 'معفى' : '0'}
                             style={{
                               width: '80px', padding: '6px', textAlign: 'center', borderRadius: '6px',
                               border: isActive ? '2px solid #1a56a8' : '1px solid #cbd5e1',

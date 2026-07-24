@@ -689,19 +689,32 @@ const saveControlMarks = async (req, res) => {
 
   try {
     const sqliteDb = db.getSQLiteDb();
+
+    // Pre-fetch all subjects into a Map for ultra-fast lookup (N+1 query elimination)
+    const allSubjects = _all(sqliteDb, "SELECT id, term1_work_mark, term1_exam_mark, term2_work_mark, term2_exam_mark FROM exam_subjects");
+    const subjectMap = new Map();
+    allSubjects.forEach(s => subjectMap.set(s.id, s));
+
+    // Pre-fetch existing marks into a Map for audit comparison
+    const yearId = academicYearId || 1;
+    const tVal = term || 1;
+    const existingMarks = _all(sqliteDb, "SELECT control_student_id, subject_id, work_marks, written_marks, total_marks FROM control_marks WHERE academic_year_id = ? AND term = ?", [yearId, tVal]);
+    const markMap = new Map();
+    existingMarks.forEach(m => markMap.set(`${m.control_student_id}_${m.subject_id}`, m));
+
     db.runTransaction(() => {
       marks.forEach(m => {
-        const subject = _get(sqliteDb, "SELECT term1_work_mark, term1_exam_mark, term2_work_mark, term2_exam_mark FROM exam_subjects WHERE id = ?", [m.subject_id]);
-        const maxWork = subject ? (term === 1 ? (subject.term1_work_mark || 15) : (subject.term2_work_mark || 15)) : 100;
-        const maxExam = subject ? (term === 1 ? (subject.term1_exam_mark || 35) : (subject.term2_exam_mark || 35)) : 100;
+        const subject = subjectMap.get(m.subject_id);
+        const maxWork = subject ? (tVal === 1 ? (subject.term1_work_mark || 15) : (subject.term2_work_mark || 15)) : 100;
+        const maxExam = subject ? (tVal === 1 ? (subject.term1_exam_mark || 35) : (subject.term2_exam_mark || 35)) : 100;
 
         const work = Math.min(Math.max(parseFloat(m.work_marks) || 0, 0), maxWork);
         const practical = Math.max(parseFloat(m.practical_marks) || 0, 0);
         const written = Math.min(Math.max(parseFloat(m.written_marks) || 0, 0), maxExam);
         const total = work + practical + written;
 
-        // Fetch existing mark for audit logging
-        const oldMark = _get(sqliteDb, "SELECT work_marks, written_marks, total_marks FROM control_marks WHERE control_student_id = ? AND subject_id = ? AND academic_year_id = ? AND term = ?", [m.control_student_id, m.subject_id, academicYearId || 1, term || 1]);
+        const key = `${m.control_student_id}_${m.subject_id}`;
+        const oldMark = markMap.get(key);
 
         sqliteDb.run(`
           INSERT INTO control_marks (control_student_id, subject_id, academic_year_id, term, work_marks, practical_marks, written_marks, total_marks, is_absent, is_exempt, updated_at)
@@ -714,14 +727,13 @@ const saveControlMarks = async (req, res) => {
             is_absent = excluded.is_absent,
             is_exempt = excluded.is_exempt,
             updated_at = datetime('now')
-        `, [m.control_student_id, m.subject_id, academicYearId || 1, term || 1, work, practical, written, total, m.is_absent ? 1 : 0, m.is_exempt ? 1 : 0]);
+        `, [m.control_student_id, m.subject_id, yearId, tVal, work, practical, written, total, m.is_absent ? 1 : 0, m.is_exempt ? 1 : 0]);
 
-        // Log audit if mark changed
         if (oldMark && (oldMark.total_marks !== total || oldMark.work_marks !== work || oldMark.written_marks !== written)) {
           sqliteDb.run(`
             INSERT INTO control_marks_audit (control_student_id, subject_id, term, old_work_marks, new_work_marks, old_written_marks, new_written_marks, old_total_marks, new_total_marks, changed_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'مسؤول الكنترول')
-          `, [m.control_student_id, m.subject_id, term || 1, oldMark.work_marks, work, oldMark.written_marks, written, oldMark.total_marks, total]);
+          `, [m.control_student_id, m.subject_id, tVal, oldMark.work_marks, work, oldMark.written_marks, written, oldMark.total_marks, total]);
         }
       });
     });

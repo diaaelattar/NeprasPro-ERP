@@ -1320,6 +1320,24 @@ const _migrateMasterPresetStructure = (dbInstance) => {
     if (!secCols.includes('code')) sqliteDb.run("ALTER TABLE sections ADD COLUMN code INTEGER;");
     if (!secCols.includes('is_active')) sqliteDb.run("ALTER TABLE sections ADD COLUMN is_active INTEGER DEFAULT 1;");
 
+    // Ensure control_marks_audit table exists for auditing changes
+    sqliteDb.run(`
+      CREATE TABLE IF NOT EXISTS control_marks_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        control_student_id INTEGER REFERENCES control_students(id),
+        subject_id INTEGER REFERENCES exam_subjects(id),
+        term INTEGER,
+        old_work_marks REAL,
+        new_work_marks REAL,
+        old_written_marks REAL,
+        new_written_marks REAL,
+        old_total_marks REAL,
+        new_total_marks REAL,
+        changed_by TEXT DEFAULT 'مسؤول الكنترول',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+    `);
+
     const stgCols = _all("PRAGMA table_info(stages_lookup)").map(c => c.name);
     if (!stgCols.includes('code')) sqliteDb.run("ALTER TABLE stages_lookup ADD COLUMN code INTEGER;");
     if (!stgCols.includes('is_active')) sqliteDb.run("ALTER TABLE stages_lookup ADD COLUMN is_active INTEGER DEFAULT 1;");
