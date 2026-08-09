@@ -211,6 +211,18 @@ CREATE TABLE IF NOT EXISTS students (
   merge_decision_number TEXT,
   merge_decision_date   TEXT,
   merge_notes           TEXT,
+  -- ─── حالات الأخوة والتوائم والمواهب والتحويل والنظام الأكاديمي ───
+  academic_system               TEXT,
+  parent_staff_id               INTEGER,
+  sibling_student_ids           TEXT,
+  twin_student_id               INTEGER,
+  is_talented                   INTEGER DEFAULT 0,
+  talent_description            TEXT,
+  is_returned_from_abroad       INTEGER DEFAULT 0,
+  country_from                  TEXT,
+  transferred_from_school       TEXT,
+  transferred_from_directorate  TEXT,
+  transferred_from_governorate  TEXT,
   -- ─── الحالة العامة ────────────────────────────────────
   enrollment_date       TEXT DEFAULT (date('now')),
   status                TEXT DEFAULT 'promoted' CHECK (status IN ('promoted','retained','suspended','disconnected','excluded','deleted')),

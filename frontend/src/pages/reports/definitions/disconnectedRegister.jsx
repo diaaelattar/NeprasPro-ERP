@@ -55,7 +55,7 @@ function DisconnectedRegisterPreview({ students = [], meta = {}, schoolInfo = {}
 
             <div className="header-col-center">
               <h2 className="report-title-main" style={{ color: '#b91c1c' }}>
-                سجل الطلاب المنقطعين عن الدراسة - الصف {selectedGrade?.grade_name_ar || 'جميع الصفوف'}
+                سجل المنقطعين - {selectedGrade?.grade_name_ar || 'جميع الصفوف'}
               </h2>
               <div className="report-subtitle-meta">
                 للعام الدراسي {selectedYear?.year_label || '...............'} | إجمالي المنقطعين: {students.length} طالب
@@ -170,7 +170,7 @@ function DisconnectedRegisterPreview({ students = [], meta = {}, schoolInfo = {}
 /* ── Report Definition Object ──────────────────────────────────── */
 const disconnectedRegister = {
   id:          'disconnected-register',
-  name:        'سجل الطلاب المنقطعين عن الدراسة',
+  name:        'سجل المنقطعين',
   desc:        'سجل وتتبع الطلاب المنقطعين رسمياً (نفس تنسيق سجل 41)',
   category:    'سجلات القيد',
   icon:        '⚠️',

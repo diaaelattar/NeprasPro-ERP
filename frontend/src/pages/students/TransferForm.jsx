@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeftRight, Save, X, AlertCircle, CheckCircle2 } from 'lucide-react';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 export default function TransferForm({ studentId, studentName, onSaved, onCancel }) {
   const [saving,  setSaving]  = useState(false);

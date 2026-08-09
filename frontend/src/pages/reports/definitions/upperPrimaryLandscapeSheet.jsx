@@ -1,0 +1,47 @@
+import React from 'react';
+import MacroGradesPreview from './MacroGradesPreview';
+
+const upperPrimaryLandscapeSheet = {
+  id:          'upper_primary_landscape',
+  name:        'سجل أعمال السنة للصفوف ( 3-4-5-6) (عرضي)',
+  desc:        'سجل رصد وتقييمات أعمال السنة للصفوف العليا بالمظهر العرضي (ماكرو إكسيل)',
+  category:    'سجلات رصد أعمال السنة',
+  icon:        '📄',
+  orientation: 'landscape',
+  available:   true,
+  excelOnly:   true,
+
+  filters: {
+    requiresSection: true,
+    requiresStage:   true,
+    requiresGrade:   true,
+    requiresYear:    true,
+    requiresClass:   true,
+  },
+
+  excelEndpoint: (f) =>
+    `/api/students/export/class-list?classId=${f.classId}&gradeId=${f.gradeId}&academicYearId=${f.academicYearId}&mode=upper_primary_landscape&status=all`,
+
+  excelFileName: (f, meta) =>
+    `سجل_أعمال_السنة_صفوف_عليا_عرضي_${meta.selectedClassroom?.class_name || 'الفصل'}.xlsm`,
+
+  buildQuery: (f) => {
+    const q = new URLSearchParams({
+      status: 'all',
+      limit: 100,
+      mode: 'upper_primary_landscape',
+    });
+    if (f.classId)        q.set('classId', f.classId);
+    if (f.gradeId)        q.set('gradeId', f.gradeId);
+    if (f.academicYearId) q.set('academicYearId', f.academicYearId);
+    if (f.sectionId)      q.set('sectionId', f.sectionId);
+    if (f.stageId)        q.set('stageId', f.stageId);
+    return q.toString();
+  },
+
+  PreviewComponent: (props) => (
+    <MacroGradesPreview {...props} title="سجل أعمال السنة للصفوف (3-4-5-6) (عرضي)" />
+  ),
+};
+
+export default upperPrimaryLandscapeSheet;

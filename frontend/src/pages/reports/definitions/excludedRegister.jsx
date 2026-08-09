@@ -172,7 +172,7 @@ const excludedRegister = {
   id:          'excluded-register',
   name:        'سجل الطلاب المستبعدين',
   desc:        'السجل الرسمي للطلاب المستبعدين والمحولين خارجياً (نفس تنسيق سجل 41)',
-  category:    'سجلات القيد',
+  category:    'المطبوعات والنماذج',
   icon:        '🚫',
   orientation: 'landscape',
   available:   true,

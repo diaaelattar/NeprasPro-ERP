@@ -6,14 +6,17 @@ import {
   AlertTriangle, CheckSquare, Square, X, Save, UserX, Trash2,
   Grid, ChevronsUpDown, ChevronUp, ChevronDown, SlidersHorizontal
 } from 'lucide-react';
-import ReportsPage from '../reports/ReportsPage';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 const STATUS_LABELS = {
-  promoted:  { label: 'منقول',        color: '#10b981' },
-  retained:  { label: 'باقٍ للإعادة', color: '#f59e0b' },
-  suspended: { label: 'موقوف قيده',   color: '#ef4444' },
+  new:          { label: 'مستجد',        color: '#3b82f6' },
+  promoted:     { label: 'منقول',        color: '#10b981' },
+  retained:     { label: 'باقٍ للإعادة', color: '#f59e0b' },
+  suspended:    { label: 'موقوف قيده',   color: '#ef4444' },
+  disconnected: { label: 'منقطع',        color: '#8b5cf6' },
+  excluded:     { label: 'مستبعد',       color: '#6b7280' },
 };
 
 const TRACK_LABELS = {
@@ -93,7 +96,18 @@ function BulkEditModal({ count, formOpts, onApply, onClose }) {
     { value: 'academic_year_id',label: 'العام الدراسي' },
   ];
   const renderValueInput = () => {
-    if (field === 'status') return (<select className="field-input" value={value} onChange={e => setValue(e.target.value)}><option value="">اختر الحالة</option>{Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}</select>);
+    if (field === 'status') return (
+      <select className="field-input" value={value} onChange={e => setValue(e.target.value)}>
+        <option value="">اختر حالة القيد</option>
+        {formOpts.enrollmentStatuses && formOpts.enrollmentStatuses.length > 0 ? (
+          formOpts.enrollmentStatuses.map(s => (
+            <option key={s.id} value={s.code.toLowerCase()}>{s.name_ar}</option>
+          ))
+        ) : (
+          Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)
+        )}
+      </select>
+    );
     if (field === 'second_language') return (<select className="field-input" value={value} onChange={e => setValue(e.target.value)}><option value="">اختر اللغة</option>{SECOND_LANGS.map(l => <option key={l} value={l}>{l}</option>)}</select>);
     if (field === 'grade_id') return (<select className="field-input" value={value} onChange={e => setValue(e.target.value)}><option value="">اختر الصف</option>{formOpts.grades?.map(g => <option key={g.id} value={g.id}>{g.grade_name_ar}</option>)}</select>);
     if (field === 'section_id') return (<select className="field-input" value={value} onChange={e => setValue(e.target.value)}><option value="">اختر القسم</option>{formOpts.sections?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>);
@@ -244,6 +258,16 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
     sectionId: activeSectionId && activeSectionId !== 'all' ? String(activeSectionId) : '',
   });
 
+  // Debounced filters to prevent API spamming on every keystroke
+  const [debouncedFilters, setDebouncedFilters] = useState(filters);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedFilters(filters);
+    }, 350); // 350ms debounce
+    return () => clearTimeout(handler);
+  }, [filters]);
+
   useEffect(() => {
     if (activeSectionId && activeSectionId !== 'all') {
       setFilters(f => ({ ...f, sectionId: String(activeSectionId), stageId: '', gradeId: '', classId: '' }));
@@ -255,44 +279,65 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
   useEffect(() => {
     fetch(`${API}/students/form-options`).then(r => r.json()).then(d => {
       if (d.success) setFormOpts(d);
-      const cur = d.academicYears?.find(y => y.is_current === 1 || y.is_current === true);
-      if (cur) setFilters(f => ({ ...f, academicYearId: String(cur.id) }));
+      // لا نفلتر تلقائياً بالسنة الدراسية — نعرض جميع الطلاب من البداية
+      // يمكن للمستخدم اختيار السنة من القوائم المنسدلة يدوياً
     });
   }, []);
 
   useEffect(() => {
-    if (filters.gradeId && filters.academicYearId) {
-      fetch(`${API}/settings/classrooms?gradeId=${filters.gradeId}&academicYearId=${filters.academicYearId}`)
+    if (debouncedFilters.gradeId && debouncedFilters.academicYearId) {
+      fetch(`${API}/settings/classrooms?gradeId=${debouncedFilters.gradeId}&academicYearId=${debouncedFilters.academicYearId}`)
         .then(r => r.json()).then(d => setClassrooms(d.success ? d.classrooms : [])).catch(() => setClassrooms([]));
-    } else { setClassrooms([]); setFilters(f => ({ ...f, classId: '' })); }
-  }, [filters.gradeId, filters.academicYearId]);
+    } else { setClassrooms([]); }
+  }, [debouncedFilters.gradeId, debouncedFilters.academicYearId]);
+
+  const [limit, setLimit] = useState(50);
 
   const loadStats = useCallback(() => {
     const q = new URLSearchParams();
-    if (filters.academicYearId) q.set('academicYearId', filters.academicYearId);
-    if (filters.sectionId)      q.set('sectionId', filters.sectionId);
+    if (debouncedFilters.academicYearId) q.set('academicYearId', debouncedFilters.academicYearId);
+    if (debouncedFilters.sectionId)      q.set('sectionId', debouncedFilters.sectionId);
     fetch(`${API}/students/stats?${q}`).then(r => r.json()).then(d => { if (d.success) setStats(d.stats); });
-  }, [filters.academicYearId, filters.sectionId]);
+  }, [debouncedFilters.academicYearId, debouncedFilters.sectionId]);
 
   const loadStudents = useCallback(() => {
     setLoading(true); setError(''); setSelected(new Set());
-    const active = Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '' && v !== null && v !== undefined));
-    const q = new URLSearchParams({ page, limit: 50, sortBy, sortDir, ...active });
+    const active = Object.fromEntries(Object.entries(debouncedFilters).filter(([, v]) => v !== '' && v !== null && v !== undefined));
+    const q = new URLSearchParams({ page, limit, sortBy, sortDir, ...active });
     q.set('viewMode', viewMode);
 
     fetch(`${API}/students?${q}`).then(r => r.json())
       .then(d => { if (d.success) { setStudents(d.students); setTotal(d.total); } else setError(d.error || 'فشل التحميل'); })
       .catch(() => setError('تعذّر الاتصال بالخادم')).finally(() => setLoading(false));
-  }, [filters, page, viewMode, sortBy, sortDir]);
+  }, [debouncedFilters, page, limit, viewMode, sortBy, sortDir]);
+
+  const selectAllMatchingFilter = async () => {
+    try {
+      setLoading(true);
+      const active = Object.fromEntries(Object.entries(debouncedFilters).filter(([, v]) => v !== '' && v !== null && v !== undefined));
+      const q = new URLSearchParams({ page: 1, limit: 100000, sortBy, sortDir, ...active });
+      q.set('viewMode', viewMode);
+      const res = await fetch(`${API}/students?${q}`);
+      const d = await res.json();
+      if (d.success && d.students) {
+        setSelected(new Set(d.students.map(s => s.id)));
+        setSuccess(`🎯 تم تحديد كافة الـ ${d.students.length} طالب المصفين بالكامل.`);
+      }
+    } catch (e) {
+      setError('فشل تحديد كافة الطلاب المصفين.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => { loadStats(); },    [loadStats]);
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [filters, viewMode, sortBy, sortDir]);
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [debouncedFilters, viewMode, sortBy, sortDir, limit]);
   useEffect(() => { loadStudents(); }, [loadStudents]);
   useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 4000); return () => clearTimeout(t); } }, [success]);
 
   const filteredStages = formOpts.stages?.filter(s => !filters.sectionId || String(s.section_id) === filters.sectionId) || [];
   const filteredGrades = formOpts.grades?.filter(g => !filters.stageId  || String(g.stage_id)   === filters.stageId)   || [];
-  const totalPages = Math.ceil(total / 50);
+  const totalPages = Math.ceil(total / limit);
   const isSecondary = formOpts.stages?.find(s => String(s.id) === filters.stageId)?.stage_name === 'ثانوي';
 
   const handleSort = (field, dir) => { setSortBy(field); setSortDir(dir); };
@@ -499,11 +544,6 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                       <AlertTriangle size={14} style={{ marginLeft: 8, color: '#f59e0b' }} /> <span>إنذارات الغياب والقيد</span>
                     </button>
                   )}
-                  {onSeating && (
-                    <button className="more-ops-menu-item" onClick={() => { onSeating(); setShowMoreOps(false); }}>
-                      <Layers size={14} style={{ marginLeft: 8, color: '#6366f1' }} /> <span>أرقام الجلوس واللجان (12 د)</span>
-                    </button>
-                  )}
                   {onDistribute && (
                     <button className="more-ops-menu-item" onClick={() => { onDistribute(); setShowMoreOps(false); }}>
                       <Grid size={14} style={{ marginLeft: 8 }} /> <span>توزيع الفصول</span>
@@ -586,11 +626,17 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
 
       {/* ── View Tabs (سجلات القيد وحالات الطلاب) ─────────────────── */}
       <div className="form-tabs" style={{ marginBottom: 0 }}>
-        <button className={`form-tab ${viewMode === 'active' ? 'active' : ''}`} onClick={() => setViewMode('active')}>📋 سجل القيد الرئيسي ({stats.total})</button>
-        <button className={`form-tab ${viewMode === 'disconnected' ? 'active' : ''}`} onClick={() => setViewMode('disconnected')} style={viewMode === 'disconnected' ? { borderColor: '#d97706', color: '#d97706' } : {}}>⚠️ سجل المنقطعين ({stats.disconnected || 0})</button>
-        <button className={`form-tab ${viewMode === 'suspended' ? 'active' : ''}`} onClick={() => setViewMode('suspended')} style={viewMode === 'suspended' ? { borderColor: '#b45309', color: '#b45309' } : {}}>🛑 سجل الموقوف قيدهم ({stats.suspended || 0})</button>
-        <button className={`form-tab ${viewMode === 'excluded' ? 'active' : ''}`} onClick={() => setViewMode('excluded')} style={viewMode === 'excluded' ? { borderColor: '#ef4444', color: '#ef4444' } : {}}>🚫 سجل المستبعدين ({stats.excluded || 0})</button>
-        <button className={`form-tab ${viewMode === 'deleted' ? 'active' : ''}`} onClick={() => setViewMode('deleted')} style={viewMode === 'deleted' ? { borderColor: '#6b7280', color: '#6b7280' } : {}}>🗑️ السلة ({stats.deleted || 0})</button>
+        <button 
+          className={`form-tab ${viewMode === 'active' ? 'active' : ''}`} 
+          onClick={() => setViewMode('active')}
+          style={viewMode === 'active' ? { background: '#e0f2fe', color: '#0369a1', fontWeight: 900, borderRadius: '8px 8px 0 0', padding: '10px 20px', border: '1px solid #bae6fd', borderBottom: '3px solid #0284c7', boxShadow: '0 2px 8px rgba(2,132,199,0.15)' } : {}}
+        >
+          📋 سجل القيد الرئيسي ({stats.total})
+        </button>
+        <button className={`form-tab ${viewMode === 'disconnected' ? 'active' : ''}`} onClick={() => setViewMode('disconnected')} style={viewMode === 'disconnected' ? { background: '#fef3c7', borderColor: '#d97706', color: '#92400e', fontWeight: 800 } : {}}>⚠️ سجل المنقطعين ({stats.disconnected || 0})</button>
+        <button className={`form-tab ${viewMode === 'suspended' ? 'active' : ''}`} onClick={() => setViewMode('suspended')} style={viewMode === 'suspended' ? { background: '#ffedd5', borderColor: '#c2410c', color: '#9a3412', fontWeight: 800 } : {}}>🛑 سجل الموقوف قيدهم ({stats.suspended || 0})</button>
+        <button className={`form-tab ${viewMode === 'excluded' ? 'active' : ''}`} onClick={() => setViewMode('excluded')} style={viewMode === 'excluded' ? { background: '#fee2e2', borderColor: '#ef4444', color: '#991b1b', fontWeight: 800 } : {}}>🚫 سجل المستبعدين ({stats.excluded || 0})</button>
+        <button className={`form-tab ${viewMode === 'deleted' ? 'active' : ''}`} onClick={() => setViewMode('deleted')} style={viewMode === 'deleted' ? { background: '#f3f4f6', borderColor: '#4b5563', color: '#1f2937', fontWeight: 800 } : {}}>🗑️ السلة ({stats.deleted || 0})</button>
       </div>
 
       {/* ── Alerts ────────────────────────────────────────── */}
@@ -617,6 +663,16 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
               )}
             </>) : (
               <button className="bulk-btn restore" onClick={handleBulkRestore} disabled={actionLoading}><RotateCcw size={15} /> استعادة المحددين</button>
+            )}
+            {selected.size > 0 && selected.size < total && (
+              <button
+                type="button"
+                className="bulk-btn"
+                onClick={selectAllMatchingFilter}
+                style={{ backgroundColor: '#0284c7', color: '#ffffff', border: 'none', fontWeight: 800 }}
+              >
+                🎯 تحديد كافة الـ ({total}) طالب المصفين بالصف/المدرسة
+              </button>
             )}
             <button className="bulk-btn cancel" onClick={() => setSelected(new Set())}><X size={15} /> إلغاء التحديد</button>
           </div>
@@ -885,9 +941,26 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
               </table>
             </div>
 
-            <div className="pagination" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: 10 }}>
-              <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>
-                عرض الصفحات: <strong style={{ color: '#0f172a' }}>{page}</strong> من <strong style={{ color: '#0f172a' }}>{totalPages || 1}</strong> (إجمالي {total} طالب)
+            <div className="pagination" style={{ position: 'sticky', bottom: 0, zIndex: 90, background: '#ffffff', borderTop: '2px solid #cbd5e1', boxShadow: '0 -4px 12px rgba(15, 23, 42, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600 }}>
+                  عرض الصفحات: <strong style={{ color: '#0f172a' }}>{page}</strong> من <strong style={{ color: '#0f172a' }}>{totalPages || 1}</strong> (إجمالي {total} طالب)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#475569', fontWeight: 700 }}>
+                  <span>عدد الطلاب بالصفحة:</span>
+                  <select
+                    value={limit}
+                    onChange={e => { setLimit(Number(e.target.value)); setPage(1); }}
+                    style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 800, background: '#f8fafc', color: '#0f172a', cursor: 'pointer' }}
+                  >
+                    <option value={50}>50 طالب</option>
+                    <option value={100}>100 طالب</option>
+                    <option value={250}>250 طالب</option>
+                    <option value={500}>500 طالب</option>
+                    <option value={1000}>1000 طالب</option>
+                    <option value={100000}>الكل (عرض جميع الطلاب)</option>
+                  </select>
+                </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <button className="page-btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>

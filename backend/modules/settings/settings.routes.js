@@ -18,6 +18,7 @@ router.get('/classrooms',                ctrl.getClassrooms);
 router.post('/classrooms/bulk-enroll',   ctrl.bulkEnrollStudents);
 router.post('/classrooms',               ctrl.createClassroom);
 router.put('/classrooms/:id',            ctrl.updateClassroom);
+router.delete('/classrooms/grade/:gradeId', ctrl.deleteGradeClassrooms);
 router.delete('/classrooms/:id',         ctrl.deleteClassroom);
 router.post('/classrooms/:id/enroll',    ctrl.enrollStudent);
 
@@ -46,11 +47,13 @@ router.get('/sections',                  ctrl.getSections);
 router.post('/sections',                 ctrl.createSection);
 router.put('/sections/:id',              ctrl.updateSection);
 router.delete('/sections/:id',           ctrl.deleteSection);
+router.patch('/sections/:id/toggle-active', ctrl.toggleSectionActive);
 
 router.get('/stages',                    ctrl.getStages);
 router.post('/stages',                   ctrl.createStage);
 router.put('/stages/:id',                 ctrl.updateStage);
 router.delete('/stages/:id',              ctrl.deleteStage);
+router.patch('/stages/:id/toggle-active', ctrl.toggleStageActive);
 
 module.exports = router;
 

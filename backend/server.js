@@ -79,6 +79,18 @@ try {
   });
 }
 
+// License & Trial Routes
+try {
+  const licenseRoutes = require('./modules/license/license.routes');
+  app.use('/api/license', licenseRoutes);
+  console.log('License routes registered successfully.');
+} catch (err) {
+  console.error('Failed to load license routes:', err.message);
+  app.use('/api/license', (req, res) => {
+    res.status(500).json({ success: false, error: `License module load error: ${err.message}` });
+  });
+}
+
 // Basic health check route
 app.get('/api/health', (req, res) => {
   res.json({

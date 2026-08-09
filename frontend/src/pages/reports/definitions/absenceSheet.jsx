@@ -41,50 +41,59 @@ function AbsenceSheetPreview({ students, meta, schoolInfo }) {
         </select>
       </div>
 
-      {/* Official Header */}
-      <div className="official-header">
-        <div className="official-logo-box">
-          <div className="logo-placeholder">شعار<br />المدرسة</div>
+      {/* Standard Official Header */}
+      <div className="report-official-header">
+        <div className="header-col-right">
+          <div>مديرية التربية والتعليم بمحافظة: <strong>{schoolInfo.governorate || '................'}</strong></div>
+          <div>إدارة: <strong>{schoolInfo.directorate || '................'} التعليمية</strong></div>
+          <div>مدرسة: <strong>{schoolInfo.schoolName || '................'}</strong></div>
         </div>
-        <div className="official-title-block">
-          <div className="official-title" style={{ fontSize: 15 }}>
-            كشف رصد الغياب — شهر {monthLabel}
-          </div>
-          <div style={{ fontSize: 12, marginTop: 4 }}>
-            {selectedGrade?.grade_name_ar} — {selectedClassroom?.class_name || '...'} — {selectedYear?.year_label}
+
+        <div className="header-col-center">
+          <h2 className="report-title-main">
+            كشف رصد الغياب الشهري — شهر {monthLabel}
+          </h2>
+          <div className="report-subtitle-meta">
+            {selectedGrade?.grade_name_ar} | فصل: {selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
           </div>
         </div>
-        <div className="official-school-info">
-          <div>محافظة: <span>{schoolInfo.governorate || '....'}</span></div>
-          <div>إدارة: <span>{schoolInfo.directorate || '....'}</span></div>
-          <div>مدرسة: <span>{schoolInfo.schoolName || '....'}</span></div>
+
+        <div className="header-col-left">
+          {schoolInfo.logoUrl ? (
+            <img src={schoolInfo.logoUrl} alt="Logo" style={{ maxHeight: 55, maxWidth: 110, objectFit: 'contain' }} />
+          ) : (
+            <div style={{ border: '1.5px dashed #94a3b8', borderRadius: 8, padding: '6px 12px', fontSize: 11, color: '#64748b', textAlign: 'center', background: '#f8fafc' }}>
+              شعار المدرسة
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>التاريخ: {new Date().toLocaleDateString('ar-EG')}</div>
         </div>
       </div>
 
-      {/* Attendance Grid */}
-      <div className="register-table-wrap" style={{ marginTop: 10, overflowX: 'auto' }}>
-        <table style={{ fontSize: 9, borderCollapse: 'collapse', width: '100%', direction: 'rtl' }}>
+      {/* Attendance Grid with Sharp Dark Borders */}
+      <div className="register-table-wrap" style={{ marginTop: 10 }}>
+        <table className="register-table" style={{ fontSize: 11, borderCollapse: 'collapse', width: '100%', direction: 'rtl' }}>
           <thead>
             <tr>
-              <th style={{ border: '1px solid #333', padding: '4px 6px', background: '#f3f4f6', width: 35 }}>م</th>
-              <th style={{ border: '1px solid #333', padding: '4px 8px', background: '#f3f4f6', minWidth: 120, textAlign: 'right' }}>اسم الطالب</th>
+              <th style={{ border: '1px solid #000 !important', padding: '4px', background: '#f1f5f9', width: 32 }}>م</th>
+              <th style={{ border: '1px solid #000 !important', padding: '4px 8px', background: '#f1f5f9', minWidth: 150, textAlign: 'right' }}>اسم الطالب</th>
               {days.map(d => (
-                <th key={d} style={{ border: '1px solid #333', padding: '3px', background: '#f3f4f6', width: 20, textAlign: 'center' }}>
+                <th key={d} style={{ border: '1px solid #000 !important', padding: '2px', background: '#f1f5f9', width: 22, textAlign: 'center' }}>
                   {d}
                 </th>
               ))}
-              <th style={{ border: '1px solid #333', padding: '4px', background: '#e5e7eb', width: 35, textAlign: 'center' }}>مجموع الغياب</th>
+              <th style={{ border: '1px solid #000 !important', padding: '4px', background: '#e2e8f0', width: 45, textAlign: 'center' }}>إجمالي الغياب</th>
             </tr>
           </thead>
           <tbody>
             {students.map((s, i) => (
-              <tr key={s.id}>
-                <td style={{ border: '1px solid #ccc', padding: '4px', textAlign: 'center' }}>{i + 1}</td>
-                <td style={{ border: '1px solid #ccc', padding: '4px 8px', textAlign: 'right', fontWeight: 600 }}>{s.full_name_ar}</td>
+              <tr key={s.id || i}>
+                <td style={{ border: '1px solid #000 !important', padding: '4px', textAlign: 'center' }}>{i + 1}</td>
+                <td style={{ border: '1px solid #000 !important', padding: '4px 8px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap' }}>{s.full_name_ar}</td>
                 {days.map(d => (
-                  <td key={d} style={{ border: '1px solid #ccc', padding: '2px', textAlign: 'center', minWidth: 20, height: 18 }}></td>
+                  <td key={d} style={{ border: '1px solid #000 !important', padding: '2px', textAlign: 'center', height: 20 }}></td>
                 ))}
-                <td style={{ border: '1px solid #ccc', padding: '4px', textAlign: 'center', background: '#fef9c3' }}></td>
+                <td style={{ border: '1px solid #000 !important', padding: '4px', textAlign: 'center' }}></td>
               </tr>
             ))}
             {students.length === 0 && (
@@ -98,10 +107,10 @@ function AbsenceSheetPreview({ students, meta, schoolInfo }) {
         </table>
       </div>
 
-      <div style={{ marginTop: 15, display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-        <div>معلم الفصل: ..........................</div>
+      <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, padding: '0 20px' }}>
+        <div>رائد الفصل: ..........................</div>
         <div>الأخصائي الاجتماعي: ..........................</div>
-        <div>مدير المدرسة: ..........................</div>
+        <div>يعتمد مدير المدرسة: ..........................</div>
       </div>
     </div>
   );

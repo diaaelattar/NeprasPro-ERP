@@ -3,8 +3,9 @@ import {
   Edit3, Search, Save, RefreshCw, AlertTriangle, CheckCircle,
   Loader2, ArrowLeft, ShieldAlert, Award, Globe, BookOpen, Filter
 } from 'lucide-react';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 export default function StudentQuickEditPage({ onBack, activeSectionId }) {
   const [activeTab, setActiveTab]   = useState('nationalId'); // 'nationalId' | 'status' | 'merge' | 'grade'

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Printer, Search, Calendar, FileText, CheckCircle, ArrowRight } from 'lucide-react';
 import '../staff/staff.css';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 export default function StudentAbsenceManager({ onBack }) {
   const [warnings, setWarnings] = useState([]);

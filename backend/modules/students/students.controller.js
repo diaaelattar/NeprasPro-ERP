@@ -1,3 +1,4 @@
+const excelReportEngine = require('../../services/excelReportEngine');
 const db = require('../../config/db');
 
 // ─── sql.js helpers ───────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ const getFormOptions = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const sections      = _all(sqliteDb, 'SELECT id, name, type FROM sections ORDER BY name');
+    const sections      = _all(sqliteDb, 'SELECT id, name, type FROM sections WHERE is_active = 1 OR is_active IS NULL ORDER BY name');
     const stages        = _all(sqliteDb, 'SELECT id, section_id, stage_name, years_count FROM stages_lookup ORDER BY section_id, display_order');
     const grades        = _all(sqliteDb, 'SELECT id, stage_id, grade_number, grade_name_ar, secondary_system FROM grades_lookup ORDER BY stage_id, grade_number');
     const nationalities = _all(sqliteDb, 'SELECT id, name FROM nationalities ORDER BY name');
@@ -625,11 +626,8 @@ const calculateAgeOnOct1st = (birthDateStr, yearLabel) => {
 const exportExcelTemplate = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
-    const ExcelJS = require('exceljs');
     const sqliteDb = db.getSQLiteDb();
-    
-    // Parse query params
-    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, isMerged, isOrphan, isForeign, isTwin, genderOrder } = req.query;
+    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, isMerged, isOrphan, isForeign, isTwin, genderOrder, templateName } = req.query;
     const where  = ['1=1'];
     const params = [];
     if (search) {
@@ -638,65 +636,56 @@ const exportExcelTemplate = async (req, res) => {
     }
     if (sectionId)     { where.push('s.section_id = ?');       params.push(sectionId); }
     if (stageId)       { where.push('s.stage_id = ?');         params.push(stageId); }
-    if (gradeId)       { where.push('s.grade_id = ?');         params.push(gradeId); }
-    if (classId) {
+    if (gradeId && gradeId !== 'all_stage' && gradeId !== 'all') {
+      where.push('s.grade_id = ?');
+      params.push(gradeId);
+    }
+    if (classId && classId !== 'all' && classId !== 'all_grade' && classId !== 'all_stage') {
       where.push('EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.student_id = s.id AND ce.class_id = ?)');
       params.push(classId);
     }
-    if (status === 'all') {
-      // All statuses
-    } else if (status) {
-      where.push('s.status = ?');
-      params.push(status);
-    } else {
-      where.push("s.status != 'suspended'");
-    }
-    if (academicYearId){ where.push('s.academic_year_id = ?'); params.push(academicYearId); }
-    if (secondaryTrack){ where.push('s.secondary_track = ?');  params.push(secondaryTrack); }
-    
-    // Custom report filters
-    if (isMerged === '1' || isMerged === 'true') {
-      where.push('(s.is_merged = 1 OR s.is_merged = 1)');
-    }
-    if (isOrphan === '1' || isOrphan === 'true') {
-      where.push("(s.father_status = 'متوفى' OR s.father_deceased = 1 OR s.mother_status = 'متوفاة' OR s.mother_deceased = 1)");
-    }
-    if (isForeign === '1' || isForeign === 'true') {
-      where.push("(n.name != 'مصري' AND n.name IS NOT NULL AND n.name != '')");
-    }
-    if (isTwin === '1' || isTwin === 'true') {
-      where.push('(s.is_twin = 1 OR s.is_twin = 1)');
-    }
-    
-    let orderClause = 's.full_name_ar ASC';
+    if (status === 'all') {}
+    else if (status)  { where.push('s.status = ?');           params.push(status); }
+    else              { where.push("s.status != 'suspended'"); }
+
+    if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
+    if (secondaryTrack) { where.push('s.secondary_track = ?');  params.push(secondaryTrack); }
+
+    if (isMerged === '1' || isMerged === 'true') where.push('(s.is_merged = 1 OR s.is_special_case = 1)');
+    if (isOrphan === '1' || isOrphan === 'true') where.push('s.is_orphan = 1');
+    if (isForeign === '1' || isForeign === 'true') where.push("(s.nationality_id IS NOT NULL AND s.nationality_id != '' AND s.nationality_id != 'EG')");
+    if (isTwin === '1' || isTwin === 'true') where.push('(s.is_twin = 1 OR s.twin_student_id IS NOT NULL)');
+
+    let genderSortClause = 's.full_name_ar ASC';
     if (genderOrder === 'boys_first') {
-      orderClause = `(CASE WHEN s.gender = 'ذكر' THEN 1 WHEN s.gender = 'أنثى' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
+      genderSortClause = `(CASE WHEN s.gender = 'ذكر' THEN 1 WHEN s.gender = 'أنثى' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
     } else if (genderOrder === 'girls_first') {
-      orderClause = `(CASE WHEN s.gender = 'أنثى' THEN 1 WHEN s.gender = 'ذكر' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
+      genderSortClause = `(CASE WHEN s.gender = 'أنثى' THEN 1 WHEN s.gender = 'ذكر' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
     }
-    
+
+    let orderClause = genderSortClause;
+    if (!classId || classId === 'all' || classId === 'all_grade' || classId === 'all_stage') {
+      if (!gradeId || gradeId === 'all_stage' || gradeId === 'all') {
+        orderClause = `st.stage_name ASC, g.grade_number ASC, COALESCE(c.class_name, '') ASC, ${genderSortClause}`;
+      } else {
+        orderClause = `COALESCE(c.class_name, '') ASC, ${genderSortClause}`;
+      }
+    }
+
     const whereStr = where.join(' AND ');
-    
     const students = _all(sqliteDb, `
-      SELECT s.id, s.student_code, s.full_name_ar, s.gender, s.status,
-             s.birth_date, s.guardian_phone, s.enrollment_date,
-             s.secondary_track, s.second_language,
-             s.national_id, s.religion, s.guardian_name, s.guardian_job, s.address,
-             s.is_merged, s.merge_type, s.merge_decision_number, s.merge_decision_date, s.merge_notes,
-             n.name AS nationality_name,
-             sec.name  AS section_name,
-             st.stage_name,
+      SELECT s.*, 
+             c.class_name AS classroom_name,
              g.grade_name_ar,
              ay.year_label AS academic_year,
-             c.class_name AS classroom_name
+             nl.name_ar AS nationality_name
       FROM students s
-      LEFT JOIN sections      sec ON sec.id = s.section_id
-      LEFT JOIN stages_lookup st  ON st.id  = s.stage_id
-      LEFT JOIN grades_lookup g   ON g.id   = s.grade_id
-      LEFT JOIN academic_years ay ON ay.id  = s.academic_year_id
-      LEFT JOIN nationalities  n  ON n.id   = s.nationality_id
-      LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
-      LEFT JOIN classes c ON c.id = ce.class_id
+      LEFT JOIN grades_lookup g          ON g.id = s.grade_id
+      LEFT JOIN stages_lookup st         ON st.id = s.stage_id
+      LEFT JOIN academic_years ay        ON ay.id = s.academic_year_id
+      LEFT JOIN nationalities_lookup nl  ON nl.id = s.nationality_id
+      LEFT JOIN class_enrollments ce     ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+      LEFT JOIN classes c                ON c.id = ce.class_id
       WHERE ${whereStr}
       ORDER BY ${orderClause}
     `, params);
@@ -704,345 +693,258 @@ const exportExcelTemplate = async (req, res) => {
     const school = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
     const grade = gradeId ? _get(sqliteDb, 'SELECT grade_name_ar FROM grades_lookup WHERE id = ?', [gradeId]) : null;
     const year = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
-    
-    const wb = new ExcelJS.Workbook();
-    const path = require('path');
-    const fs = require('fs');
 
-    const templateNameParam = req.query.templateName;
-    let templateFileName = 'student_register_41d_template.xltx';
+    const buffer = await excelReportEngine.generateStudentRegisterReport({
+      templateName,
+      school,
+      gradeName: grade?.grade_name_ar || '',
+      yearLabel: year?.year_label || '',
+      totalStudents: students.length,
+      isMerged,
+      students,
+      calculateAgeOnOct1st
+    });
 
-    if (templateNameParam) {
-      templateFileName = (templateNameParam.endsWith('.xltx') || templateNameParam.endsWith('.xlsx')) 
-        ? templateNameParam 
-        : `${templateNameParam}.xltx`;
-    } else if (isMerged === '1' || isMerged === 'true') {
-      templateFileName = 'سجل_الطلاب_المدمجين.xltx';
-    }
-
-    const templatePath = path.join(__dirname, `../../templates/reports/${templateFileName}`);
-    const defaultTemplatePath = path.join(__dirname, '../../templates/reports/student_register_41d_template.xltx');
-    const fallbackPath = path.join(__dirname, '../../../register_template.xltx');
-
-    if (fs.existsSync(templatePath)) {
-      await wb.xlsx.readFile(templatePath);
-    } else if (fs.existsSync(defaultTemplatePath)) {
-      await wb.xlsx.readFile(defaultTemplatePath);
-    } else {
-      await wb.xlsx.readFile(fallbackPath);
-    }
-    const ws = wb.worksheets[0];
-    
-    const originalMerges = [...(ws.model.merges || [])];
-    const totalStudents = students.length;
-    const pageSize = 20;
-    const numPages = Math.ceil(totalStudents / pageSize) || 1;
-    
-    // Duplicate page ranges dynamically
-    for (let p = 2; p <= numPages; p++) {
-      const sourceStart = 1;
-      const targetStart = (p - 1) * 30 + 1;
-      
-      for (let offset = 0; offset < 30; offset++) {
-        const srcRowIdx = sourceStart + offset;
-        const tgtRowIdx = targetStart + offset;
-        
-        const srcRow = ws.getRow(srcRowIdx);
-        const tgtRow = ws.getRow(tgtRowIdx);
-        
-        tgtRow.height = srcRow.height;
-        
-        srcRow.eachCell({ includeEmpty: true }, (srcCell, colNumber) => {
-          const tgtCell = tgtRow.getCell(colNumber);
-          tgtCell.value = srcCell.value;
-          if (srcCell.style) {
-            tgtCell.style = JSON.parse(JSON.stringify(srcCell.style));
-          }
-        });
-      }
-      
-      originalMerges.forEach(rangeStr => {
-        const range = parseRange(rangeStr);
-        if (range.startRow >= sourceStart && range.endRow <= sourceStart + 29) {
-          const sRow = range.startRow - sourceStart + targetStart;
-          const eRow = range.endRow - sourceStart + targetStart;
-          ws.mergeCells(sRow, range.startCol, eRow, range.endCol);
-        }
-      });
-      
-      const prevPageFooterRow = (p - 1) * 30;
-      ws.getRow(prevPageFooterRow).addPageBreak();
-    }
-    
-    const STATUS_LABELS = {
-      promoted: 'منقول',
-      retained: 'باقٍ للإعادة',
-      suspended: 'موقوف قيده'
-    };
-    
-    const gradeName = grade?.grade_name_ar || '';
-    const yearLabel = year?.year_label || '';
-    const isMergeTemplate = templateFileName.includes('مدمجين') || templateFileName.includes('الدمج') || isMerged === '1' || isMerged === 'true';
-    
-    if (isMergeTemplate) {
-      // Populate merge template headers
-      try { ws.getCell('A1').value = `مديرية التربية والتعليم بمحافظة ${school.governorate || '...............'}`; } catch(e){}
-      try { ws.getCell('A2').value = `إدارة: ${school.directorate || '...............'} التعليمية`; } catch(e){}
-      try { ws.getCell('A3').value = `مدرسة : ${school.school_name || '...............'}`; } catch(e){}
-      try { ws.getCell('A4').value = `الصف: ${gradeName || 'جميع الصفوف'}   |   العام الدراسي: ${yearLabel || '...............'}   |   إجمالي طلاب الدمج : ${totalStudents} طالب`; } catch(e){}
-
-      // Populate student data rows starting at row 7
-      students.forEach((s, i) => {
-        const r = 7 + i;
-        const setVal = (colIdx, val) => {
-          try {
-            const cell = ws.getRow(r).getCell(colIdx);
-            cell.value = val !== undefined && val !== null ? val : '';
-          } catch (e) {}
-        };
-
-        setVal(1, i + 1);
-        setVal(2, s.full_name_ar || '');
-        setVal(3, s.national_id || '');
-        setVal(4, s.grade_name_ar || gradeName || '');
-        setVal(5, s.classroom_name || 'غير مسكن');
-        setVal(6, s.merge_type || 'دمج تعليمي');
-        setVal(7, s.merge_decision_number || s.merge_decision_num || '');
-        setVal(8, s.merge_decision_date || '');
-        setVal(9, s.merge_notes || s.notes || '');
-      });
-    } else {
-      // Fill metadata headers for each page in 41-D template
-      for (let p = 1; p <= numPages; p++) {
-        const startRow = (p - 1) * 30 + 1;
-        const getCellAndUpdate = (cellRef, val) => {
-          const cell = ws.getCell(cellRef);
-          cell.value = String(val || '');
-        };
-        
-        getCellAndUpdate(`B${startRow + 1}`, `محافظة : ${school.governorate || ''}`);
-        getCellAndUpdate(`B${startRow + 2}`, `إدارة : ${school.directorate || ''}`);
-        getCellAndUpdate(`B${startRow + 3}`, `مدرسة : ${school.school_name || ''}`);
-        getCellAndUpdate(`E${startRow + 2}`, `سجل قيد تلاميذ الصف ${gradeName} للعام الدراسي ${yearLabel}`);
-      }
-      
-      // Fill students data cells for 41-D template
-      students.forEach((s, i) => {
-        const p = Math.floor(i / pageSize) + 1;
-        const offset = i % pageSize;
-        const r = (p - 1) * 30 + 8 + offset;
-        
-        const age = calculateAgeOnOct1st(s.birth_date, yearLabel);
-        
-        const setVal = (cellRef, val) => {
-          const cell = ws.getCell(cellRef);
-          cell.value = val;
-        };
-        
-        setVal(`A${r}`, i + 1);
-        setVal(`B${r}`, s.full_name_ar || '');
-        setVal(`C${r}`, s.national_id || '');
-        setVal(`D${r}`, s.birth_date || '');
-        
-        setVal(`E${r}`, age.days !== '' ? Number(age.days) : '');
-        setVal(`F${r}`, age.months !== '' ? Number(age.months) : '');
-        setVal(`G${r}`, age.years !== '' ? Number(age.years) : '');
-        
-        setVal(`H${r}`, s.classroom_name || '');
-        setVal(`I${r}`, s.gender || '');
-        setVal(`J${r}`, s.religion || '');
-        setVal(`K${r}`, s.nationality_name || '');
-        setVal(`L${r}`, STATUS_LABELS[s.status] || '');
-        setVal(`M${r}`, s.is_merged === 1 ? (s.merge_type || 'دمج') : 'لا يوجد');
-        setVal(`N${r}`, s.guardian_name || '');
-        setVal(`O${r}`, s.guardian_job || '');
-        setVal(`P${r}`, s.guardian_phone || '');
-        setVal(`Q${r}`, s.address || '');
-        setVal(`R${r}`, s.enrollment_date || '');
-      });
-    }
-    
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename=register_report.xlsx`);
-    
-    const buffer = await wb.xlsx.writeBuffer();
     return res.send(buffer);
   } catch (err) {
     console.error('Failed to export Excel register template:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: 'فشل تصدير ملف الإكسيل الرئيسي.' });
   }
 };
 
-// ─── GET /api/students/export/class-list (Backend class list template populator) 
-const exportClassListExcel = async (req, res) => {
+const exportFullClassListExcel = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
-    const ExcelJS = require('exceljs');
+    const excelReportEngine = require('../../services/excelReportEngine');
     const sqliteDb = db.getSQLiteDb();
-    
-    // Parse query params
-    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack } = req.query;
+    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, genderOrder } = req.query;
     const where  = ['1=1'];
     const params = [];
     if (search) {
       where.push('(s.full_name_ar LIKE ? OR s.student_code LIKE ? OR s.national_id LIKE ?)');
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
-    if (sectionId)     { where.push('s.section_id = ?');       params.push(sectionId); }
-    if (stageId)       { where.push('s.stage_id = ?');         params.push(stageId); }
-    if (gradeId)       { where.push('s.grade_id = ?');         params.push(gradeId); }
-    if (classId) {
+    if (sectionId) { where.push('s.section_id = ?'); params.push(sectionId); }
+    if (stageId)   { where.push('s.stage_id = ?');   params.push(stageId); }
+    if (gradeId && gradeId !== 'all_stage' && gradeId !== 'all') {
+      where.push('s.grade_id = ?'); params.push(gradeId);
+    }
+    if (classId && classId !== 'all' && classId !== 'all_grade' && classId !== 'all_stage') {
       where.push('EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.student_id = s.id AND ce.class_id = ?)');
       params.push(classId);
     }
-    if (status === 'all') {
-      // Include all
-    } else if (status) {
-      where.push('s.status = ?');
-      params.push(status);
-    } else {
-      where.push("s.status != 'suspended'");
+    if (status === 'all') {}
+    else if (status) { where.push('s.status = ?'); params.push(status); }
+    else { where.push("s.status != 'suspended'"); }
+    if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
+
+    let genderSortClause = 's.full_name_ar ASC';
+    if (genderOrder === 'boys_first') {
+      genderSortClause = `(CASE WHEN s.gender = 'ذكر' THEN 1 WHEN s.gender = 'أنثى' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
+    } else if (genderOrder === 'girls_first') {
+      genderSortClause = `(CASE WHEN s.gender = 'أنثى' THEN 1 WHEN s.gender = 'ذكر' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
     }
-    if (academicYearId){ where.push('s.academic_year_id = ?'); params.push(academicYearId); }
-    if (secondaryTrack){ where.push('s.secondary_track = ?');  params.push(secondaryTrack); }
-    
+
     const whereStr = where.join(' AND ');
-    
     const students = _all(sqliteDb, `
-      SELECT s.id, s.student_code, s.full_name_ar, s.gender, s.status,
-             s.birth_date, s.guardian_phone, s.enrollment_date,
-             s.secondary_track, s.second_language,
-             s.national_id, s.religion, s.guardian_name, s.guardian_job, s.address,
-             s.is_merged, s.merge_type,
-             n.name AS nationality_name,
-             sec.name  AS section_name,
-             st.stage_name,
+      SELECT s.*, 
+             c.class_name AS classroom_name,
              g.grade_name_ar,
-             ay.year_label AS academic_year,
-             c.class_name AS classroom_name
+             ay.year_label AS academic_year
       FROM students s
-      LEFT JOIN sections      sec ON sec.id = s.section_id
-      LEFT JOIN stages_lookup st  ON st.id  = s.stage_id
       LEFT JOIN grades_lookup g   ON g.id   = s.grade_id
       LEFT JOIN academic_years ay ON ay.id  = s.academic_year_id
-      LEFT JOIN nationalities  n  ON n.id   = s.nationality_id
       LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
       LEFT JOIN classes c ON c.id = ce.class_id
       WHERE ${whereStr}
-      ORDER BY s.full_name_ar ASC
+      ORDER BY ${genderSortClause}
     `, params);
 
     const school = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
     const classroom = classId ? _get(sqliteDb, 'SELECT class_name FROM classes WHERE id = ?', [classId]) : null;
     const year = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
-    
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile('d:/NeprasPro/class_list_template.xltx');
-    const ws = wb.worksheets[0];
-    
-    const originalMerges = [...(ws.model.merges || [])];
-    const totalStudents = students.length;
-    const pageSize = 50;
-    const numPages = Math.ceil(totalStudents / pageSize) || 1;
-    
-    // Duplicate page ranges dynamically
-    for (let p = 2; p <= numPages; p++) {
-      const sourceStart = 1;
-      const targetStart = (p - 1) * 32 + 1;
-      
-      for (let offset = 0; offset < 32; offset++) {
-        const srcRowIdx = sourceStart + offset;
-        const tgtRowIdx = targetStart + offset;
-        
-        const srcRow = ws.getRow(srcRowIdx);
-        const tgtRow = ws.getRow(tgtRowIdx);
-        
-        tgtRow.height = srcRow.height;
-        
-        srcRow.eachCell({ includeEmpty: true }, (srcCell, colNumber) => {
-          const tgtCell = tgtRow.getCell(colNumber);
-          tgtCell.value = srcCell.value;
-          if (srcCell.style) {
-            tgtCell.style = JSON.parse(JSON.stringify(srcCell.style));
-          }
-        });
-      }
-      
-      originalMerges.forEach(rangeStr => {
-        const range = parseRange(rangeStr);
-        if (range.startRow >= sourceStart && range.endRow <= sourceStart + 31) {
-          const sRow = range.startRow - sourceStart + targetStart;
-          const eRow = range.endRow - sourceStart + targetStart;
-          ws.mergeCells(sRow, range.startCol, eRow, range.endCol);
-        }
-      });
-      
-      const prevPageFooterRow = (p - 1) * 32;
-      ws.getRow(prevPageFooterRow).addPageBreak();
-    }
-    
-    const STATUS_LABELS = {
-      promoted: 'منقول',
-      retained: 'باقٍ للإعادة',
-      suspended: 'موقوف قيده'
-    };
-    
-    const className = classroom?.class_name || '';
-    const yearLabel = year?.year_label || '';
-    
-    // Fill metadata headers for each page
-    for (let p = 1; p <= numPages; p++) {
-      const startRow = (p - 1) * 32 + 1;
-      const getCellAndUpdate = (cellRef, val) => {
-        const cell = ws.getCell(cellRef);
-        cell.value = String(val || '');
-      };
-      
-      getCellAndUpdate(`A${startRow}`, `مديرية : ${school.governorate || ''}`);
-      getCellAndUpdate(`A${startRow + 1}`, `إدارة : ${school.directorate || ''}`);
-      getCellAndUpdate(`A${startRow + 2}`, `مدرسة : ${school.school_name || ''}`);
-      getCellAndUpdate(`C${startRow + 1}`, `قائمة تلاميذ فصل: ${className}`);
-      getCellAndUpdate(`C${startRow + 3}`, `العام الدراسى : ${yearLabel}`);
-    }
-    
-    // Fill students data cells (Left/Right side, 25 students per side)
-    students.forEach((s, i) => {
-      const p = Math.floor(i / pageSize) + 1;
-      const offset = i % pageSize;
-      
-      const setVal = (cellRef, val) => {
-        const cell = ws.getCell(cellRef);
-        cell.value = val;
-      };
-      
-      if (offset < 25) {
-        // Left Column (A-D)
-        const r = (p - 1) * 32 + 6 + offset;
-        setVal(`A${r}`, i + 1);
-        setVal(`B${r}`, s.full_name_ar || '');
-        setVal(`C${r}`, s.religion || '');
-        setVal(`D${r}`, STATUS_LABELS[s.status] || '');
-      } else {
-        // Right Column (E-H)
-        const r = (p - 1) * 32 + 6 + (offset - 25);
-        setVal(`E${r}`, i + 1);
-        setVal(`F${r}`, s.full_name_ar || '');
-        setVal(`G${r}`, s.religion || '');
-        setVal(`H${r}`, STATUS_LABELS[s.status] || '');
-      }
+
+    const classNameLabel = classroom?.class_name || (students[0] ? students[0].classroom_name : 'عام');
+    const yearLabel = year?.year_label || (students[0] ? students[0].academic_year : '');
+
+    const buffer = await excelReportEngine.generateFullClassListReport({
+      classNameLabel,
+      school,
+      yearLabel,
+      students
     });
-    
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=class_list_report.xlsx`);
-    
-    const buffer = await wb.xlsx.writeBuffer();
+    res.setHeader('Content-Disposition', `attachment; filename=full_class_list_${encodeURIComponent(classNameLabel)}.xlsx`);
     return res.send(buffer);
   } catch (err) {
-    console.error('Failed to export Excel class list template:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error('Failed to export full class list Excel:', err);
+    return res.status(500).json({ success: false, error: 'فشل تصدير قائمة الفصل الكاملة.' });
   }
 };
 
+const exportClassListExcel = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const JSZip = require('jszip');
+    const excelReportEngine = require('../../services/excelReportEngine');
+    const pdfReportEngine = require('../../services/pdfReportEngine');
+    const excelToPdfConverter = require('../../services/excelToPdfConverter');
+    const sqliteDb = db.getSQLiteDb();
+    
+    // Parse query params
+    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, mode, includePdf, format, preview, religion } = req.query;
+
+    const school = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const yearObj = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
+    const yearLabel = yearObj?.year_label || '';
+
+    // If batch mode is requested or classId === 'all', query all classes
+    let targetClasses = [];
+    const _getClsQuery = `
+      SELECT c.id, c.class_name, g.grade_number, s.stage_name
+      FROM classes c
+      LEFT JOIN grades_lookup g ON g.id = c.grade_id
+      LEFT JOIN stages_lookup s ON s.id = g.stage_id
+    `;
+    if (classId && classId !== 'all') {
+      const cls = _get(sqliteDb, `${_getClsQuery} WHERE c.id = ?`, [classId]);
+      if (cls) targetClasses.push(cls);
+      else targetClasses.push({ id: classId, class_name: 'فصل' });
+    } else {
+      let clsQuery = `${_getClsQuery} WHERE 1=1`;
+      const clsParams = [];
+      if (gradeId) { clsQuery += ' AND c.grade_id = ?'; clsParams.push(gradeId); }
+      clsQuery += ' ORDER BY g.grade_number ASC, c.class_name ASC';
+      targetClasses = _all(sqliteDb, clsQuery, clsParams);
+      if (targetClasses.length === 0) {
+        targetClasses.push({ id: null, class_name: 'جميع_الطلاب' });
+      }
+    }
+
+    const isZipResult = (targetClasses.length > 1) || (includePdf === 'true' || includePdf === '1');
+    const zip = isZipResult ? new JSZip() : null;
+
+    let singleBuffer = null;
+    let singleFileName = '';
+    let lastStudentList = [];
+
+    for (let clsIdx = 0; clsIdx < targetClasses.length; clsIdx++) {
+      const cls = targetClasses[clsIdx];
+      const where = ['1=1'];
+      const params = [];
+      if (search) {
+        where.push('(s.full_name_ar LIKE ? OR s.student_code LIKE ? OR s.national_id LIKE ?)');
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      }
+      if (sectionId) { where.push('s.section_id = ?'); params.push(sectionId); }
+      if (stageId)   { where.push('s.stage_id = ?');   params.push(stageId); }
+      if (gradeId)   { where.push('s.grade_id = ?');   params.push(gradeId); }
+      if (cls.id) {
+        where.push('EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.student_id = s.id AND ce.class_id = ?)');
+        params.push(cls.id);
+      }
+      if (status === 'all') {
+        // All
+      } else if (status) {
+        where.push('s.status = ?'); params.push(status);
+      } else {
+        where.push("s.status != 'suspended'");
+      }
+      if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
+      if (secondaryTrack) { where.push('s.secondary_track = ?');  params.push(secondaryTrack); }
+      if (religion && religion !== 'all') { where.push('s.religion = ?'); params.push(religion); }
+
+      const students = _all(sqliteDb, `
+        SELECT s.*, n.name AS nationality_name, c.class_name AS classroom_name
+        FROM students s
+        LEFT JOIN nationalities n ON n.id = s.nationality_id
+        LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+        LEFT JOIN classes c ON c.id = ce.class_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY s.full_name_ar ASC
+      `, params);
+      lastStudentList = students;
+
+      let className = (cls.class_name || 'فصل').trim();
+      const stageSuffix = cls.stage_name?.includes('إعداد') ? 'ع'
+        : cls.stage_name?.includes('ثانو') ? 'ث'
+        : cls.stage_name?.includes('ابتدائ') ? 'ب'
+        : cls.stage_name?.includes('رياض') ? 'ك' : 'ع';
+      const gNum = cls.grade_number || 1;
+
+      if (!/^\d+-\d+\s*[\u0600-\u06FF]+$/.test(className)) {
+        const nums = className.match(/\d+/g);
+        let subNum = (clsIdx + 1);
+        if (nums && nums.length >= 2) {
+          subNum = nums[1];
+        } else if (nums && nums.length === 1 && nums[0] !== String(gNum)) {
+          subNum = nums[0];
+        }
+        className = `${gNum}-${subNum} ${stageSuffix}`;
+      }
+
+      
+    const MACRO_TEMPLATES = {
+      'primary_portrait': 'كشف_رصد_صفوف_أولى_بالطول.xltm',
+      'primary_landscape': 'كشف_رصد_صفوف_أولى_بالعرض.xltm',
+      'upper_primary_portrait': 'كشف_رصد_صفوف_عليا_بالطول.xltm',
+      'upper_primary_landscape': 'كشف_رصد_صفوف_عليا_بالعرض.xltm',
+      'prep_portrait': 'كشف_رصد_اعدادى_بالطول.xltm',
+      'prep_landscape': 'كشف_رصد_اعدادى_بالعرض.xltm',
+      'sec_portrait': 'كشف_رصد_ثانوى_بالطول.xltm',
+      'sec_landscape': 'كشف_رصد_ثانوى_بالعرض.xltm',
+    };
+
+      if (MACRO_TEMPLATES[mode]) {
+        const xlsmBuf = await excelReportEngine.generateMacroGradesReport({ templateName: MACRO_TEMPLATES[mode], school, className, yearLabel, students });
+        const xlsmName = `${MACRO_TEMPLATES[mode].replace('.xltm', '')}_${className}.xlsm`;
+
+        if (zip) {
+          zip.file(xlsmName, xlsmBuf);
+          if (includePdf === 'true' || includePdf === '1') {
+            try {
+              const pdfBuf = await excelToPdfConverter.convertXlsmToPdf(xlsmBuf, { school, className, yearLabel, students });
+              zip.file(`${MACRO_TEMPLATES[mode].replace('.xltm', '')}_${className}.pdf`, pdfBuf);
+            } catch (pdfErr) {
+              console.error('[PDF Convert Error]', pdfErr);
+            }
+          }
+        } else {
+          singleBuffer = xlsmBuf;
+          singleFileName = xlsmName;
+        }
+      } else if (mode === 'full_class_list') {
+        const xlsxBuf = await excelReportEngine.generateFullClassListReport({ classNameLabel: className, school, yearLabel, students });
+        const xlsxName = `قائمة_فصل_كاملة_البيانات_${className}.xlsx`;
+        if (zip) zip.file(xlsxName, xlsxBuf);
+        else { singleBuffer = xlsxBuf; singleFileName = xlsxName; }
+      } else {
+        // Fallback
+        const xlsmBuf = await excelReportEngine.generateMacroGradesReport({ templateName: 'كشف_رصد_صفوف_أولى_بالطول.xltm', school, className, yearLabel, students });
+        const xlsmName = `كشف_رصد_${className}.xlsm`;
+        if (zip) zip.file(xlsmName, xlsmBuf);
+        else { singleBuffer = xlsmBuf; singleFileName = xlsmName; }
+      }
+    }
+
+    if (zip) {
+      const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment; filename=nepras_reports_batch.zip');
+      return res.send(zipBuffer);
+    } else {
+      res.setHeader('Content-Type', singleFileName.endsWith('.xlsm') ? 'application/vnd.ms-excel.sheet.macroEnabled.12' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(singleFileName)}"`);
+      return res.send(singleBuffer);
+    }
+  } catch (err) {
+    console.error('Failed to export class list:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
 
 // ─── GET /api/students/import/template ────────────────────────────────────
 const downloadImportTemplate = async (req, res) => {
@@ -2512,6 +2414,199 @@ const getSeatingLists = async (req, res) => {
   }
 };
 
+// ─── GET /api/students/export/classes-for-export ─────────────────────────────
+// Returns list of classes matching optional gradeId/stageId/sectionId filters.
+// Used by frontend to build the batch-export iteration queue.
+const getClassesForExport = (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { gradeId, stageId, sectionId, academicYearId } = req.query;
+    let query = `
+      SELECT DISTINCT c.id, c.class_name, g.grade_name_ar, g.grade_number, g.id AS grade_id, s.stage_name
+      FROM classes c
+      JOIN grades_lookup g ON g.id = c.grade_id
+      JOIN stages_lookup s ON s.id = g.stage_id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (gradeId && gradeId !== 'all_stage' && gradeId !== 'all_grade') { query += ' AND c.grade_id = ?'; params.push(gradeId); }
+    if (stageId) { query += ' AND g.stage_id = ?'; params.push(stageId); }
+    if (sectionId) { query += ' AND s.section_id = ?'; params.push(sectionId); }
+    if (academicYearId) { query += ' AND (c.academic_year_id = ? OR c.academic_year_id IS NULL OR c.academic_year_id = 0)'; params.push(academicYearId); }
+    query += ' ORDER BY g.grade_number ASC, c.class_name ASC';
+    let classes = _all(sqliteDb, query, params);
+
+    // Group by grade_id to generate 1-1 ع, 1-2 ع sequential names
+    const gradeCounters = {};
+    classes = classes.map(c => {
+      const gId = c.grade_id || 0;
+      gradeCounters[gId] = (gradeCounters[gId] || 0) + 1;
+      const subNum = gradeCounters[gId];
+      const stageSuffix = c.stage_name?.includes('إعداد') ? 'ع'
+        : c.stage_name?.includes('ثانو') ? 'ث'
+        : c.stage_name?.includes('ابتدائ') ? 'ب'
+        : c.stage_name?.includes('رياض') ? 'ك' : 'ع';
+      const formattedName = `${c.grade_number || 1}-${subNum} ${stageSuffix}`;
+      return { ...c, class_name: formattedName };
+    });
+
+    return res.json({ success: true, classes });
+  } catch (err) {
+    console.error('getClassesForExport error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── GET /api/students/export/report-pdf ──────────────────────────────────────
+// Generates a PDF of a single class using the Excel template as the layout source.
+// Strategy: generate .xlsm → try macro `تصدير_PDF_تلقائي` → fallback ExportAsFixedFormat.
+const exportReportPdf = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const excelReportEngine   = require('../../services/excelReportEngine');
+    const excelToPdfConverter = require('../../services/excelToPdfConverter');
+    const sqliteDb = db.getSQLiteDb();
+
+    const { classId, gradeId, stageId, academicYearId, mode } = req.query;
+
+    const school   = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const yearObj  = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
+    const yearLabel = yearObj?.year_label || '';
+    const classObj  = classId ? _get(sqliteDb, 'SELECT class_name FROM classes WHERE id = ?', [classId]) : null;
+    const className = classObj?.class_name || 'فصل';
+
+    // ── Build student query ──────────────────────────────────────────────
+    const where  = ['1=1'];
+    const params = [];
+    if (stageId)        { where.push('s.stage_id = ?');   params.push(stageId); }
+    if (gradeId)        { where.push('s.grade_id = ?');   params.push(gradeId); }
+    if (classId) {
+      where.push('EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.student_id = s.id AND ce.class_id = ?)');
+      params.push(classId);
+    }
+    where.push("s.status != 'suspended'");
+    if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
+
+    const students = _all(sqliteDb, `
+      SELECT s.*, n.name AS nationality_name, c.class_name AS classroom_name
+      FROM students s
+      LEFT JOIN nationalities n ON n.id = s.nationality_id
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+      LEFT JOIN classes c ON c.id = ce.class_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY s.full_name_ar ASC
+    `, params);
+
+    // ── Generate .xlsm from template ─────────────────────────────────────
+    const reportMode = mode || 'primary_portrait';
+    let xlsmBuf;
+    
+    const MACRO_TEMPLATES = {
+      'primary_portrait': 'كشف_رصد_صفوف_أولى_بالطول.xltm',
+      'primary_landscape': 'كشف_رصد_صفوف_أولى_بالعرض.xltm',
+      'upper_primary_portrait': 'كشف_رصد_صفوف_عليا_بالطول.xltm',
+      'upper_primary_landscape': 'كشف_رصد_صفوف_عليا_بالعرض.xltm',
+      'prep_portrait': 'كشف_رصد_اعدادى_بالطول.xltm',
+      'prep_landscape': 'كشف_رصد_اعدادى_بالعرض.xltm',
+      'sec_portrait': 'كشف_رصد_ثانوى_بالطول.xltm',
+      'sec_landscape': 'كشف_رصد_ثانوى_بالعرض.xltm',
+    };
+
+    
+    if (MACRO_TEMPLATES[reportMode]) {
+      xlsmBuf = await excelReportEngine.generateMacroGradesReport({ templateName: MACRO_TEMPLATES[reportMode], school, className, yearLabel, students });
+    } else if (reportMode === 'full_class_list') {
+      xlsmBuf = await excelReportEngine.generateFullClassListReport({ classNameLabel: className, school, yearLabel, students });
+    } else {
+      xlsmBuf = await excelReportEngine.generateMacroGradesReport({ templateName: MACRO_TEMPLATES['primary_portrait'], school, className, yearLabel, students });
+    }
+
+    // ── Convert to PDF (macro → ExportAsFixedFormat → LibreOffice → Puppeteer) ─
+    const pdfBuf = await excelToPdfConverter.convertXlsmToPdf(xlsmBuf, { school, className, yearLabel, students });
+
+    const safeName = encodeURIComponent(`تقرير_${className}.pdf`);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(pdfBuf);
+  } catch (err) {
+    console.error('exportReportPdf error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── GET /api/students/export/open-in-excel ──────────────────────────────────
+// Populates .xlsm from template and opens it directly in MS Excel on desktop.
+const openInExcel = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const excelReportEngine   = require('../../services/excelReportEngine');
+    const excelToPdfConverter = require('../../services/excelToPdfConverter');
+    const sqliteDb = db.getSQLiteDb();
+
+    const { classId, gradeId, stageId, academicYearId, mode } = req.query;
+
+    const school   = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const yearObj  = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
+    const yearLabel = yearObj?.year_label || '';
+    const classObj  = classId ? _get(sqliteDb, 'SELECT class_name FROM classes WHERE id = ?', [classId]) : null;
+    const className = classObj?.class_name || 'فصل';
+
+    const where  = ['1=1'];
+    const params = [];
+    if (stageId) { where.push('s.stage_id = ?'); params.push(stageId); }
+    if (gradeId) { where.push('s.grade_id = ?'); params.push(gradeId); }
+    if (classId) {
+      where.push('EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.student_id = s.id AND ce.class_id = ?)');
+      params.push(classId);
+    }
+    where.push("s.status != 'suspended'");
+    if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
+
+    const students = _all(sqliteDb, `
+      SELECT s.*, n.name AS nationality_name, c.class_name AS classroom_name
+      FROM students s
+      LEFT JOIN nationalities n ON n.id = s.nationality_id
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+      LEFT JOIN classes c ON c.id = ce.class_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY s.full_name_ar ASC
+    `, params);
+
+    const reportMode = mode || 'primary_portrait';
+    let xlsmBuf;
+    
+    const MACRO_TEMPLATES = {
+      'primary_portrait': 'كشف_رصد_صفوف_أولى_بالطول.xltm',
+      'primary_landscape': 'كشف_رصد_صفوف_أولى_بالعرض.xltm',
+      'upper_primary_portrait': 'كشف_رصد_صفوف_عليا_بالطول.xltm',
+      'upper_primary_landscape': 'كشف_رصد_صفوف_عليا_بالعرض.xltm',
+      'prep_portrait': 'كشف_رصد_اعدادى_بالطول.xltm',
+      'prep_landscape': 'كشف_رصد_اعدادى_بالعرض.xltm',
+      'sec_portrait': 'كشف_رصد_ثانوى_بالطول.xltm',
+      'sec_landscape': 'كشف_رصد_ثانوى_بالعرض.xltm',
+    };
+
+    
+    if (MACRO_TEMPLATES[reportMode]) {
+      xlsmBuf = await excelReportEngine.generateMacroGradesReport({ templateName: MACRO_TEMPLATES[reportMode], school, className, yearLabel, students });
+    } else if (reportMode === 'full_class_list') {
+      xlsmBuf = await excelReportEngine.generateFullClassListReport({ classNameLabel: className, school, yearLabel, students });
+    } else {
+      xlsmBuf = await excelReportEngine.generateMacroGradesReport({ templateName: MACRO_TEMPLATES['primary_portrait'], school, className, yearLabel, students });
+    }
+
+    const fileNameHint = `كشف_رصد_${className}.xlsm`;
+    excelToPdfConverter.openXlsmInExcel(xlsmBuf, fileNameHint);
+
+    return res.json({ success: true, message: 'تم فتح الملف ببرنامج MS Excel بنجاح.' });
+  } catch (err) {
+    console.error('openInExcel error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   getFormOptions,
   getStats,
@@ -2524,6 +2619,7 @@ module.exports = {
   getTransfersList,
   exportExcelTemplate,
   exportClassListExcel,
+  exportFullClassListExcel,
   exportTransfersExcel,
   downloadImportTemplate,
   importPreview,
@@ -2544,7 +2640,8 @@ module.exports = {
   recordStudentAbsence,
   generateSeatingNumbers,
   getSeatingLists,
-  getDuplicateStudents
+  getDuplicateStudents,
+  getClassesForExport,
+  exportReportPdf,
+  openInExcel,
 };
-
-

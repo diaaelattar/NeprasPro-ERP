@@ -7,6 +7,7 @@ import studentRegister          from './definitions/studentRegister';
 import studentRegister41        from './definitions/studentRegister41';
 import callList                 from './definitions/callList';
 import classList                from './definitions/classList';
+import fullClassList             from './definitions/fullClassList';
 import disconnectedRegister     from './definitions/disconnectedRegister';
 import suspendedRegister        from './definitions/suspendedRegister';
 import excludedRegister         from './definitions/excludedRegister';
@@ -17,9 +18,7 @@ import mergeStudentsReport      from './definitions/mergeStudentsReport';
 // ── قوائم وتوزيع الفصول ─────────────────────────────────────────
 import mergeClassList           from './definitions/mergeClassList';
 import absenceSheet             from './definitions/absenceSheet';
-import gradesSheet              from './definitions/gradesSheet';
-import secondLanguageSheet      from './definitions/secondLanguageSheet';
-import secondaryTracksSheet     from './definitions/secondaryTracksSheet';
+import absenceSheet20           from './definitions/absenceSheet20';
 import booksList                from './definitions/booksList';
 import emergencyPhonesList      from './definitions/emergencyPhonesList';
 
@@ -37,10 +36,16 @@ import guardianSummonsNotice    from './definitions/guardianSummonsNotice';
 import parentStaffAffiliation   from './definitions/parentStaffAffiliation';
 import martyrsChildren          from './definitions/martyrsChildren';
 
-// ── الكنترول والامتحانات ─────────────────────────────────────────
-import seatingNumbersList       from './definitions/seatingNumbersList';
-import committeeDistributionList from './definitions/committeeDistributionList';
-import examAbsenceList          from './definitions/examAbsenceList';
+// ── سجلات رصد أعمال السنة ─────────────────────────────────────────
+import primaryLandscapeSheet     from './definitions/primaryLandscapeSheet';
+import primaryPortraitSheet      from './definitions/primaryPortraitSheet';
+import upperPrimaryLandscapeSheet from './definitions/upperPrimaryLandscapeSheet';
+import upperPrimaryPortraitSheet from './definitions/upperPrimaryPortraitSheet';
+import prepLandscapeSheet        from './definitions/prepLandscapeSheet';
+import prepPortraitSheet         from './definitions/prepPortraitSheet';
+import secLandscapeSheet         from './definitions/secLandscapeSheet';
+import secPortraitSheet          from './definitions/secPortraitSheet';
+import gradesSheet               from './definitions/gradesSheet';
 
 // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────────
 import statisticalStatement1    from './definitions/statisticalStatement1';
@@ -55,26 +60,31 @@ import emisSummary              from './definitions/emisSummary';
 import outstandingStudentsRegister from './definitions/outstandingStudentsRegister';
 
 const REPORTS = [
-  // ── سجلات القيد والمناداة ─────────────────────────────────────
+  // ── سجلات القيد ─────────────────────────────────────────────
   studentRegister,
   studentRegister41,
-  callList,
-  classList,
   disconnectedRegister,
   suspendedRegister,
-  excludedRegister,
-  transfersReport,
-  foreignStudentsReport,
   mergeStudentsReport,
 
   // ── قوائم وتوزيع الفصول ─────────────────────────────────────
-  mergeClassList,
+  fullClassList,
+  classList,
+  callList,
   absenceSheet,
-  gradesSheet,
-  secondLanguageSheet,
-  secondaryTracksSheet,
+  absenceSheet20,
   booksList,
   emergencyPhonesList,
+
+  primaryPortraitSheet,
+  primaryLandscapeSheet,
+  upperPrimaryPortraitSheet,
+  upperPrimaryLandscapeSheet,
+  prepPortraitSheet,
+  prepLandscapeSheet,
+  secPortraitSheet,
+  secLandscapeSheet,
+  gradesSheet,
 
   // ── الصحة والسلامة المدرسية ──────────────────────────────────
   vaccinationsSheet,
@@ -89,11 +99,9 @@ const REPORTS = [
   guardianSummonsNotice,
   parentStaffAffiliation,
   martyrsChildren,
-
-  // ── الكنترول والامتحانات ─────────────────────────────────────
-  seatingNumbersList,
-  committeeDistributionList,
-  examAbsenceList,
+  excludedRegister,
+  transfersReport,
+  foreignStudentsReport,
 
   // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────
   statisticalStatement1,

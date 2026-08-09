@@ -16,21 +16,25 @@ const _decodeRow = (row) => {
 // Helper to query all rows in sql.js
 const _all = (sqliteDb, sql, params = []) => {
   const stmt = sqliteDb.prepare(sql);
-  if (params.length) stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(_decodeRow(stmt.getAsObject()));
-  stmt.free();
-  return rows;
+  try {
+    if (params.length) stmt.bind(params);
+    const rows = [];
+    while (stmt.step()) rows.push(_decodeRow(stmt.getAsObject()));
+    return rows;
+  } finally {
+    stmt.free();
+  }
 };
 
 // Helper to query single row in sql.js
 const _get = (sqliteDb, sql, params = []) => {
   const stmt = sqliteDb.prepare(sql);
-  if (params.length) stmt.bind(params);
-  const hasRow = stmt.step();
-  const row = hasRow ? _decodeRow(stmt.getAsObject()) : null;
-  stmt.free();
-  return row;
+  try {
+    if (params.length) stmt.bind(params);
+    return stmt.step() ? _decodeRow(stmt.getAsObject()) : null;
+  } finally {
+    stmt.free();
+  }
 };
 
 // Helper to get last insert ID
@@ -241,7 +245,7 @@ const getClassrooms = async (req, res) => {
   try {
     const sqliteDb = db.getSQLiteDb();
     let query = `
-      SELECT c.id, c.grade_id, c.academic_year_id, c.class_name, c.capacity,
+      SELECT c.id, c.grade_id, c.academic_year_id, c.class_name, c.class_code, c.capacity,
              g.grade_name_ar, ay.year_label
       FROM classes c
       JOIN grades_lookup g ON g.id = c.grade_id
@@ -257,7 +261,7 @@ const getClassrooms = async (req, res) => {
       query += ' AND c.academic_year_id = ?';
       params.push(academicYearId);
     }
-    query += ' ORDER BY c.class_name';
+    query += ' ORDER BY CASE WHEN c.class_code IS NOT NULL AND c.class_code != "" THEN CAST(c.class_code AS INTEGER) ELSE c.id END ASC, c.id ASC';
     const classrooms = _all(sqliteDb, query, params);
     
     // For each classroom, we can also count current enrolled students
@@ -275,7 +279,7 @@ const getClassrooms = async (req, res) => {
 // POST /api/settings/classrooms
 const createClassroom = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
-  const { gradeId, academicYearId, className, capacity } = req.body;
+  const { gradeId, academicYearId, className, classCode, capacity } = req.body;
   if (!gradeId || !academicYearId || !className) {
     return res.status(400).json({ success: false, error: 'الصف الدراسي، العام الدراسي، واسم الفصل حقول إلزامية.' });
   }
@@ -286,12 +290,48 @@ const createClassroom = async (req, res) => {
     if (exists) {
       return res.status(400).json({ success: false, error: 'هذا الفصل مسجل بالفعل في هذا الصف لنفس العام الدراسي.' });
     }
+
+    let finalClassCode = classCode;
+
+    if (!finalClassCode) {
+      // Find grade info
+      const grade = _get(sqliteDb, 'SELECT grade_number, stage_id, section_id FROM grades_lookup WHERE id = ?', [gradeId]);
+      const gradeNum = grade?.grade_number || 1;
+      
+      const stage = grade ? _get(sqliteDb, 'SELECT stage_name FROM stages_lookup WHERE id = ?', [grade.stage_id]) : null;
+      let stageCode = 3;
+      if (stage) {
+        const sn = stage.stage_name || '';
+        if (sn.includes('تمهيدي'))        stageCode = 1;
+        else if (sn.includes('رياض'))     stageCode = 2;
+        else if (sn.includes('ابتدائي')) stageCode = 3;
+        else if (sn.includes('إعدادي') || sn.includes('اعدادي')) stageCode = 4;
+        else if (sn.includes('ثانوي'))   stageCode = 5;
+      }
+
+      const section = grade ? _get(sqliteDb, 'SELECT name, code FROM sections WHERE id = ?', [grade.section_id]) : null;
+      let secCode = 1;
+      if (section) {
+        const secName = section.name || '';
+        if (secName.includes('لغات') || section.code === 'languages') secCode = 2;
+        else if (secName.includes('دولي') || section.code === 'international') secCode = 3;
+      }
+
+      // Count existing classes for this grade and year to find next index
+      const existingClasses = _all(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
+      const nextIndex = (existingClasses ? existingClasses.length : 0) + 1;
+      const classNumStr = String(nextIndex).padStart(2, '0');
+      finalClassCode = `${secCode}${stageCode}${gradeNum}${classNumStr}`;
+    }
+
+    const safeCap = Math.min(49, Math.max(1, parseInt(capacity) || 40));
+
     sqliteDb.run(`
-      INSERT INTO classes (grade_id, academic_year_id, class_name, capacity)
-      VALUES (?, ?, ?, ?)
-    `, [gradeId, academicYearId, className, capacity || 40]);
+      INSERT INTO classes (grade_id, academic_year_id, class_name, class_code, capacity)
+      VALUES (?, ?, ?, ?, ?)
+    `, [gradeId, academicYearId, className, finalClassCode, safeCap]);
     const classroomId = _lastId(sqliteDb);
-    return res.status(201).json({ success: true, message: 'تم إضافة الفصل بنجاح.', classroomId });
+    return res.status(201).json({ success: true, message: 'تم إضافة الفصل بنجاح.', classroomId, classCode: finalClassCode });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -301,7 +341,7 @@ const createClassroom = async (req, res) => {
 const updateClassroom = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   const { id } = req.params;
-  const { className, capacity } = req.body;
+  const { className, classCode, capacity } = req.body;
   try {
     const sqliteDb = db.getSQLiteDb();
     const classroom = _get(sqliteDb, 'SELECT id, grade_id, academic_year_id FROM classes WHERE id = ?', [id]);
@@ -315,11 +355,15 @@ const updateClassroom = async (req, res) => {
       }
     }
 
+    const safeCap = capacity ? Math.min(49, Math.max(1, parseInt(capacity) || 40)) : null;
+
     sqliteDb.run(`
       UPDATE classes
-      SET class_name = COALESCE(?, class_name), capacity = COALESCE(?, capacity)
+      SET class_name = COALESCE(?, class_name),
+          class_code = COALESCE(?, class_code),
+          capacity   = COALESCE(?, capacity)
       WHERE id = ?
-    `, [className || null, capacity || null, id]);
+    `, [className || null, classCode || null, safeCap, id]);
 
     return res.json({ success: true, message: 'تم تحديث بيانات الفصل بنجاح.' });
   } catch (err) {
@@ -344,6 +388,56 @@ const deleteClassroom = async (req, res) => {
 
     sqliteDb.run('DELETE FROM classes WHERE id = ?', [id]);
     return res.json({ success: true, message: 'تم حذف الفصل بنجاح.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// DELETE /api/settings/classrooms/grade/:gradeId
+const deleteGradeClassrooms = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { gradeId } = req.params;
+  const { academicYearId, confirmUnenroll } = req.query;
+
+  if (!gradeId || !academicYearId) {
+    return res.status(400).json({ success: false, error: 'معرف الصف والعام الدراسي مطلوبان.' });
+  }
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+
+    // Find all classes for this grade and academic year
+    const classes = _all(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
+    if (!classes || classes.length === 0) {
+      return res.status(404).json({ success: false, error: 'لا توجد فصول مسجلة لهذا الصف.' });
+    }
+
+    const classIds = classes.map(c => c.id);
+    const placeholders = classIds.map(() => '?').join(',');
+
+    // Check if students are enrolled in any of these classes
+    const enrolled = _get(sqliteDb, `SELECT COUNT(*) as n FROM class_enrollments WHERE class_id IN (${placeholders})`, classIds)?.n || 0;
+
+    if (enrolled > 0 && confirmUnenroll !== 'true') {
+      return res.status(400).json({
+        success: false,
+        requiresConfirmation: true,
+        enrolledCount: enrolled,
+        error: `يوجد ${enrolled} طالب موزع على فصول هذا الصف. هل تريد فك تسكين/توزيع الطلاب وحذف جميع الفصول؟`
+      });
+    }
+
+    db.runTransaction(() => {
+      if (enrolled > 0) {
+        sqliteDb.run(`DELETE FROM class_enrollments WHERE class_id IN (${placeholders})`, classIds);
+      }
+      sqliteDb.run(`DELETE FROM classes WHERE grade_id = ? AND academic_year_id = ?`, [gradeId, academicYearId]);
+    });
+
+    return res.json({
+      success: true,
+      message: `تم حذف جميع فصول الصف (${classes.length} فصل)${enrolled > 0 ? ` وفك تسكين ${enrolled} طالب` : ''} بنجاح.`
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -461,6 +555,11 @@ const createAcademicYear = async (req, res) => {
         INSERT INTO academic_years (year_label, start_date, end_date, is_current)
         VALUES (?, ?, ?, ?)
       `, [yearLabel, startDate, endDate, isCurrent ? 1 : 0]);
+
+      sqliteDb.run(`
+        INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
+        VALUES ('academic_years', 'create_year', NULL, ?, 'admin')
+      `, [`label:${yearLabel}`]);
     });
     return res.status(201).json({ success: true, message: 'تم إضافة العام الدراسي بنجاح.' });
   } catch (err) {
@@ -495,6 +594,11 @@ const updateAcademicYear = async (req, res) => {
         SET year_label = ?, start_date = ?, end_date = ?, is_current = ?
         WHERE id = ?
       `, [yearLabel, startDate, endDate, isCurrent ? 1 : 0, id]);
+
+      sqliteDb.run(`
+        INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
+        VALUES ('academic_years', 'update_year', ?, ?, 'admin')
+      `, [`id:${id}`, `label:${yearLabel},current:${isCurrent ? 1 : 0}`]);
     });
     return res.json({ success: true, message: 'تم تحديث العام الدراسي بنجاح.' });
   } catch (err) {
@@ -515,13 +619,35 @@ const deleteAcademicYear = async (req, res) => {
       return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي الحالي النشط.' });
     }
 
+    // Check for enrolled students — cannot delete if students exist
     const hasStudents = _get(sqliteDb, 'SELECT COUNT(*) as n FROM students WHERE academic_year_id = ?', [id])?.n || 0;
-    const hasClassrooms = _get(sqliteDb, 'SELECT COUNT(*) as n FROM classes WHERE academic_year_id = ?', [id])?.n || 0;
-    if (hasStudents > 0 || hasClassrooms > 0) {
-      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود فصول أو طلاب مسجلين فيه.' });
+    if (hasStudents > 0) {
+      return res.status(400).json({ success: false, error: `لا يمكن حذف العام الدراسي لوجود ${hasStudents} طالب مسجل فيه.` });
+    }
+
+    // Check for control_marks
+    const hasControlMarks = _get(sqliteDb, 'SELECT COUNT(*) as n FROM control_marks WHERE academic_year_id = ?', [id])?.n || 0;
+    if (hasControlMarks > 0) {
+      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود درجات طلاب مسجلة فيه.' });
+    }
+
+    // Check for control_committees
+    const hasCommittees = _get(sqliteDb, 'SELECT COUNT(*) as n FROM control_committees WHERE academic_year_id = ?', [id])?.n || 0;
+    if (hasCommittees > 0) {
+      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود لجان امتحانية مسجلة فيه.' });
+    }
+
+    // Check for classes
+    const hasClasses = _get(sqliteDb, 'SELECT COUNT(*) as n FROM classes WHERE academic_year_id = ?', [id])?.n || 0;
+    if (hasClasses > 0) {
+      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود فصول مسجلة فيه.' });
     }
 
     sqliteDb.run('DELETE FROM academic_years WHERE id = ?', [id]);
+    sqliteDb.run(`
+      INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
+      VALUES ('academic_years', 'delete_year', ?, NULL, 'admin')
+    `, [`id:${id}`]);
     return res.json({ success: true, message: 'تم حذف العام الدراسي بنجاح.' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -540,6 +666,10 @@ const setCurrentAcademicYear = async (req, res) => {
     db.runTransaction(() => {
       sqliteDb.run('UPDATE academic_years SET is_current = 0');
       sqliteDb.run('UPDATE academic_years SET is_current = 1 WHERE id = ?', [id]);
+      sqliteDb.run(`
+        INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
+        VALUES ('academic_years', 'set_current_year', NULL, ?, 'admin')
+      `, [`id:${id}`]);
     });
     return res.json({ success: true, message: 'تم تعيين العام الدراسي كالعام الحالي بنجاح.' });
   } catch (err) {
@@ -612,6 +742,11 @@ const updateInstitution = async (req, res) => {
             hasMultipleSections ? 1 : 0
           ]);
         }
+
+        sqliteDb.run(`
+          INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
+          VALUES ('institution', 'update_config', ?, ?, 'admin')
+        `, ['institution_config', `code:${schoolCode},name:${schoolName}`]);
 
         // Sync sections
         if (sections && Array.isArray(sections)) {
@@ -935,7 +1070,7 @@ const getSections = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const sections = _all(sqliteDb, 'SELECT * FROM sections ORDER BY id ASC');
+    const sections = _all(sqliteDb, "SELECT * FROM sections WHERE name NOT LIKE 'مرحلة %' ORDER BY id ASC");
     return res.json({ success: true, sections });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -956,10 +1091,10 @@ const createSection = async (req, res) => {
     db.runTransaction(() => {
       sqliteDb.run(`
         INSERT INTO sections (
-          name, type, education_type, legal_status,
+          name, type, education_type, legal_status, is_active,
           section_director_name, section_director_qualification, section_director_national_id, section_director_phone,
           section_deputy_name, section_deputy_phone, students_vice_name, students_vice_phone, staff_vice_name, staff_vice_phone
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?,?)
       `, [
         name, type, educationType || '', legalStatus || '',
         sectionDirectorName || null, sectionDirectorQualification || null, sectionDirectorNationalId || null, sectionDirectorPhone || null,
@@ -1004,22 +1139,47 @@ const updateSection = async (req, res) => {
   }
 };
 
+// PATCH /api/settings/sections/:id/toggle-active
+const toggleSectionActive = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { id } = req.params;
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const section = _get(sqliteDb, 'SELECT id, is_active, name FROM sections WHERE id = ?', [id]);
+    if (!section) return res.status(404).json({ success: false, error: 'القسم غير موجود.' });
+    const newActive = section.is_active ? 0 : 1;
+    db.runTransaction(() => {
+      sqliteDb.run('UPDATE sections SET is_active = ? WHERE id = ?', [newActive, id]);
+    });
+    return res.json({
+      success: true,
+      is_active: newActive,
+      message: newActive ? `تم تفعيل قسم "${section.name}" بنجاح.` : `تم تعطيل قسم "${section.name}" – لن يظهر في النظام.`
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 // DELETE /api/settings/sections/:id
 const deleteSection = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   const { id } = req.params;
   try {
     const sqliteDb = db.getSQLiteDb();
-    // Check if section contains classrooms or students
-    const check = _get(sqliteDb, `
+    // Check if section contains enrolled students or classrooms
+    const directStudents = _get(sqliteDb, 'SELECT COUNT(*) as count FROM students WHERE section_id = ?', [id]);
+    const enrolledStudents = _get(sqliteDb, `
       SELECT COUNT(*) as count FROM class_enrollments ce 
       JOIN classes c ON c.id = ce.class_id
       JOIN grades_lookup g ON g.id = c.grade_id
       JOIN stages_lookup s ON s.id = g.stage_id
       WHERE s.section_id = ?
     `, [id]);
-    if (check && check.count > 0) {
-      return res.status(400).json({ success: false, error: 'لا يمكن حذف القسم لوجود طلاب مسجلين في صفوفه.' });
+    const totalCount = (directStudents?.count || 0) + (enrolledStudents?.count || 0);
+
+    if (totalCount > 0) {
+      return res.status(400).json({ success: false, error: `⚠️ لا يمكن حذف هذا القسم لأنه يحتوي على (${totalCount}) طالب مسجل بالنظام.` });
     }
 
     db.runTransaction(() => {
@@ -1040,9 +1200,32 @@ const getStages = async (req, res) => {
       SELECT sl.*, s.name as section_name, s.type as section_type 
       FROM stages_lookup sl
       JOIN sections s ON s.id = sl.section_id
+      WHERE s.name NOT LIKE 'مرحلة %'
       ORDER BY sl.display_order ASC, sl.id ASC
     `);
     return res.json({ success: true, stages });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// PATCH /api/settings/stages/:id/toggle-active
+const toggleStageActive = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { id } = req.params;
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const stage = _get(sqliteDb, 'SELECT id, is_active, stage_name FROM stages_lookup WHERE id = ?', [id]);
+    if (!stage) return res.status(404).json({ success: false, error: 'المرحلة غير موجودة.' });
+    const newActive = stage.is_active ? 0 : 1;
+    db.runTransaction(() => {
+      sqliteDb.run('UPDATE stages_lookup SET is_active = ? WHERE id = ?', [newActive, id]);
+    });
+    return res.json({
+      success: true,
+      is_active: newActive,
+      message: newActive ? `تم تفعيل مرحلة "${stage.stage_name}" بنجاح.` : `تم تعطيل مرحلة "${stage.stage_name}" – لن تظهر في النظام.`
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1162,11 +1345,10 @@ const deleteStage = async (req, res) => {
 module.exports = {
   getUsers, createUser, updateUser, deleteUser,
   getRoles, getPermissions,
-  getClassrooms, createClassroom, updateClassroom, deleteClassroom, enrollStudent, bulkEnrollStudents,
+  getClassrooms, createClassroom, updateClassroom, deleteClassroom, deleteGradeClassrooms, enrollStudent, bulkEnrollStudents,
   getAcademicYears, createAcademicYear, updateAcademicYear, deleteAcademicYear, setCurrentAcademicYear,
   getInstitution, updateInstitution,
-  listBackups, createBackup, restoreBackup, deleteBackup, downloadBackup, importBackup,
-  getSections, createSection, updateSection, deleteSection,
-  getStages, createStage, updateStage, deleteStage,
+  listBackups, createBackup, downloadBackup, importBackup, restoreBackup, deleteBackup,
+  getSections, createSection, updateSection, deleteSection, toggleSectionActive,
+  getStages, createStage, updateStage, deleteStage, toggleStageActive
 };
-

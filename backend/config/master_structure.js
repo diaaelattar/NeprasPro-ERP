@@ -11,6 +11,15 @@ const MASTER_STRUCTURE = [
     education_type: 'عربي',
     stages: [
       {
+        stage_code: 0,
+        stage_name: 'تمهيدي',
+        years_count: 1,
+        display_order: 0,
+        grades: [
+          { grade_number: 1, grade_code: 101, grade_name_ar: 'الصف الأول التمهيدي' }
+        ]
+      },
+      {
         stage_code: 1,
         stage_name: 'رياض أطفال',
         years_count: 2,
@@ -64,6 +73,15 @@ const MASTER_STRUCTURE = [
     type: 'languages',
     education_type: 'لغات',
     stages: [
+      {
+        stage_code: 0,
+        stage_name: 'تمهيدي لغات',
+        years_count: 1,
+        display_order: 0,
+        grades: [
+          { grade_number: 1, grade_code: 201, grade_name_ar: 'الصف الأول التمهيدي - لغات' }
+        ]
+      },
       {
         stage_code: 1,
         stage_name: 'رياض أطفال لغات',

@@ -7,20 +7,22 @@ import {
   Filter, RefreshCw, BookOpen, List, BarChart3,
   Search, LayoutGrid, X, Layers, Sparkles, ChevronDown, CheckCircle2
 } from 'lucide-react';
+import JSZip from 'jszip';
 import REPORTS from './reportRegistry';
 import './reports.css';
+import API_BASE_URL, { SERVER_ORIGIN } from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 /* ── Category icons ────────────────────────────────────────────── */
 const CAT_ICONS = {
-  'الكل':             <Sparkles  size={14} />,
-  'سجلات القيد':       <BookOpen  size={14} />,
-  'قوائم الفصول':      <List      size={14} />,
-  'إحصائيات':          <BarChart3 size={14} />,
-  'المطبوعات والنماذج': <Printer   size={14} />,
-  'الصحة المدرسية':    <FileText  size={14} />,
-  'الكنترول والامتحانات': <Layers   size={14} />,
+  'الكل':                   <Sparkles  size={14} />,
+  'سجلات القيد':             <BookOpen  size={14} />,
+  'قوائم الفصول':            <List      size={14} />,
+  'سجلات رصد أعمال السنة':    <Layers    size={14} />,
+  'إحصائيات':                <BarChart3 size={14} />,
+  'المطبوعات والنماذج':       <Printer   size={14} />,
+  'الصحة المدرسية':          <FileText  size={14} />,
 };
 
 /* ── Unique categories ─────────────────────────────────────────── */
@@ -58,6 +60,9 @@ export default function ReportsPage({ activeSectionId }) {
   const [reportReady, setReportReady] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportMsg, setExportMsg] = useState('');
+  // Batch-export progress state
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, label: '' });
+  const [exportingPdf,  setExportingPdf]  = useState(false);
 
   const filteredStages = formOpts.stages?.filter(
     s => !filters.sectionId || String(s.section_id) === filters.sectionId) || [];
@@ -66,9 +71,20 @@ export default function ReportsPage({ activeSectionId }) {
 
   const selectedYear      = formOpts.academicYears?.find(y => String(y.id) === filters.academicYearId);
   const selectedGrade     = formOpts.grades?.find(g => String(g.id) === filters.gradeId);
+  const selectedStage     = formOpts.stages?.find(s => String(s.id) === filters.stageId);
   const selectedClassroom = classrooms.find(c => String(c.id) === filters.classId);
 
-  const meta = { selectedYear, selectedGrade, selectedClassroom };
+  const classroomLabel =
+    filters.classId === 'all_stage' ? 'جميع فصول المرحلة بالكامل' :
+    filters.classId === 'all_grade' ? `جميع فصول ${selectedGrade?.grade_name_ar || 'الصف'}` :
+    selectedClassroom?.class_name;
+
+  const gradeLabel =
+    filters.gradeId === 'all_stage' || filters.classId === 'all_stage'
+      ? (selectedStage?.stage_name ? `المرحلة ال${selectedStage.stage_name}` : 'جميع صفوف المرحلة')
+      : selectedGrade?.grade_name_ar;
+
+  const meta = { selectedYear, selectedGrade, selectedStage, selectedClassroom, classroomLabel, gradeLabel };
 
   /* ─── Boot ───────────────────────────────────────────────────── */
   useEffect(() => {
@@ -77,8 +93,13 @@ export default function ReportsPage({ activeSectionId }) {
       .then(d => {
         if (d.success) {
           setFormOpts(d);
-          const cur = d.academicYears?.find(y => y.is_current === 1 || y.is_current === true);
-          if (cur) setFilters(f => ({ ...f, academicYearId: String(cur.id) }));
+          setFilters(f => {
+            const newF = { ...f };
+            const cur = d.academicYears?.find(y => y.is_current === 1 || y.is_current === true);
+            if (cur && !newF.academicYearId) newF.academicYearId = String(cur.id);
+            if (d.sections?.length === 1 && !newF.sectionId) newF.sectionId = String(d.sections[0].id);
+            return newF;
+          });
         }
       });
     fetch(`${API}/setup/status`)
@@ -95,14 +116,22 @@ export default function ReportsPage({ activeSectionId }) {
   }, []);
 
   useEffect(() => {
-    if (filters.gradeId && filters.academicYearId) {
+    if (filteredStages.length === 1 && !filters.stageId) {
+      setFilters(f => ({ ...f, stageId: String(filteredStages[0].id) }));
+    }
+  }, [filteredStages]);
+
+  useEffect(() => {
+    if (filters.gradeId && filters.gradeId !== 'all_stage' && filters.academicYearId) {
       fetch(`${API}/settings/classrooms?gradeId=${filters.gradeId}&academicYearId=${filters.academicYearId}`)
         .then(r => r.json())
         .then(d => setClassrooms(d.success ? (d.classrooms || []) : []))
         .catch(() => setClassrooms([]));
     } else {
       setClassrooms([]);
-      setFilters(f => ({ ...f, classId: '' }));
+      if (filters.classId !== 'all_stage' && filters.classId !== 'all_grade') {
+        setFilters(f => ({ ...f, classId: '' }));
+      }
     }
   }, [filters.gradeId, filters.academicYearId]);
 
@@ -122,12 +151,22 @@ export default function ReportsPage({ activeSectionId }) {
     }
   };
 
+  const isBatchMode = Boolean(filters.isBatchMode) ||
+                       filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
+                       filters.printScope === 'all_grade' || filters.printScope === 'all_stage';
+
+  const effectiveFilters = {
+    ...filters,
+    classId: isBatchMode ? (filters.gradeId ? 'all_grade' : 'all_stage') : filters.classId,
+    gradeId: isBatchMode ? (filters.gradeId || 'all_stage') : filters.gradeId,
+  };
+
   const canGenerate = (() => {
     if (!activeReport?.available) return false;
     const f = activeReport.filters || {};
-    if (f.requiresYear  && !filters.academicYearId) return false;
-    if (f.requiresGrade && !filters.gradeId)        return false;
-    if (f.requiresClass && !filters.classId)        return false;
+    if (f.requiresYear  && !effectiveFilters.academicYearId) return false;
+    if (f.requiresGrade && !effectiveFilters.gradeId)        return false;
+    if (f.requiresClass && !effectiveFilters.classId)        return false;
     return true;
   })();
 
@@ -140,7 +179,7 @@ export default function ReportsPage({ activeSectionId }) {
     setError('');
     setReportReady(false);
     try {
-      const queryStr = activeReport.buildQuery(filters);
+      const queryStr = activeReport.buildQuery(effectiveFilters);
       const res  = await fetch(`${API}/students?${queryStr}`);
       const data = await res.json();
       if (data.success) {
@@ -154,35 +193,256 @@ export default function ReportsPage({ activeSectionId }) {
     } finally {
       setLoading(false);
     }
-  }, [filters, activeReport, canGenerate]);
+  }, [effectiveFilters, activeReport, canGenerate]);
 
+  /* ─── Export Excel (single class or batch sequential) ───────── */
   const exportExcel = async () => {
-    if (exportingExcel) return;
+    if (exportingExcel || exportingPdf) return;
+
+    const isBatchMode = Boolean(filters.isBatchMode) || 
+                        filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
+                        filters.printScope === 'all_grade' || filters.printScope === 'all_stage';
+
     setExportingExcel(true);
-    setExportMsg('جاري إنشاء وتجهيز ملف الإكسيل الرسمي...');
+    setExportMsg('');
+    setBatchProgress({ current: 0, total: 0, label: '' });
+
     try {
-      const endpoint = activeReport.excelEndpoint(filters);
-      const filename = activeReport.excelFileName(filters, meta);
-      const res  = await fetch(`http://${window.location.hostname}:3001${endpoint}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob   = await res.blob();
-      const url    = window.URL.createObjectURL(blob);
-      const a      = document.createElement('a');
-      a.href       = url;
-      a.download   = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-      setExportMsg(`✅ تم تصدير ملف الإكسيل (${filename}) بنجاح!`);
-      setTimeout(() => setExportMsg(''), 4500);
+      // ── BATCH MODE: iterate one class at a time ──────────────
+      if (isBatchMode) {
+        const zip = new JSZip();
+
+        // 1. Get the classes list for iteration
+        const clsParams = new URLSearchParams();
+        if (filters.sectionId) clsParams.set('sectionId', filters.sectionId);
+        if (filters.stageId)   clsParams.set('stageId',   filters.stageId);
+        if (filters.gradeId && filters.gradeId !== 'all_stage' && filters.gradeId !== 'all_grade') clsParams.set('gradeId', filters.gradeId);
+        if (filters.academicYearId) clsParams.set('academicYearId', filters.academicYearId);
+
+        const clsRes   = await fetch(`${API}/students/export/classes-for-export?${clsParams}`);
+        const clsData  = await clsRes.json();
+        const classes  = clsData.classes || [];
+
+        if (classes.length === 0) {
+          setExportMsg('⚠️ لا توجد فصول مطابقة للفلاتر المحددة.');
+          setTimeout(() => setExportMsg(''), 4000);
+          return;
+        }
+
+        setBatchProgress({ current: 0, total: classes.length, label: '' });
+
+        // 2. Export each class sequentially using the active report's generator
+        for (let i = 0; i < classes.length; i++) {
+          const cls = classes[i];
+          setBatchProgress({ current: i + 1, total: classes.length, label: cls.class_name });
+          setExportMsg(`⏳ جاري تصدير الفصل ${i + 1} من ${classes.length}: ${cls.class_name}`);
+
+          const classFilters = {
+            ...effectiveFilters,
+            classId: String(cls.id),
+            gradeId: cls.grade_id ? String(cls.grade_id) : effectiveFilters.gradeId,
+          };
+
+          let endpoint = activeReport.excelEndpoint ? activeReport.excelEndpoint(classFilters) : `/api/students/export/class-list?classId=${cls.id}`;
+          if (filters.religion && filters.religion !== 'all' && !endpoint.includes('religion=')) {
+            endpoint += `&religion=${encodeURIComponent(filters.religion)}`;
+          }
+          if (!endpoint.startsWith('http')) {
+            endpoint = `${SERVER_ORIGIN}${endpoint}`;
+          }
+
+          try {
+            const fileRes = await fetch(endpoint);
+            if (!fileRes.ok) throw new Error(`HTTP ${fileRes.status}`);
+            const buf  = await fileRes.arrayBuffer();
+            const name = `تقرير_${cls.class_name}.xlsm`;
+            zip.file(name, buf);
+          } catch (clsErr) {
+            console.error(`[Batch Export] Error for ${cls.class_name}:`, clsErr);
+          }
+        }
+
+        // 3. Generate and download ZIP
+        setExportMsg('جاري إعداد ملف ZIP شامل لجميع الفصول...');
+        const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const url = window.URL.createObjectURL(zipBlob);
+        const a   = document.createElement('a');
+        a.href    = url;
+        a.download = `تقارير_فصول_المؤسسة_${new Date().toISOString().slice(0,10)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        setExportMsg(`✅ تم تصدير ${classes.length} فصل بنجاح في ملف ZIP واحد`);
+        setTimeout(() => setExportMsg(''), 5000);
+
+      } else {
+        // ── SINGLE CLASS MODE ─────────────────────────────────────
+        setExportMsg('جاري توليد ملف الإكسيل...');
+        let endpoint          = activeReport.excelEndpoint(effectiveFilters);
+        if (filters.religion && filters.religion !== 'all' && !endpoint.includes('religion=')) {
+          endpoint += `&religion=${encodeURIComponent(filters.religion)}`;
+        }
+        const defaultFilename = activeReport.excelFileName(effectiveFilters, meta);
+        const res = await fetch(`${SERVER_ORIGIN}${endpoint}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const contentDisposition = res.headers.get('content-disposition');
+        let filename = defaultFilename;
+        if (contentDisposition) {
+          const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+          if (match && match[1]) filename = decodeURIComponent(match[1]);
+        }
+        if (res.headers.get('content-type')?.includes('zip') && !filename.endsWith('.zip'))
+          filename = 'nepras_reports_batch.zip';
+
+        const blob = await res.blob();
+        const url  = window.URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        setExportMsg(`✅ تم التصدير بنجاح: (${filename})`);
+        setTimeout(() => setExportMsg(''), 4500);
+      }
     } catch (err) {
-      alert('خطأ في تصدير Excel: ' + err.message);
+      alert('خطأ في تصدير الملف: ' + err.message);
       setExportMsg('');
     } finally {
       setExportingExcel(false);
+      setBatchProgress({ current: 0, total: 0, label: '' });
     }
   };
+
+  /* ─── Export PDF (Excel template → macro → PDF stream) ──────── */
+  const exportPdf = async (preview = false) => {
+    if (exportingPdf || exportingExcel) return;
+
+    const isBatchMode = Boolean(filters.isBatchMode) || 
+                        filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
+                        filters.printScope === 'all_grade' || filters.printScope === 'all_stage';
+
+    setExportingPdf(true);
+    setExportMsg('جاري توليد PDF من الإكسيل...');
+    setBatchProgress({ current: 0, total: 0, label: '' });
+
+    try {
+      if (isBatchMode) {
+        const zip   = new JSZip();
+
+        const clsParams = new URLSearchParams();
+        if (filters.sectionId) clsParams.set('sectionId', filters.sectionId);
+        if (filters.stageId)   clsParams.set('stageId',   filters.stageId);
+        if (filters.gradeId && filters.gradeId !== 'all_stage' && filters.gradeId !== 'all_grade') clsParams.set('gradeId', filters.gradeId);
+        if (filters.academicYearId) clsParams.set('academicYearId', filters.academicYearId);
+
+        const clsRes  = await fetch(`${API}/students/export/classes-for-export?${clsParams}`);
+        const clsData = await clsRes.json();
+        const classes = clsData.classes || [];
+        if (classes.length === 0) {
+          setExportMsg('⚠️ لا توجد فصول مطابقة.');
+          setTimeout(() => setExportMsg(''), 4000);
+          return;
+        }
+        setBatchProgress({ current: 0, total: classes.length, label: '' });
+
+        for (let i = 0; i < classes.length; i++) {
+          const cls = classes[i];
+          setBatchProgress({ current: i + 1, total: classes.length, label: cls.class_name });
+          setExportMsg(`⏳ PDF فصل ${i + 1} من ${classes.length}: ${cls.class_name}`);
+          try {
+            const p = new URLSearchParams({
+              classId: cls.id,
+              academicYearId: filters.academicYearId || '',
+              mode: activeReport.mode || 'primary_portrait',
+            });
+            const r = await fetch(`${API}/students/export/report-pdf?${p}`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const buf  = await r.arrayBuffer();
+            zip.file(`تقرير_${cls.class_name}.pdf`, buf);
+          } catch (clsErr) {
+            console.error(`[PDF Batch] Error for ${cls.class_name}:`, clsErr);
+          }
+        }
+        const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+        const url = window.URL.createObjectURL(zipBlob);
+        const a   = document.createElement('a');
+        a.href    = url;
+        a.download = `تقارير_PDF_${new Date().toISOString().slice(0,10)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        setExportMsg(`✅ تم توليد ${classes.length} PDF بنجاح`);
+        setTimeout(() => setExportMsg(''), 5000);
+      } else {
+        // Single class PDF
+        const p = new URLSearchParams({
+          classId:       filters.classId       || '',
+          gradeId:       filters.gradeId       || '',
+          stageId:       filters.stageId       || '',
+          academicYearId: filters.academicYearId || '',
+          mode:          activeReport.mode || 'primary_portrait',
+        });
+        const pdfUrl = `${API}/students/export/report-pdf?${p}`;
+
+        if (preview) {
+          window.open(pdfUrl, '_blank');
+          setExportMsg('✅ تم فتح معاينة PDF في تبويب جديد');
+        } else {
+          const r = await fetch(pdfUrl);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const blob = await r.blob();
+          const url  = window.URL.createObjectURL(blob);
+          const a    = document.createElement('a');
+          a.href     = url;
+          a.download = `تقرير_${filters.classId || 'عام'}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          window.URL.revokeObjectURL(url);
+          setExportMsg('✅ تم تحميل PDF بنجاح');
+        }
+        setTimeout(() => setExportMsg(''), 4500);
+      }
+    } catch (err) {
+      alert('خطأ في توليد PDF: ' + err.message);
+      setExportMsg('');
+    } finally {
+      setExportingPdf(false);
+      setBatchProgress({ current: 0, total: 0, label: '' });
+    }
+  };
+
+  /* ─── Open populated file directly in MS Excel on Desktop ──── */
+  const openInExcelApp = async () => {
+    setExportMsg('جاري فتح شيت الإكسيل ببرنامج MS Excel على جهازك...');
+    try {
+      const p = new URLSearchParams({
+        classId:       filters.classId       || '',
+        gradeId:       filters.gradeId       || '',
+        stageId:       filters.stageId       || '',
+        academicYearId: filters.academicYearId || '',
+        mode:          activeReport.mode || activeReport.id || 'primary_portrait',
+      });
+      if (filters.religion && filters.religion !== 'all') p.set('religion', filters.religion);
+      const r = await fetch(`${API}/students/export/open-in-excel?${p}`);
+      const d = await r.json();
+      if (d.success) {
+        setExportMsg('✅ تم فتح التقرير ببرنامج MS Excel على شاشتك بنجاح!');
+      } else {
+        alert(d.error || 'تعذر فتح الإكسيل');
+      }
+    } catch (err) {
+      alert('خطأ في فتح الإكسيل: ' + err.message);
+    } finally {
+      setTimeout(() => setExportMsg(''), 4500);
+    }
+  };
+
 
   const printReport = () => {
     const orientation = activeReport?.orientation || 'portrait';
@@ -272,32 +532,34 @@ export default function ReportsPage({ activeSectionId }) {
         {/* ── Filters & Direct Report Switcher Card ───────────── */}
         {activeReport?.available && (
           <div className="report-filters-card">
-            <div className="filters-title" style={{ justifyContent: 'space-between' }}>
+            <div className="filters-title" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Filter size={14} /> اختر التقرير والفلاتر المطلوب عرضها
+                <Filter size={14} /> فلاتر ومعطيات التقرير
               </span>
               <span style={{ fontSize: 11, color: '#4f46e5', fontWeight: 700 }}>
                 إجمالي التقارير المتاحة: {filteredReports.length} تقرير
               </span>
             </div>
 
-            <div className="filters-grid">
+            {/* Direct Active Report Switcher (Full Width Hero Bar) */}
+            <div className="report-select-hero-bar" style={{ marginBottom: 14, padding: '10px 14px', background: '#f5f3ff', borderRadius: 10, border: '1px solid #c7d2fe' }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 800, color: '#4338ca', marginBottom: 6 }}>
+                📋 التقرير المطلوب عرضه وتصديره *
+              </label>
+              <select
+                value={activeId}
+                onChange={e => switchReport(e.target.value)}
+                style={{ width: '100%', height: 40, border: '2px solid #6366f1', background: '#ffffff', fontWeight: 800, color: '#1e1b4b', borderRadius: 8, padding: '0 12px', fontSize: 13 }}
+              >
+                {filteredReports.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.icon} {r.name} — ({r.category})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              {/* Direct Active Report Switcher */}
-              <div className="filter-field" style={{ minWidth: 240 }}>
-                <label style={{ fontWeight: 800, color: '#4f46e5' }}>التقرير المباشر المطلوب *</label>
-                <select
-                  value={activeId}
-                  onChange={e => switchReport(e.target.value)}
-                  style={{ height: 38, border: '2px solid #6366f1', background: '#eff6ff', fontWeight: 800, color: '#1e1b4b' }}
-                >
-                  {filteredReports.map(r => (
-                    <option key={r.id} value={r.id}>
-                      {r.icon} {r.name} ({r.category})
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="filters-grid">
 
               {/* Academic Year */}
               {activeReport.filters?.requiresYear && (
@@ -383,6 +645,22 @@ export default function ReportsPage({ activeSectionId }) {
                 </div>
               )}
 
+              {/* Independent Religion Filter — Only for Grade/Assessment Reports */}
+              {activeReport?.category === 'سجلات رصد أعمال السنة' && (
+                <div className="filter-field">
+                  <label style={{ color: '#047857', fontWeight: 800 }}>فرز الديانة</label>
+                  <select
+                    value={filters.religion || 'all'}
+                    onChange={e => setF({ religion: e.target.value })}
+                    style={{ background: '#ecfdf5', borderColor: '#a7f3d0', fontWeight: 700, color: '#065f46' }}
+                  >
+                    <option value="all">الكل (مسلمون ومسيحيون)</option>
+                    <option value="مسلم">☪️ الديانة المسلمة فقط</option>
+                    <option value="مسيحي">✝️ الديانة المسيحية فقط</option>
+                  </select>
+                </div>
+              )}
+
               {/* Gender Sorting Order (البنون أولاً / البنات أولاً) */}
               <div className="filter-field">
                 <label style={{ color: '#4338ca', fontWeight: 800 }}>فرز ترتيب النوع</label>
@@ -395,6 +673,19 @@ export default function ReportsPage({ activeSectionId }) {
                   <option value="boys_first">👦 البنون (الذكور) أولاً</option>
                   <option value="girls_first">👧 البنات (الإناث) أولاً</option>
                 </select>
+              </div>
+
+              {/* Checkbox for Batch Exporting All Classes */}
+              <div className="filter-field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, color: '#1e40af', background: '#eff6ff', padding: '8px 12px', borderRadius: 8, border: '1px solid #bfdbfe', width: '100%' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(filters.isBatchMode)}
+                    onChange={e => setF({ isBatchMode: e.target.checked })}
+                    style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: 'pointer' }}
+                  />
+                  <span>📦 تصدير كل فصول الصف/المرحلة مجمعة (ملف ZIP)</span>
+                </label>
               </div>
 
               <button
@@ -416,20 +707,76 @@ export default function ReportsPage({ activeSectionId }) {
               <span className="badge-dot" />
               <span>تم تجهيز التقرير: <strong>{students.length}</strong> طالب مسجل</span>
             </div>
-            <div className="action-buttons">
+            <div className="action-buttons" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+
+              {/* ── Excel Export button ── */}
               <button
                 className={`btn-action excel ${exportingExcel ? 'loading' : ''}`}
                 onClick={exportExcel}
-                disabled={exportingExcel}
-                style={{ opacity: exportingExcel ? 0.7 : 1, cursor: exportingExcel ? 'wait' : 'pointer' }}
+                disabled={exportingExcel || exportingPdf}
+                style={{ opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, cursor: (exportingExcel || exportingPdf) ? 'wait' : 'pointer', background: '#15803d', color: '#fff' }}
+                title="تصدير الشيت المعتمد بصيغة .xlsm الممتلئ بالبيانات"
               >
                 {exportingExcel ? <RefreshCw size={15} className="spin" /> : <FileSpreadsheet size={15} />}
-                <span>{exportingExcel ? 'جاري التصدير...' : 'تصدير Excel'}</span>
+                <span>
+                  {isBatchMode ? '📦 تصدير كل الفصول (.zip)' : '📊 تصدير شيت إكسيل (.xlsm)'}
+                </span>
               </button>
-              <button className="btn-action print" onClick={printReport} disabled={exportingExcel}>
-                <Printer size={15} /> <span>طباعة التقرير / PDF</span>
+
+              {/* ── PDF Preview button ── */}
+              {!activeReport?.excelOnly && (
+                <button
+                  className="btn-action print"
+                  onClick={() => exportPdf(true)}
+                  disabled={exportingExcel || exportingPdf}
+                  style={{ background: '#0284c7', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1 }}
+                  title="توليد PDF مباشرة من شيت الإكسيل"
+                >
+                  {exportingPdf ? <RefreshCw size={15} className="spin" /> : <Printer size={15} />}
+                  <span>🖨️ طباعة إكسيل مباشرة</span>
+                </button>
+              )}
+
+              {/* ── Open Directly in MS Excel Desktop button ── */}
+              <button
+                className="btn-action"
+                onClick={openInExcelApp}
+                disabled={exportingExcel || exportingPdf}
+                style={{ background: '#0d9488', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                title="فتح ملف الإكسيل الممتلئ بالبيانات ببرنامج MS Excel على شاشتك فوراً للمعاينة والطباعة اليدوية"
+              >
+                <FileSpreadsheet size={15} />
+                <span>💻 فتح ببرنامج MS Excel</span>
               </button>
+
+              {/* ── PDF Download button ── */}
+              {!activeReport?.excelOnly && (
+                <button
+                  className="btn-action"
+                  onClick={() => exportPdf(false)}
+                  disabled={exportingExcel || exportingPdf}
+                  style={{ background: '#7c3aed', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                  title="تحميل ملف PDF مباشرة"
+                >
+                  <FileText size={15} />
+                  <span>⬇️ تحميل PDF</span>
+                </button>
+              )}
+
             </div>
+
+            {/* ── Batch Progress Bar ── */}
+            {batchProgress.total > 0 && (
+              <div className="print-hide" style={{ marginTop: 10, padding: '10px 14px', background: '#f0f9ff', border: '1.5px solid #38bdf8', borderRadius: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13, fontWeight: 800, color: '#0369a1' }}>
+                  <span>فصل {batchProgress.current} من {batchProgress.total}: {batchProgress.label}</span>
+                  <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                </div>
+                <div style={{ background: '#bae6fd', borderRadius: 6, height: 8, overflow: 'hidden' }}>
+                  <div style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%`, background: '#0284c7', height: '100%', transition: 'width 0.3s ease', borderRadius: 6 }} />
+                </div>
+              </div>
+            )}
           </div>
         )}
 

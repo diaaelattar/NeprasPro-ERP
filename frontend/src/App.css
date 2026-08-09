@@ -186,6 +186,10 @@ h2 { font-size: 22px; font-weight: 800; color: var(--text-primary); margin-botto
   flex: 1; padding: 10px 10px 0;
 }
 
+.dashboard-sidebar, .dashboard-sidebar *, .nav-item, .nav-subitem, .sidebar-brand {
+  font-family: 'Cairo', system-ui, sans-serif !important;
+}
+
 .nav-item {
   padding: 9px 12px; border-radius: 7px;
   font-size: 13px; font-weight: 600;

@@ -4,12 +4,13 @@ import {
   Edit3, CheckCircle2, AlertCircle, X, ShieldAlert, BookOpen, Plus,
   Calendar, Building, Printer, RotateCcw
 } from 'lucide-react';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api/settings`;
+const API = `${API_BASE_URL}/settings`;
 
 export default function SettingsPage({ 
-  initialTab = 'users', 
-  allowedTabs = ['users', 'roles', 'perms', 'classrooms', 'institution', 'academic_years'] 
+  initialTab = 'institution', 
+  allowedTabs = ['institution', 'sections_stages', 'classrooms', 'academic_years', 'users', 'roles', 'perms'] 
 }) {
   const [activeTab,    setActiveTab]    = useState(initialTab);
   const [users,        setUsers]        = useState([]);
@@ -68,7 +69,7 @@ export default function SettingsPage({
   const [bulkForm, setBulkForm] = useState({
     count: 1,
     capacity: 40,
-    namingStyle: 'arabic',   // 'arabic' | 'numeric' | 'custom'
+    namingStyle: 'numeric',   // Default to numeric 1/1, 1/2, 1/3...
     prefix: '',              // used when namingStyle === 'custom'
   });
   const [bulkCreating, setBulkCreating] = useState(false);
@@ -111,6 +112,18 @@ export default function SettingsPage({
   const [stageForm, setStageForm] = useState({ sectionId: '', stageName: '', stageCode: '', yearsCount: 3, displayOrder: 0 });
   const [showStageForm, setShowStageForm] = useState(false);
 
+  const [masterLookups, setMasterLookups] = useState({
+    sections: [],
+    educationTypes: [],
+    classifications: [],
+    stages: [],
+    grades: []
+  });
+  const [selectedClassificationId, setSelectedClassificationId] = useState('');
+  const [configuredSections, setConfiguredSections] = useState([
+    { sectionMasterId: 1, educationTypeId: 1, stages: [] }
+  ]);
+
   const loadData = () => {
     setLoading(true);
     setError('');
@@ -118,13 +131,17 @@ export default function SettingsPage({
       fetch(`${API}/users`).then(r => r.json()),
       fetch(`${API}/roles`).then(r => r.json()),
       fetch(`${API}/permissions`).then(r => r.json()),
-      fetch(`http://${window.location.hostname}:3001/api/students/form-options`).then(r => r.json()),
+      fetch(`${API_BASE_URL}/students/form-options`).then(r => r.json()),
       fetch(`${API}/academic-years`).then(r => r.json()),
       fetch(`${API}/institution`).then(r => r.json()),
       fetch(`${API}/sections`).then(r => r.json()),
-      fetch(`${API}/stages`).then(r => r.json())
+      fetch(`${API}/stages`).then(r => r.json()),
+      fetch(`${API_BASE_URL}/setup/master-structure-lookups`).then(r => r.json())
     ])
-      .then(([userData, roleData, permData, optData, yearsData, instData, secData, stageData]) => {
+      .then(([userData, roleData, permData, optData, yearsData, instData, secData, stageData, masterData]) => {
+        if (masterData.success && masterData.masterLookups) {
+          setMasterLookups(masterData.masterLookups);
+        }
         if (userData.success) setUsers(userData.users);
         if (roleData.success)  setRoles(roleData.roles);
         if (permData.success)  setPerms(permData.permissions);
@@ -204,6 +221,37 @@ export default function SettingsPage({
     }
   }, [isPrintingProfile]);
 
+  // Helper to detect naming style from existing classrooms in a grade
+  const detectNamingStyle = (classList) => {
+    if (!classList || classList.length === 0) return { style: null, prefix: '' };
+    const first = classList[0].class_name?.trim() || '';
+
+    // 1. arabic_suffix: e.g. "1 / 1 ع" or "2 / 5 ب"
+    if (/^\d+\s*\/\s*\d+\s+[\u0600-\u06FF]+$/.test(first)) {
+      return { style: 'arabic_suffix', prefix: '' };
+    }
+    // 2. arabic: e.g. "1 / أ" or "2 / ب"
+    if (/^\d+\s*\/\s*[\u0600-\u06FF]+$/.test(first)) {
+      return { style: 'arabic', prefix: '' };
+    }
+    // 3. numeric: e.g. "1 / 1" or "2 / 3"
+    if (/^\d+\s*\/\s*\d+$/.test(first)) {
+      return { style: 'numeric', prefix: '' };
+    }
+    // 4. english_letter_grade: e.g. "A1" or "B2"
+    if (/^[A-Za-z]+[\s\d]*$/.test(first)) {
+      return { style: 'english_letter_grade', prefix: '' };
+    }
+
+    // Custom prefix: e.g. "أ / 1"
+    const matchCustom = first.match(/^(.+?)\s*\/\s*\d+$/);
+    if (matchCustom) {
+      return { style: 'custom', prefix: matchCustom[1].trim() };
+    }
+
+    return { style: 'custom', prefix: '' };
+  };
+
   const loadClassrooms = () => {
     if (!classroomFilters.gradeId || !classroomFilters.academicYearId) {
       setClassrooms([]);
@@ -213,7 +261,19 @@ export default function SettingsPage({
       .then(r => r.json())
       .then(data => {
         if (data.success) {
-          setClassrooms(data.classrooms);
+          const list = data.classrooms || [];
+          setClassrooms(list);
+          if (list.length > 0) {
+            const { style, prefix } = detectNamingStyle(list);
+            if (style) {
+              setBulkForm(f => ({
+                ...f,
+                namingStyle: style,
+                prefix: prefix || f.prefix,
+                count: Math.max(f.count, list.length + 1)
+              }));
+            }
+          }
         } else {
           setError(data.error || 'فشل تحميل الفصول.');
         }
@@ -327,46 +387,105 @@ export default function SettingsPage({
 
   // ── Classroom Handlers ────────────────────────────────
   // Compute generated names preview based on naming style + count
-  const getGeneratedNames = (gradeId) => {
+  // ── Classroom Handlers ────────────────────────────────
+  // Compute generated names & class codes preview based on naming style + count, skipping existing names
+  const getGeneratedClassItems = (gradeId) => {
     const grade = formOpts.grades?.find(g => String(g.id) === String(gradeId));
-    const gradeNum = grade?.grade_number || '';
+    const gradeNum = grade?.grade_number || 1;
     const ARABIC_LETTERS = ['أ','ب','ج','د','ه','و','ز','ح','ط','ي','ك','ل','م','ن','س','ع','ف','ص','ق','ر','ش','ت','ث','خ','ذ','ض','ظ','غ'];
     const ENGLISH_LETTERS = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
-    const names = [];
+    
+    // Find Stage Code (1 digit)
+    const stage = formOpts.stages?.find(s => String(s.id) === String(grade?.stage_id));
+    let stageCode = 3;
+    let suffix = 'ع';
+    if (stage) {
+      const sn = stage.stage_name || '';
+      if (sn.includes('تمهيدي'))        { stageCode = 1; suffix = 'ت'; }
+      else if (sn.includes('رياض'))     { stageCode = 2; suffix = 'ح'; }
+      else if (sn.includes('ابتدائي')) { stageCode = 3; suffix = 'ب'; }
+      else if (sn.includes('إعدادي') || sn.includes('اعدادي')) { stageCode = 4; suffix = 'ع'; }
+      else if (sn.includes('ثانوي'))   { stageCode = 5; suffix = 'ث'; }
+    }
 
-    // Determine section suffix for arabic_suffix style
-    const section = formOpts.sections?.find(s => String(s.id) === String(classroomFilters.sectionId));
-    let suffix = 'ع'; // default to عربي
+    // Find Section Code (1 digit)
+    const section = formOpts.sections?.find(s => String(s.id) === String(classroomFilters.sectionId || grade?.section_id));
+    let secCode = 1;
     if (section) {
-      if (section.type === 'languages') suffix = 'ل';
-      else if (section.type === 'kindergarten') suffix = 'ت';
+      const secName = section.name || section.section_name || '';
+      if (secName.includes('لغات') || section.code === 'languages') secCode = 2;
+      else if (secName.includes('دولي') || section.code === 'international') secCode = 3;
     }
 
-    for (let i = 0; i < bulkForm.count; i++) {
+    const existingNames = new Set(classrooms.map(c => c.class_name.trim()));
+    const items = [];
+    let i = 1;
+    const targetTotal = Math.max(1, parseInt(bulkForm.count) || 1);
+    const existingCount = classrooms.length;
+    
+    // Calculate how many NEW classes are needed to reach targetTotal
+    const neededCount = Math.max(0, targetTotal - existingCount);
+
+    if (neededCount === 0) return [];
+
+    while (items.length < neededCount && i <= 150) {
+      let candidateName = '';
       if (bulkForm.namingStyle === 'arabic') {
-        names.push(`${gradeNum} / ${ARABIC_LETTERS[i] || (i+1)}`);
+        candidateName = `${gradeNum} / ${ARABIC_LETTERS[i - 1] || i}`;
       } else if (bulkForm.namingStyle === 'numeric') {
-        names.push(`${gradeNum} / ${i+1}`);
+        candidateName = `${gradeNum} / ${i}`;
       } else if (bulkForm.namingStyle === 'arabic_suffix') {
-        names.push(`${gradeNum} / ${i+1} ${suffix}`);
+        candidateName = `${gradeNum} / ${i} ${suffix}`;
       } else if (bulkForm.namingStyle === 'english_letter_grade') {
-        names.push(`${ENGLISH_LETTERS[i] || 'Class'}${gradeNum}`);
+        candidateName = `${ENGLISH_LETTERS[i - 1] || 'Class'}${gradeNum}`;
       } else {
-        names.push(`${bulkForm.prefix || gradeNum} / ${i+1}`);
+        candidateName = `${bulkForm.prefix || gradeNum} / ${i}`;
       }
+
+      if (!existingNames.has(candidateName.trim())) {
+        const classNumStr = String(i).padStart(2, '0');
+        const classCode = `${secCode}${stageCode}${gradeNum}${classNumStr}`;
+        items.push({ name: candidateName, classCode, classNum: i });
+      }
+
+      i++;
     }
-    return names;
+
+    return items;
+  };
+
+  const getGeneratedNames = (gradeId) => {
+    const existingCount = classrooms.length;
+    const targetTotal = Math.max(1, parseInt(bulkForm.count) || 1);
+    if (targetTotal <= existingCount) {
+      return [`(الصف يحتوي بالفعل على ${existingCount} فصل - مستوفى بالكامل)`];
+    }
+    const items = getGeneratedClassItems(gradeId);
+    return items.map(item => `${item.name} (${item.classCode})`);
   };
 
   const handleBulkCreate = async () => {
     if (!classroomFilters.gradeId || !classroomFilters.academicYearId) {
       return setError('يرجى اختيار الصف الدراسي والعام الدراسي أولاً.');
     }
-    const names = getGeneratedNames(classroomFilters.gradeId);
+    const targetTotal = Math.max(1, parseInt(bulkForm.count) || 1);
+    const existingCount = classrooms.length;
+
+    if (targetTotal <= existingCount) {
+      return setError(`الصف يحتوي بالفعل على ${existingCount} فصل. لا داعي للإضافة لأن العدد المستهدف المطلوب (${targetTotal}) مستوفى بالفعل.`);
+    }
+
+    const items = getGeneratedClassItems(classroomFilters.gradeId);
+    if (items.length === 0) {
+      return setError('لم يتم التمكن من توليد فصول جديدة فريدة.');
+    }
+
     setBulkCreating(true);
     setError(''); setSuccess('');
     let created = 0; const skipped = [];
-    for (const name of names) {
+    const safeCap = Math.min(49, Math.max(1, parseInt(bulkForm.capacity) || 40));
+
+    for (const item of items) {
       try {
         const res = await fetch(`${API}/classrooms`, {
           method: 'POST',
@@ -374,20 +493,21 @@ export default function SettingsPage({
           body: JSON.stringify({
             gradeId: classroomFilters.gradeId,
             academicYearId: classroomFilters.academicYearId,
-            className: name,
-            capacity: bulkForm.capacity,
+            className: item.name,
+            classCode: item.classCode,
+            capacity: safeCap,
           }),
         });
         const data = await res.json();
         if (data.success) created++;
-        else skipped.push(name);
-      } catch { skipped.push(name); }
+        else skipped.push(item.name);
+      } catch { skipped.push(item.name); }
     }
     setBulkCreating(false);
     if (created > 0) {
-      setSuccess(`تم إنشاء ${created} فصل${skipped.length ? ` (تم تخطي الموجود بالفعل: ${skipped.join(', ')})` : ''} بنجاح.`);
+      setSuccess(`تم إضافة ${created} فصل جديد لتكملة الفصول المسجلة سابقاً (${existingCount}) ليكون إجمالي الفصول (${existingCount + created}) فصلاً بنجاح${skipped.length ? ` (تم تخطي المكرر: ${skipped.join(', ')})` : ''}.`);
     } else {
-      setError('لم يتم إنشاء أي فصل. ربما تكون الفصول موجودة بالفعل.');
+      setError('لم يتم إضافة أي فصل. ربما تكون جميع الأسماء المقترحة مسجلة بالفعل.');
     }
     loadClassrooms();
   };
@@ -395,11 +515,12 @@ export default function SettingsPage({
   const handleSaveEditClassroom = async () => {
     if (!editForm.className.trim()) return setError('اسم الفصل مطلوب.');
     setError(''); setSuccess('');
+    const safeCap = editForm.capacity ? Math.min(49, Math.max(1, parseInt(editForm.capacity) || 40)) : 40;
     try {
       const res = await fetch(`${API}/classrooms/${editingClassroom}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ className: editForm.className, capacity: editForm.capacity }),
+        body: JSON.stringify({ className: editForm.className, capacity: safeCap }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل تحديث الفصل.');
@@ -419,6 +540,45 @@ export default function SettingsPage({
       setSuccess(data.message || 'تم حذف الفصل بنجاح.');
       loadClassrooms();
     } catch (err) { setError(err.message); }
+  };
+
+  const handleDeleteAllGradeClassrooms = async (confirmUnenroll = false) => {
+    if (!classroomFilters.gradeId || !classroomFilters.academicYearId) return;
+    const grade = formOpts.grades?.find(g => String(g.id) === String(classroomFilters.gradeId));
+    const gradeName = grade?.grade_name_ar || 'الصف';
+
+    if (!confirmUnenroll) {
+      if (!window.confirm(`هل أنت متأكد من حذف كافة فصول (${gradeName})؟`)) return;
+    }
+
+    setError(''); setSuccess('');
+    try {
+      const url = `${API}/classrooms/grade/${classroomFilters.gradeId}?academicYearId=${classroomFilters.academicYearId}${confirmUnenroll ? '&confirmUnenroll=true' : ''}`;
+      const res = await fetch(url, { method: 'DELETE' });
+      const text = await res.text();
+      let data = {};
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        throw new Error('فشل التواصل مع السيرفر عند حذف الفصول. يرجى التأكد من إعادة تشغيل سيرفر الباك إند.');
+      }
+
+      if (!res.ok) {
+        if (data.requiresConfirmation) {
+          const proceed = window.confirm(`تنبيه هام:\n${data.error}\n\nهل تريد فك توزيع الطلاب وحذف كافة فصول هذا الصف الآن؟`);
+          if (proceed) {
+            return handleDeleteAllGradeClassrooms(true);
+          }
+          return;
+        }
+        throw new Error(data.error || 'فشل حذف فصول الصف.');
+      }
+
+      setSuccess(data.message || 'تم حذف كافة فصول الصف بنجاح.');
+      loadClassrooms();
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   // ── Sections & Stages Handlers ────────────────────────
@@ -454,6 +614,7 @@ export default function SettingsPage({
       if (!res.ok) throw new Error(data.error || 'فشل حفظ القسم.');
       setSuccess(data.message || 'تم حفظ القسم بنجاح.');
       setShowSectionForm(false);
+      window.dispatchEvent(new Event('sections-updated'));
       loadData();
     } catch (err) { setError(err.message); }
   };
@@ -466,6 +627,19 @@ export default function SettingsPage({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حذف القسم.');
       setSuccess(data.message || 'تم حذف القسم بنجاح.');
+      window.dispatchEvent(new Event('sections-updated'));
+      loadData();
+    } catch (err) { setError(err.message); }
+  };
+
+  const handleToggleSectionActive = async (sec) => {
+    setError(''); setSuccess('');
+    try {
+      const res = await fetch(`${API}/sections/${sec.id}/toggle-active`, { method: 'PATCH' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'فشل تغيير حالة القسم.');
+      setSuccess(data.message);
+      window.dispatchEvent(new Event('sections-updated'));
       loadData();
     } catch (err) { setError(err.message); }
   };
@@ -519,6 +693,17 @@ export default function SettingsPage({
     } catch (err) { setError(err.message); }
   };
 
+  const handleToggleStageActive = async (stg) => {
+    setError(''); setSuccess('');
+    try {
+      const res = await fetch(`${API}/stages/${stg.id}/toggle-active`, { method: 'PATCH' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'فشل تغيير حالة المرحلة.');
+      setSuccess(data.message);
+      loadData();
+    } catch (err) { setError(err.message); }
+  };
+
   const handleAddSectionInline = () => {
     setSections(prev => [
       ...prev,
@@ -545,62 +730,35 @@ export default function SettingsPage({
     }));
   };
 
-  // ── Institution Config Handlers ───────────────────────
   const handleSaveInstitution = async (e) => {
     e.preventDefault();
     setError(''); setSuccess('');
+
+    if (!form.school_name || !form.school_name.trim() || !configuredSections || !configuredSections.length) {
+      setError('اسم المدرسة والأقسام المقررة حقول إيجابية ملزمة.');
+      return;
+    }
     try {
-      let sectionsPayload = [];
-      if (!institutionForm.hasMultipleSections) {
-        sectionsPayload = [{
-          id: sections[0]?.id || undefined,
-          name: singleSection.name || 'القسم الرئيسي',
-          type: singleSection.type || 'arabic',
-          education_type: singleSection.educationType || institutionForm.educationType || '',
-          legal_status: singleSection.legalStatus || 'حكومي',
-          section_director_name: singleSection.sectionDirectorName || '',
-          section_director_qualification: singleSection.sectionDirectorQualification || '',
-          section_director_national_id: singleSection.sectionDirectorNationalId || '',
-          section_director_phone: singleSection.sectionDirectorPhone || '',
-          section_deputy_name: singleSection.sectionDeputyName || '',
-          section_deputy_phone: singleSection.sectionDeputyPhone || '',
-          students_vice_name: singleSection.studentsViceName || '',
-          students_vice_phone: singleSection.studentsVicePhone || '',
-          staff_vice_name: singleSection.staffViceName || '',
-          staff_vice_phone: singleSection.staffVicePhone || '',
-        }];
-      } else {
-        sectionsPayload = sections.map(s => ({
-          id: s.id && !String(s.id).startsWith('temp') ? s.id : undefined,
-          name: s.name,
-          type: s.type,
-          education_type: s.education_type || s.educationType || '',
-          legal_status: s.legal_status || s.legalStatus || 'حكومي',
-          section_director_name: s.section_director_name || '',
-          section_director_qualification: s.section_director_qualification || '',
-          section_director_national_id: s.section_director_national_id || '',
-          section_director_phone: s.section_director_phone || '',
-          section_deputy_name: s.section_deputy_name || '',
-          section_deputy_phone: s.section_deputy_phone || '',
-          students_vice_name: s.students_vice_name || '',
-          students_vice_phone: s.students_vice_phone || '',
-          staff_vice_name: s.staff_vice_name || '',
-          staff_vice_phone: s.staff_vice_phone || '',
-        }));
-      }
+      const structRes = await fetch(`${API_BASE_URL}/setup/save-institution-structure`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          classificationId: selectedClassificationId,
+          configuredSections: configuredSections
+        })
+      });
+      const structData = await structRes.json();
+      if (!structRes.ok) throw new Error(structData.error || 'فشل حفظ الهيكل المخصص للمؤسسة.');
 
       const res = await fetch(`${API}/institution`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...institutionForm,
-          sections: sectionsPayload
-        })
+        body: JSON.stringify(institutionForm)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حفظ بيانات المؤسسة.');
 
-      setSuccess('✅ تم حفظ بيانات المؤسسة بنجاح — انتقل الآن إلى تبويب «الأقسام والمراحل» لاستكمال إعداد الهيكل التنظيمي');
+      setSuccess('✅ تم حفظ بيانات وتأثيل المؤسسة بنجاح بتطابق تامي مع المعاجم الخمسة والهيكل المعماري!');
       loadData();
     } catch (err) {
       setError(err.message);
@@ -609,22 +767,26 @@ export default function SettingsPage({
 
   // ── Academic Year Handlers ────────────────────────────
   const handleOpenYearAdd = () => {
+    const curYear = new Date().getFullYear();
     setEditingYear(null);
     setYearForm({
-      yearLabel: '',
-      startDate: '',
-      endDate: '',
-      isCurrent: false,
+      yearLabel: `${curYear}/${curYear + 1}`,
+      startDate: `${curYear}-09-01`,
+      endDate: `${curYear + 1}-08-31`,
+      isCurrent: true,
     });
     setShowYearForm(true);
   };
 
   const handleOpenYearEdit = (y) => {
     setEditingYear(y.id);
+    const match = (y.year_label || '').match(/(\d{4})/);
+    const startYear = match ? parseInt(match[1]) : new Date().getFullYear();
+    const endYear = startYear + 1;
     setYearForm({
-      yearLabel: y.year_label,
-      startDate: y.start_date,
-      endDate: y.end_date,
+      yearLabel: y.year_label || `${startYear}/${endYear}`,
+      startDate: y.start_date || `${startYear}-09-01`,
+      endDate: y.end_date || `${endYear}-08-31`,
       isCurrent: y.is_current === 1 || y.is_current === true,
     });
     setShowYearForm(true);
@@ -668,6 +830,9 @@ export default function SettingsPage({
   };
 
   const handleSetCurrentYear = async (id) => {
+    const targetYear = academicYears.find(y => y.id === id);
+    const label = targetYear?.year_label || '';
+    if (!window.confirm(`⚠️ تنبيه هام:\nتغيير السنة الدراسية الحالية إلى "${label}" سينعكس على كافة شاشات وبيانات البرنامج وسيصبح هو العام النشط للنظام.\n\nهل تريد الاستمرار؟`)) return;
     setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/academic-years/${id}/set-current`, { method: 'POST' });
@@ -682,6 +847,22 @@ export default function SettingsPage({
 
   const filteredStages = formOpts.stages?.filter(s => !classroomFilters.sectionId || String(s.section_id) === classroomFilters.sectionId) || [];
   const filteredGrades = formOpts.grades?.filter(g => !classroomFilters.stageId || String(g.stage_id) === classroomFilters.stageId) || [];
+
+  useEffect(() => {
+    if (formOpts.academicYears?.length && !classroomFilters.academicYearId) {
+      const cur = formOpts.academicYears.find(y => y.is_current === 1 || y.is_current === true);
+      if (cur) setClassroomFilters(f => ({ ...f, academicYearId: String(cur.id) }));
+    }
+    if (formOpts.sections?.length === 1 && !classroomFilters.sectionId) {
+      setClassroomFilters(f => ({ ...f, sectionId: String(formOpts.sections[0].id) }));
+    }
+  }, [formOpts.academicYears, formOpts.sections]);
+
+  useEffect(() => {
+    if (filteredStages.length === 1 && !classroomFilters.stageId) {
+      setClassroomFilters(f => ({ ...f, stageId: String(filteredStages[0].id) }));
+    }
+  }, [filteredStages]);
 
   if (loading) {
     return (
@@ -750,6 +931,26 @@ export default function SettingsPage({
 
       {/* ── Tabs ────────────────────────────────────────── */}
       <div className="form-tabs">
+        {allowedTabs.includes('institution') && (
+          <button className={`form-tab ${activeTab === 'institution' ? 'active' : ''}`} onClick={() => { setActiveTab('institution'); setShowForm(false); }}>
+            🏫 بيانات المؤسسة
+          </button>
+        )}
+        {allowedTabs.includes('sections_stages') && (
+          <button className={`form-tab ${activeTab === 'sections_stages' ? 'active' : ''}`} onClick={() => { setActiveTab('sections_stages'); setShowForm(false); }}>
+            🏢 الأقسام والمراحل والصفوف
+          </button>
+        )}
+        {allowedTabs.includes('classrooms') && (
+          <button className={`form-tab ${activeTab === 'classrooms' ? 'active' : ''}`} onClick={() => { setActiveTab('classrooms'); setShowForm(false); }}>
+            📚 إعداد الفصول الدراسية
+          </button>
+        )}
+        {allowedTabs.includes('academic_years') && (
+          <button className={`form-tab ${activeTab === 'academic_years' ? 'active' : ''}`} onClick={() => { setActiveTab('academic_years'); setShowForm(false); setShowYearForm(false); }}>
+            📅 الأعوام الدراسية ({academicYears.length})
+          </button>
+        )}
         {allowedTabs.includes('users') && (
           <button className={`form-tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => { setActiveTab('users'); setShowForm(false); }}>
             👤 المستخدمين والمسؤولين
@@ -763,26 +964,6 @@ export default function SettingsPage({
         {allowedTabs.includes('perms') && (
           <button className={`form-tab ${activeTab === 'perms' ? 'active' : ''}`} onClick={() => { setActiveTab('perms'); setShowForm(false); }}>
             🔑 صلاحيات النظام ({perms.length})
-          </button>
-        )}
-        {allowedTabs.includes('institution') && (
-          <button className={`form-tab ${activeTab === 'institution' ? 'active' : ''}`} onClick={() => { setActiveTab('institution'); setShowForm(false); }}>
-            🏫 بيانات المؤسسة
-          </button>
-        )}
-        {allowedTabs.includes('sections_stages') && (
-          <button className={`form-tab ${activeTab === 'sections_stages' ? 'active' : ''}`} onClick={() => { setActiveTab('sections_stages'); setShowForm(false); }}>
-            🏢 الأقسام والمراحل
-          </button>
-        )}
-        {allowedTabs.includes('academic_years') && (
-          <button className={`form-tab ${activeTab === 'academic_years' ? 'active' : ''}`} onClick={() => { setActiveTab('academic_years'); setShowForm(false); setShowYearForm(false); }}>
-            📅 الأعوام الدراسية ({academicYears.length})
-          </button>
-        )}
-        {allowedTabs.includes('classrooms') && (
-          <button className={`form-tab ${activeTab === 'classrooms' ? 'active' : ''}`} onClick={() => { setActiveTab('classrooms'); setShowForm(false); }}>
-            📚 إعداد الفصول الدراسية
           </button>
         )}
       </div>
@@ -1077,26 +1258,38 @@ export default function SettingsPage({
 
                   {/* Count */}
                   <div className="field-group">
-                    <label className="field-label">عدد الفصول</label>
-                    <input type="number" className="field-input" min={1} max={20} value={bulkForm.count}
-                      onChange={e => setBulkForm(f => ({ ...f, count: Math.min(20, Math.max(1, parseInt(e.target.value) || 1)) }))} />
+                    <label className="field-label">
+                      {classrooms.length > 0
+                        ? `إجمالي الفصول المطلوب (يوجد ${classrooms.length} فصل حالياً)`
+                        : 'عدد الفصول'}
+                    </label>
+                    <input type="number" className="field-input"
+                      min={classrooms.length > 0 ? classrooms.length + 1 : 1} max={50} value={bulkForm.count}
+                      onChange={e => setBulkForm(f => ({ ...f, count: Math.min(50, Math.max(classrooms.length > 0 ? classrooms.length + 1 : 1, parseInt(e.target.value) || 1)) }))} />
                   </div>
 
                   {/* Capacity */}
                   <div className="field-group">
-                    <label className="field-label">السعة الموحدة (طالب)</label>
-                    <input type="number" className="field-input" min={1} max={100} value={bulkForm.capacity}
-                      onChange={e => setBulkForm(f => ({ ...f, capacity: Math.max(1, parseInt(e.target.value) || 1) }))} />
+                    <label className="field-label">السعة الموحدة (أقصى حد 49 طالب)</label>
+                    <input type="number" className="field-input" min={1} max={49} value={bulkForm.capacity}
+                      onChange={e => setBulkForm(f => ({ ...f, capacity: Math.min(49, Math.max(1, parseInt(e.target.value) || 1)) }))} />
                   </div>
 
                   {/* Naming style */}
                   <div className="field-group">
-                    <label className="field-label">طريقة تسمية الفصول</label>
-                    <select className="field-input" value={bulkForm.namingStyle}
+                    <label className="field-label">
+                      طريقة تسمية الفصول
+                      {classrooms.length > 0 && (
+                        <span style={{ fontSize: 11, color: '#6366f1', marginRight: 6, fontWeight: 700 }}>
+                          🔒 (مثبتة تلقائياً لتطابق الفصول الحالية)
+                        </span>
+                      )}
+                    </label>
+                    <select className="field-input" value={bulkForm.namingStyle} disabled={classrooms.length > 0}
                       onChange={e => setBulkForm(f => ({ ...f, namingStyle: e.target.value, prefix: '' }))}>
-                      <option value="arabic">حروف عربية (أ / ب / ج ...)</option>
-                      <option value="numeric">أرقام (1 / 2 / 3 ...)</option>
-                      <option value="arabic_suffix">أرقام مع لاحقة القسم (1/1 ع - 1/2 ع ...)</option>
+                      <option value="numeric">أرقام قياسية (1/1 ، 1/2 ، 1/3 ...)</option>
+                      <option value="arabic">حروف عربية (1/أ ، 1/ب ، 1/ج ...)</option>
+                      <option value="arabic_suffix">أرقام مع لاحقة المرحلة (1/1 ع ، 1/2 ع ...)</option>
                       <option value="english_letter_grade">أجنبي (A1 , B1 , C1 ...)</option>
                       <option value="custom">بادئة مخصصة</option>
                     </select>
@@ -1107,6 +1300,7 @@ export default function SettingsPage({
                     <div className="field-group">
                       <label className="field-label">البادئة (مثال: أ )</label>
                       <input type="text" className="field-input" maxLength={5}
+                        disabled={classrooms.length > 0}
                         value={bulkForm.prefix} placeholder="أ أو A أو ..." dir="rtl"
                         onChange={e => setBulkForm(f => ({ ...f, prefix: e.target.value }))} />
                     </div>
@@ -1116,7 +1310,11 @@ export default function SettingsPage({
                 {/* Preview badges */}
                 {classroomFilters.gradeId && (
                   <div style={{ marginTop: 18 }}>
-                    <p className="field-label" style={{ marginBottom: 8 }}>معاينة اسماء الفصول التي سيتم إنشاؤها:</p>
+                    <p className="field-label" style={{ marginBottom: 8 }}>
+                      {classrooms.length > 0
+                        ? `معاينة الفصول الجديدة المراد إضافتها لتكملة الفصول من (${classrooms.length}) إلى (${bulkForm.count}):`
+                        : 'معاينة أسماء وأكواد الفصول الجديدة التي سيتم إنشاؤها:'}
+                    </p>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {getGeneratedNames(classroomFilters.gradeId).map((n, i) => (
                         <span key={i} style={{
@@ -1135,7 +1333,9 @@ export default function SettingsPage({
                     style={{ gap: 8, minWidth: 180 }}>
                     {bulkCreating
                       ? <><div className="loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> جاري الإنشاء...</>
-                      : <><Plus size={17} /> إنشاء {bulkForm.count} فصل{bulkForm.count > 1 ? 'ول' : ''}</>}
+                      : <><Plus size={17} /> {classrooms.length > 0
+                          ? `إضافة ${Math.max(0, (parseInt(bulkForm.count) || 1) - classrooms.length)} فصل جديد لتكملة العدد إلى ${bulkForm.count}`
+                          : `إنشاء ${bulkForm.count} فصل`}</>}
                   </button>
                 </div>
               </div>
@@ -1145,9 +1345,29 @@ export default function SettingsPage({
             {classroomFilters.gradeId ? (
               classrooms.length > 0 ? (
                 <div>
-                  <h3 className="section-title" style={{ marginBottom: 14 }}>
-                    🏫 الفصول الحالية ({classrooms.length} فصل)
-                  </h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                    <h3 className="section-title" style={{ margin: 0 }}>
+                      🏫 الفصول الحالية ({classrooms.length} فصل)
+                    </h3>
+                    <button
+                      className="btn-delete"
+                      onClick={() => handleDeleteAllGradeClassrooms(false)}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        color: '#ef4444',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        padding: '6px 14px',
+                        borderRadius: 8,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}>
+                      <Trash2 size={14} /> حذف كافة فصول هذا الصف
+                    </button>
+                  </div>
                   <div className="classrooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 14 }}>
                     {classrooms.map(c => {
                       const percent = Math.min(100, Math.round((c.enrolledCount / (c.capacity || 1)) * 100));
@@ -1165,9 +1385,9 @@ export default function SettingsPage({
                                   onChange={e => setEditForm(f => ({ ...f, className: e.target.value }))} />
                               </div>
                               <div className="field-group">
-                                <label className="field-label">السعة (طالب)</label>
-                                <input type="number" className="field-input" min={1} max={100} value={editForm.capacity}
-                                  onChange={e => setEditForm(f => ({ ...f, capacity: parseInt(e.target.value) || 1 }))} />
+                                <label className="field-label">السعة (أقصى حد 49)</label>
+                                <input type="number" className="field-input" min={1} max={49} value={editForm.capacity}
+                                  onChange={e => setEditForm(f => ({ ...f, capacity: Math.min(49, Math.max(1, parseInt(e.target.value) || 1)) }))} />
                               </div>
                               <div style={{ display: 'flex', gap: 8 }}>
                                 <button className="btn-save" style={{ flex: 1, justifyContent: 'center', padding: '7px 0' }}
@@ -1180,9 +1400,16 @@ export default function SettingsPage({
                             // ── View Mode ──
                             <>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <h4 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 1 }}>
-                                  🏫 {c.class_name}
-                                </h4>
+                                <div>
+                                  <h4 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 1, margin: 0 }}>
+                                    🏫 {c.class_name}
+                                  </h4>
+                                  {c.class_code && (
+                                    <span style={{ fontSize: 11, background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, display: 'inline-block' }}>
+                                      🏷️ كود: {c.class_code}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="row-actions">
                                   <button className="action-btn view" title="تعديل"
                                     onClick={() => { setEditingClassroom(c.id); setEditForm({ className: c.class_name, capacity: c.capacity }); }}>
@@ -1244,10 +1471,10 @@ export default function SettingsPage({
             {/* ── Section 1: Basic School Data ── */}
             <div className="glass-panel form-body">
               <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                🏫 البيانات الأساسية للمدرسة
+                🏫 البيانات الأساسية ومعلومات التواصل بالمدرسة
               </h3>
               <p style={{ marginBottom: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
-                المعلومات التعريفية الرئيسية المعتمدة رسمياً للمدرسة
+                المعلومات التعريفية والعنوان ووسائل التواصل المعتمدة رسمياً للمدرسة
               </p>
               <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px 20px' }}>
                 <div className="field-group">
@@ -1281,45 +1508,22 @@ export default function SettingsPage({
                   <input type="text" className="field-input" required value={institutionForm.directorate}
                     onChange={e => setInstitutionForm({ ...institutionForm, directorate: e.target.value })} placeholder="مثال: إدارة الدقي التعليمية" />
                 </div>
-                <div className="field-group" style={{ gridColumn: 'span 2' }}>
-                  <label className="field-label" style={{ fontWeight: 'bold' }}>طبيعة هيكل المدرسة ★</label>
-                  <select className="field-input" value={institutionForm.hasMultipleSections ? '1' : '0'}
-                    onChange={e => setInstitutionForm({ ...institutionForm, hasMultipleSections: e.target.value === '1' })}>
-                    <option value="0">🏫 قسم واحد مستقل بالمدرسة (عربي فقط أو لغات فقط أو دولي فقط)</option>
-                    <option value="1">🏫 أقسام متعددة ومسارات مختلفة (عربي ولغات ودولي معاً بنفس المدرسة)</option>
+                <div className="field-group">
+                  <label className="field-label" style={{ fontWeight: 'bold' }}>تصنيف التعليم (صفة المؤسسة) ★</label>
+                  <select
+                    className="field-input"
+                    value={selectedClassificationId}
+                    onChange={e => setSelectedClassificationId(e.target.value)}
+                  >
+                    <option value="">اختر تصنيف التعليم...</option>
+                    {masterLookups.classifications.map(c => (
+                      <option key={c.id} value={c.id}>{c.name_ar}</option>
+                    ))}
                   </select>
                 </div>
-                {institutionForm.hasMultipleSections && (
-                  <div style={{ gridColumn: 'span 2', background: 'rgba(24,188,156,0.08)', border: '1px solid rgba(24,188,156,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#1a7a6a', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    💡 سيتم تحديد نوعية الدراسة والترخيص لكل قسم على حدة — أكمل الحفظ هنا ثم انتقل إلى تبويب <strong>الأقسام والمراحل</strong>
-                  </div>
-                )}
-                {!institutionForm.hasMultipleSections && (
-                  <div className="field-group">
-                    <label className="field-label">النوعية / نوع التعليم</label>
-                    <select className="field-input" value={institutionForm.educationType}
-                      onChange={e => setInstitutionForm({ ...institutionForm, educationType: e.target.value })}>
-                      <option value="">اختر النوعية...</option>
-                      <optgroup label="حكومي">
-                        <option value="عربي رسمي">عربي رسمي</option>
-                        <option value="لغات رسمي">لغات رسمي</option>
-                        <option value="لغات رسمي متميز">لغات رسمي متميز</option>
-                      </optgroup>
-                      <optgroup label="خاص">
-                        <option value="خاص عربي">خاص عربي</option>
-                        <option value="خاص لغات">خاص لغات</option>
-                        <option value="خاص دولي">خاص دولي</option>
-                        <option value="دولي معتمد">دولي معتمد</option>
-                      </optgroup>
-                      <optgroup label="أخرى">
-                        <option value="أزهري">أزهري</option>
-                        <option value="تكنولوجي تطبيقي">تكنولوجي تطبيقي</option>
-                      </optgroup>
-                    </select>
-                  </div>
-                )}
+
                 <div className="field-group">
-                  <label className="field-label">العنوان</label>
+                  <label className="field-label">العنوان التفصيلي للمدرسة</label>
                   <input type="text" className="field-input" value={institutionForm.address}
                     onChange={e => setInstitutionForm({ ...institutionForm, address: e.target.value })} placeholder="مثال: 12 شارع التحرير، الدقي" />
                 </div>
@@ -1329,7 +1533,7 @@ export default function SettingsPage({
                     onChange={e => setInstitutionForm({ ...institutionForm, phone: e.target.value })} placeholder="مثال: 0233445566" dir="ltr" />
                 </div>
                 <div className="field-group">
-                  <label className="field-label">البريد الإلكتروني</label>
+                  <label className="field-label">البريد الإلكتروني الرسمي</label>
                   <input type="email" className="field-input" value={institutionForm.email}
                     onChange={e => setInstitutionForm({ ...institutionForm, email: e.target.value })} placeholder="school@example.com" dir="ltr" />
                 </div>
@@ -1338,122 +1542,235 @@ export default function SettingsPage({
                   <input type="text" className="field-input" value={institutionForm.website}
                     onChange={e => setInstitutionForm({ ...institutionForm, website: e.target.value })} placeholder="www.school.com" dir="ltr" />
                 </div>
+
+                {/* ── Multi-Section Cards Builder ── */}
+                {/* ── Multi-Section & Leadership Cards Builder ── */}
+                <div style={{ gridColumn: 'span 2', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  <h4 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#1e293b' }}>
+                    🏢 أقسام المؤسسة وقيادات الأقسام المعتمدة
+                  </h4>
+                  {configuredSections.map((sec, secIdx) => {
+                    const secMaster = masterLookups.sections?.find(s => s.id === sec.sectionMasterId);
+                    const secNameLower = (secMaster?.name_ar || secMaster?.code || '').toLowerCase();
+                    
+                    let filteredEduTypes = masterLookups.educationTypes || [];
+                    if (secNameLower.includes('لغات') || secNameLower.includes('languages')) {
+                      filteredEduTypes = filteredEduTypes.filter(et => et.name_ar.includes('لغات') || et.code.includes('languages') || et.code.includes('distinguished'));
+                    } else if (secNameLower.includes('دولي') || secNameLower.includes('international')) {
+                      filteredEduTypes = filteredEduTypes.filter(et => et.name_ar.includes('دولي') || et.code.includes('international'));
+                    } else {
+                      filteredEduTypes = filteredEduTypes.filter(et => !et.name_ar.includes('لغات') && !et.name_ar.includes('دولي'));
+                    }
+
+                    return (
+                      <div key={secIdx} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 2px 4px rgba(0,0,0,0.03)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: 10 }}>
+                          <div style={{ fontWeight: 800, fontSize: 15, color: '#0f172a' }}>
+                            قسم ({secMaster?.name_ar || `قسم ${secIdx + 1}`})
+                          </div>
+                          {configuredSections.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setConfiguredSections(prev => prev.filter((_, i) => i !== secIdx))}
+                              style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
+                            >
+                              🗑️ حذف هذا القسم
+                            </button>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                          <div className="field-group">
+                            <label className="field-label">اختر القسم ★</label>
+                            <select
+                              className="field-input"
+                              value={sec.sectionMasterId}
+                              onChange={e => {
+                                const val = Number(e.target.value);
+                                setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionMasterId: val } : s));
+                              }}
+                            >
+                              {masterLookups.sections.map(s => (
+                                <option key={s.id} value={s.id}>{s.name_ar}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="field-group">
+                            <label className="field-label">نوعية التعليم المحددة للقسم ★</label>
+                            <select
+                              className="field-input"
+                              value={sec.educationTypeId}
+                              onChange={e => {
+                                const val = Number(e.target.value);
+                                setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, educationTypeId: val } : s));
+                              }}
+                            >
+                              {filteredEduTypes.map(et => (
+                                <option key={et.id} value={et.id}>{et.name_ar}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Section Leadership */}
+                        <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #e2e8f0', marginTop: 4 }}>
+                          <h5 style={{ margin: '0 0 12px 0', fontSize: 13.5, fontWeight: 800, color: '#1e293b' }}>
+                            👤 مدير ووكلاء {secMaster?.name_ar || `القسم ${secIdx + 1}`}
+                          </h5>
+                          
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 14 }}>
+                            <div className="field-group">
+                              <label className="field-label" style={{ fontSize: 12 }}>اسم مدير القسم</label>
+                              <input
+                                type="text"
+                                className="field-input"
+                                style={{ fontSize: 13 }}
+                                value={sec.sectionDirectorName || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorName: val } : s));
+                                }}
+                                placeholder="الاسم رباعياً"
+                              />
+                            </div>
+                            <div className="field-group">
+                              <label className="field-label" style={{ fontSize: 12 }}>المؤهل العلمي</label>
+                              <input
+                                type="text"
+                                className="field-input"
+                                style={{ fontSize: 13 }}
+                                value={sec.sectionDirectorQualification || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorQualification: val } : s));
+                                }}
+                                placeholder="مثال: بكالوريوس تربية"
+                              />
+                            </div>
+                            <div className="field-group">
+                              <label className="field-label" style={{ fontSize: 12 }}>الرقم القومي (14 رقم)</label>
+                              <input
+                                type="text"
+                                className="field-input"
+                                style={{ fontSize: 13 }}
+                                dir="ltr"
+                                maxLength={14}
+                                value={sec.sectionDirectorNationalId || ''}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/\D/g, '');
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorNationalId: val } : s));
+                                }}
+                                placeholder="14 رقماً"
+                              />
+                            </div>
+                            <div className="field-group">
+                              <label className="field-label" style={{ fontSize: 12 }}>رقم هاتف مدير القسم</label>
+                              <input
+                                type="text"
+                                className="field-input"
+                                style={{ fontSize: 13 }}
+                                dir="ltr"
+                                value={sec.sectionDirectorPhone || ''}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/[^\d+]/g, '');
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorPhone: val } : s));
+                                }}
+                                placeholder="01xxxxxxxxx"
+                              />
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                            <div className="field-group" style={{ background: '#ffffff', padding: 10, borderRadius: 6, border: '1px solid #cbd5e1' }}>
+                              <label className="field-label" style={{ fontWeight: 700, fontSize: 12 }}>وكيل القسم</label>
+                              <input
+                                className="field-input"
+                                style={{ marginBottom: 6, fontSize: 12 }}
+                                value={sec.sectionDeputyName || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDeputyName: val } : s));
+                                }}
+                                placeholder="اسم وكيل القسم"
+                              />
+                              <input
+                                className="field-input"
+                                dir="ltr"
+                                style={{ fontSize: 12 }}
+                                value={sec.sectionDeputyPhone || ''}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/[^\d+]/g, '');
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDeputyPhone: val } : s));
+                                }}
+                                placeholder="تليفون الوكيل"
+                              />
+                            </div>
+
+                            <div className="field-group" style={{ background: '#ffffff', padding: 10, borderRadius: 6, border: '1px solid #cbd5e1' }}>
+                              <label className="field-label" style={{ fontWeight: 700, fontSize: 12 }}>وكيل شئون الطلاب</label>
+                              <input
+                                className="field-input"
+                                style={{ marginBottom: 6, fontSize: 12 }}
+                                value={sec.studentsViceName || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, studentsViceName: val } : s));
+                                }}
+                                placeholder="اسم وكيل شئون الطلاب"
+                              />
+                              <input
+                                className="field-input"
+                                dir="ltr"
+                                style={{ fontSize: 12 }}
+                                value={sec.studentsVicePhone || ''}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/[^\d+]/g, '');
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, studentsVicePhone: val } : s));
+                                }}
+                                placeholder="تليفون وكيل الطلاب"
+                              />
+                            </div>
+
+                            <div className="field-group" style={{ background: '#ffffff', padding: 10, borderRadius: 6, border: '1px solid #cbd5e1' }}>
+                              <label className="field-label" style={{ fontWeight: 700, fontSize: 12 }}>وكيل شئون العاملين</label>
+                              <input
+                                className="field-input"
+                                style={{ marginBottom: 6, fontSize: 12 }}
+                                value={sec.staffViceName || ''}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, staffViceName: val } : s));
+                                }}
+                                placeholder="اسم وكيل شئون العاملين"
+                              />
+                              <input
+                                className="field-input"
+                                dir="ltr"
+                                style={{ fontSize: 12 }}
+                                value={sec.staffVicePhone || ''}
+                                onChange={e => {
+                                  const val = e.target.value.replace(/[^\d+]/g, '');
+                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, staffVicePhone: val } : s));
+                                }}
+                                placeholder="تليفون وكيل العاملين"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={() => setConfiguredSections(prev => [...prev, { sectionMasterId: masterLookups.sections[0]?.id || 1, educationTypeId: masterLookups.educationTypes[0]?.id || 1, stages: [] }])}
+                    style={{ background: '#f0fdf4', color: '#166534', border: '1.5px dashed #86efac', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 800, fontSize: 14 }}
+                  >
+                    ➕ إضافة قسم آخر للمؤسسة
+                  </button>
+                </div>
               </div>
             </div>
-
-            {/* ── Section 2: Director Info ── */}
-            <div className="glass-panel form-body">
-              <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                👤 مدير المدرسة
-              </h3>
-              <p style={{ marginBottom: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
-                بيانات مدير/ة المدرسة المعين رسمياً
-              </p>
-              <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px 20px' }}>
-                <div className="field-group">
-                  <label className="field-label">اسم المدير / المديرة</label>
-                  <input type="text" className="field-input" value={institutionForm.directorName}
-                    onChange={e => setInstitutionForm({ ...institutionForm, directorName: e.target.value })} placeholder="الاسم رباعياً" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">المؤهل العلمي</label>
-                  <input type="text" className="field-input" value={institutionForm.directorQualification}
-                    onChange={e => setInstitutionForm({ ...institutionForm, directorQualification: e.target.value })} placeholder="مثال: بكالوريوس تربية" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">الرقم القومي للمدير</label>
-                  <input type="text" className="field-input" value={institutionForm.directorNationalId}
-                    onChange={e => setInstitutionForm({ ...institutionForm, directorNationalId: e.target.value })} placeholder="14 رقماً" dir="ltr" maxLength={14} />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">تليفون المدير</label>
-                  <input type="text" className="field-input" value={institutionForm.directorPhone}
-                    onChange={e => setInstitutionForm({ ...institutionForm, directorPhone: e.target.value })} placeholder="01xxxxxxxxx" dir="ltr" />
-                </div>
-              </div>
-            </div>
-
-            {/* ── Main Section Configuration (Only for Single Section Mode) ── */}
-            {!institutionForm.hasMultipleSections && (
-              <div className="glass-panel form-body" style={{ borderTop: '4px solid var(--accent-primary)' }}>
-                <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  ⚙️ بيانات القسم الرئيسي للمدرسة
-                </h3>
-                <p style={{ marginBottom: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
-                  تحديد اسم ونوع القسم الرئيسي للمدرسة بما يطابق نظام الوزارة للقسم الواحد المستقل
-                </p>
-                <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px 20px', marginBottom: 20 }}>
-                  <div className="field-group">
-                    <label className="field-label">اسم القسم الرئيسي</label>
-                    <input type="text" className="field-input" value={singleSection.name}
-                      onChange={e => setSingleSection({ ...singleSection, name: e.target.value })} placeholder="مثال: القسم العربي" />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">وصف القسم / نوعية الدراسة بالقسم</label>
-                    <input type="text" className="field-input" value={singleSection.educationType || ''}
-                      onChange={e => setSingleSection({ ...singleSection, educationType: e.target.value })} placeholder="مثال: عربي رسمي، لغات رسمي، خاص لغات" />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">نوع القسم / المنهج</label>
-                    <select className="field-input" value={singleSection.type}
-                      onChange={e => setSingleSection({ ...singleSection, type: e.target.value })}>
-                      <option value="arabic">عربي (تعليم أساسي ومتقدم باللغة العربية)</option>
-                      <option value="languages">لغات / تجريبي (تعليم باللغات الأجنبية)</option>
-                      <option value="kindergarten">رياض أطفال (تمهيدي وتأسيسي)</option>
-                    </select>
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">الترخيص / الوضعية القانونية</label>
-                    <select className="field-input" value={singleSection.legalStatus}
-                      onChange={e => setSingleSection({ ...singleSection, legalStatus: e.target.value })}>
-                      <option value="حكومي">حكومي</option>
-                      <option value="خاص">خاص / استثماري</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Section Leadership */}
-                <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 14, paddingBottom: 8, borderBottom: '1px solid var(--border-color)' }}>
-                  👥 وكلاء وإدارة القسم الرئيسي
-                </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px 20px', marginBottom: 20 }}>
-                  <div className="field-group">
-                    <label className="field-label">اسم مدير القسم</label>
-                    <input className="field-input" value={singleSection.sectionDirectorName} onChange={e => setSingleSection({ ...singleSection, sectionDirectorName: e.target.value })} placeholder="الاسم رباعياً" />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">مؤهل مدير القسم</label>
-                    <input className="field-input" value={singleSection.sectionDirectorQualification} onChange={e => setSingleSection({ ...singleSection, sectionDirectorQualification: e.target.value })} placeholder="بكالوريوس..." />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">الرقم القومي للمدير</label>
-                    <input className="field-input" value={singleSection.sectionDirectorNationalId} dir="ltr" maxLength={14} onChange={e => setSingleSection({ ...singleSection, sectionDirectorNationalId: e.target.value.replace(/\D/g, '') })} placeholder="14 رقماً" />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">هاتف مدير القسم</label>
-                    <input className="field-input" value={singleSection.sectionDirectorPhone} dir="ltr" onChange={e => setSingleSection({ ...singleSection, sectionDirectorPhone: e.target.value.replace(/[^\d+]/g, '') })} placeholder="01xxxxxxxxx" />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px 20px' }}>
-                  <div className="field-group" style={{ background: 'rgba(255,255,255,0.01)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                    <label className="field-label" style={{ fontWeight: 700 }}>وكيل القسم</label>
-                    <input className="field-input" style={{ marginBottom: 6 }} value={singleSection.sectionDeputyName} onChange={e => setSingleSection({ ...singleSection, sectionDeputyName: e.target.value })} placeholder="اسم وكيل القسم" />
-                    <input className="field-input" dir="ltr" value={singleSection.sectionDeputyPhone} onChange={e => setSingleSection({ ...singleSection, sectionDeputyPhone: e.target.value.replace(/[^\d+]/g, '') })} placeholder="تليفون وكيل القسم" />
-                  </div>
-                  <div className="field-group" style={{ background: 'rgba(255,255,255,0.01)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                    <label className="field-label" style={{ fontWeight: 700 }}>وكيل شئون الطلاب بالقسم</label>
-                    <input className="field-input" style={{ marginBottom: 6 }} value={singleSection.studentsViceName} onChange={e => setSingleSection({ ...singleSection, studentsViceName: e.target.value })} placeholder="اسم وكيل شئون الطلاب" />
-                    <input className="field-input" dir="ltr" value={singleSection.studentsVicePhone} onChange={e => setSingleSection({ ...singleSection, studentsVicePhone: e.target.value.replace(/[^\d+]/g, '') })} placeholder="تليفون وكيل شئون الطلاب" />
-                  </div>
-                  <div className="field-group" style={{ background: 'rgba(255,255,255,0.01)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                    <label className="field-label" style={{ fontWeight: 700 }}>وكيل شئون العاملين بالقسم</label>
-                    <input className="field-input" style={{ marginBottom: 6 }} value={singleSection.staffViceName} onChange={e => setSingleSection({ ...singleSection, staffViceName: e.target.value })} placeholder="اسم وكيل شئون العاملين" />
-                    <input className="field-input" dir="ltr" value={singleSection.staffVicePhone} onChange={e => setSingleSection({ ...singleSection, staffVicePhone: e.target.value.replace(/[^\d+]/g, '') })} placeholder="تليفون وكيل شئون العاملين" />
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* ── Section 4: School Logo ── */}
             <div className="glass-panel form-body">
@@ -1588,18 +1905,11 @@ export default function SettingsPage({
             <div className="glass-panel" style={{ padding: '24px 30px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>🏢 الأقسام والمسارات التعليمية</h3>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>🏢 الأقسام والمسارات التعليمية المسجلة</h3>
                   <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {institutionForm.hasMultipleSections 
-                      ? 'الأقسام الكبرى في المدرسة (مثل القسم العربي، اللغات، إلخ)' 
-                      : 'المدرسة مهيأة في وضع (قسم واحد مستقل) - يتم إدارة القسم الرئيسي مباشرة من شاشة بيانات المؤسسة.'}
+                    الأقسام والمسارات التعليمية المعتمدة للمؤسسة المحددة من بيانات المؤسسة
                   </p>
                 </div>
-                {institutionForm.hasMultipleSections && !showSectionForm && (
-                  <button className="btn-add-student" style={{ padding: '6px 12px', fontSize: 12 }} onClick={handleOpenSectionAdd}>
-                    <Plus size={14} /> إضافة قسم جديد
-                  </button>
-                )}
               </div>
 
               {showSectionForm && (
@@ -1646,53 +1956,42 @@ export default function SettingsPage({
                   <thead>
                     <tr>
                       <th>اسم القسم</th>
-                      <th>وصف القسم / نوعية الدراسة</th>
-                      <th>نوع المنهج</th>
-                      <th>الترخيص</th>
-                      <th>إجراءات</th>
+                      <th>حالة القسم في المؤسسة</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sections.map(sec => (
-                      <tr key={sec.id} className="table-row">
-                        <td style={{ fontWeight: 700 }}>{sec.name}</td>
-                        <td>{sec.education_type || '—'}</td>
-                        <td>
-                          {sec.type === 'arabic' ? 'عربي' : sec.type === 'languages' ? 'لغات' : 'رياض أطفال'}
-                        </td>
-                        <td>{sec.legal_status || '—'}</td>
-                        <td>
-                          <div className="row-actions">
-                            <button className="action-btn view" onClick={() => handleOpenSectionEdit(sec)} title="تعديل">
-                              <Edit3 size={14} />
-                            </button>
-                            {institutionForm.hasMultipleSections && (
-                              <button className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
-                                onClick={() => handleDeleteSection(sec.id, sec.name)} title="حذف">
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                          </div>
+                    {sections.filter(sec => sec.is_active === 1 || sec.is_active === true || sec.is_active === '1').length === 0 ? (
+                      <tr>
+                        <td colSpan={2} style={{ textAlign: 'center', opacity: 0.5, padding: 16 }}>
+                          لا توجد أقسام مسجلة ومفعلة حالياً بالمؤسسة.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      sections.filter(sec => sec.is_active === 1 || sec.is_active === true || sec.is_active === '1').map(sec => (
+                        <tr key={sec.id} className="table-row">
+                          <td style={{ fontWeight: 800, fontSize: 14 }}>{sec.name}</td>
+                          <td>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '4px 12px',
+                              borderRadius: 20,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              background: 'rgba(16,185,129,0.12)',
+                              color: '#10b981',
+                              border: '1px solid #10b98130'
+                            }}>
+                              ✅ قسم معتمد ومسجل بالمؤسسة
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
 
-              {/* Section Leadership Cards */}
-              {sections.length > 0 && (
-                <div style={{ marginTop: 28 }}>
-                  <h4 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 14, paddingBottom: 8, borderBottom: '1px solid var(--border-color)' }}>
-                    👥 القيادات والإدارة التنفيذية للأقسام
-                  </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {sections.map(sec => (
-                      <SectionDirectorCard key={sec.id} section={sec} onSaved={loadData} API={API} />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Section Leadership Cards hidden to reduce distraction */}
             </div>
 
             {/* 2. STAGES PANEL */}
@@ -1718,20 +2017,47 @@ export default function SettingsPage({
                       <select className="filter-select" required value={stageForm.sectionId}
                         onChange={e => setStageForm({ ...stageForm, sectionId: e.target.value })} disabled={editingStage}>
                         <option value="">اختر القسم...</option>
-                        {sections.map(s => (
+                        {sections.filter(sec => sec.is_active === 1 || sec.is_active === true || sec.is_active === '1').map(s => (
                           <option key={s.id} value={s.id}>{s.name}</option>
                         ))}
                       </select>
                     </div>
                     <div className="field-group">
-                      <label className="field-label">اسم المرحلة التعليمية</label>
-                      <input type="text" className="field-input" required value={stageForm.stageName}
-                        onChange={e => setStageForm({ ...stageForm, stageName: e.target.value })} placeholder="مثال: ابتدائي، إعدادي، ثانوي" />
+                      <label className="field-label">اختر المرحلة التعليمية المكودة ★</label>
+                      <select
+                        className="field-input"
+                        required
+                        value={stageForm.stageCode || ''}
+                        onChange={e => {
+                          const selectedCode = e.target.value;
+                          const matchedStage = masterLookups.stages.find(st => st.code === selectedCode || String(st.id) === selectedCode);
+                          const name = matchedStage ? matchedStage.name_ar : e.target.value;
+                          const code = matchedStage ? matchedStage.code : selectedCode;
+                          
+                          let defaultYears = 3;
+                          if (code === 'primary') defaultYears = 6;
+                          else if (code === 'kg') defaultYears = 2;
+                          else if (code === 'prep' || code === 'sec') defaultYears = 3;
+
+                          setStageForm({
+                            ...stageForm,
+                            stageName: name,
+                            stageCode: code,
+                            yearsCount: defaultYears
+                          });
+                        }}
+                      >
+                        <option value="">اختر المرحلة من التكواد المعتمدة...</option>
+                        {masterLookups.stages.map(stg => (
+                          <option key={stg.id} value={stg.code}>
+                            {stg.name_ar} ({stg.code})
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="field-group">
-                      <label className="field-label">كود المرحلة بالوزارة / المدرسة المستقلة</label>
-                      <input type="text" className="field-input" value={stageForm.stageCode}
-                        onChange={e => setStageForm({ ...stageForm, stageCode: e.target.value })} placeholder="مثال: 1234" dir="ltr" />
+                      <label className="field-label">كود المرحلة الموحد بالنظام</label>
+                      <input type="text" className="field-input" readOnly value={stageForm.stageCode} dir="ltr" style={{ background: '#f8fafc', opacity: 0.85 }} />
                     </div>
                     <div className="field-group">
                       <label className="field-label">عدد الصفوف الدراسية بها</label>
@@ -1760,21 +2086,47 @@ export default function SettingsPage({
                       <th>القسم التابع له</th>
                       <th>عدد سنوات الدراسة (الصفوف)</th>
                       <th>ترتيب العرض</th>
+                      <th>الحالة</th>
                       <th>إجراءات</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stages.map(stg => (
-                      <tr key={stg.id} className="table-row">
+                      <tr key={stg.id} className="table-row" style={{ opacity: stg.is_active ? 1 : 0.55 }}>
                         <td style={{ fontWeight: 700 }}>{stg.stage_name}</td>
                         <td><code className="student-code">{stg.stage_code || '—'}</code></td>
                         <td>{stg.section_name}</td>
                         <td>{stg.years_count} صفوف دراسية</td>
                         <td>{stg.display_order}</td>
                         <td>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 10px',
+                            borderRadius: 20,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            background: stg.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
+                            color: stg.is_active ? '#10b981' : '#ef4444',
+                            border: `1px solid ${stg.is_active ? '#10b98130' : '#ef444430'}`
+                          }}>
+                            {stg.is_active ? '✅ نشط' : '⛔ غير مفعل'}
+                          </span>
+                        </td>
+                        <td>
                           <div className="row-actions">
                             <button className="action-btn view" onClick={() => handleOpenStageEdit(stg)} title="تعديل">
                               <Edit3 size={14} />
+                            </button>
+                            <button
+                              className="action-btn view"
+                              style={{
+                                borderColor: stg.is_active ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)',
+                                color: stg.is_active ? '#ef4444' : '#10b981'
+                              }}
+                              onClick={() => handleToggleStageActive(stg)}
+                              title={stg.is_active ? 'تعطيل (إخفاء من النظام)' : 'تفعيل (إظهار في النظام)'}
+                            >
+                              {stg.is_active ? '⛔' : '✅'}
                             </button>
                             <button className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
                               onClick={() => handleDeleteStage(stg.id, stg.stage_name)} title="حذف">
@@ -1788,19 +2140,7 @@ export default function SettingsPage({
                 </table>
               </div>
 
-              {/* Stage Leadership Cards */}
-              {stages.length > 0 && (
-                <div style={{ marginTop: 28 }}>
-                  <h4 style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 14, paddingBottom: 8, borderBottom: '1px solid var(--border-color)' }}>
-                    🎓 قيادات ومديرو المراحل الدراسية
-                  </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    {stages.map(stg => (
-                      <StageDirectorCard key={stg.id} stage={stg} onSaved={loadData} API={API} />
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Stage Leadership Cards hidden to reduce distraction */}
             </div>
 
           </div>
@@ -1818,17 +2158,33 @@ export default function SettingsPage({
                 
                 <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
                   <div className="field-group" style={{ gridColumn: 'span 2' }}>
-                    <label className="field-label">تسمية العام الدراسي</label>
+                    <label className="field-label">تسمية العام الدراسي (أدخل سنة البداية 2026 للاستكمال التلقائي)</label>
                     <input type="text" className="field-input" required value={yearForm.yearLabel}
-                      onChange={e => setYearForm({ ...yearForm, yearLabel: e.target.value })} placeholder="مثال: 2025/2026" />
+                      dir="rtl"
+                      style={{ textAlign: 'right', direction: 'rtl' }}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const match = val.match(/(\d{4})/);
+                        if (match) {
+                          const num = parseInt(match[1]);
+                          setYearForm(prev => ({
+                            ...prev,
+                            yearLabel: `${num}/${num + 1}`,
+                            startDate: `${num}-09-01`,
+                            endDate: `${num + 1}-08-31`
+                          }));
+                        } else {
+                          setYearForm(prev => ({ ...prev, yearLabel: val }));
+                        }
+                      }} placeholder="مثال: 2026 أو 2026/2027" />
                   </div>
                   <div className="field-group">
-                    <label className="field-label">تاريخ البدء</label>
+                    <label className="field-label">تاريخ البدء (بداية سبتمبر)</label>
                     <input type="date" className="field-input" required value={yearForm.startDate}
                       onChange={e => setYearForm({ ...yearForm, startDate: e.target.value })} />
                   </div>
                   <div className="field-group">
-                    <label className="field-label">تاريخ الانتهاء</label>
+                    <label className="field-label">تاريخ الانتهاء (نهاية أغسطس)</label>
                     <input type="date" className="field-input" required value={yearForm.endDate}
                       onChange={e => setYearForm({ ...yearForm, endDate: e.target.value })} />
                   </div>
@@ -1861,9 +2217,9 @@ export default function SettingsPage({
                     <tbody>
                       {academicYears.map(y => (
                         <tr key={y.id} className="table-row">
-                          <td style={{ fontWeight: 700, fontSize: 15 }}>{y.year_label}</td>
-                          <td dir="ltr" style={{ textAlign: 'right' }}>{y.start_date}</td>
-                          <td dir="ltr" style={{ textAlign: 'right' }}>{y.end_date}</td>
+                          <td dir="rtl" style={{ fontWeight: 800, fontSize: 15, textAlign: 'right' }}>{y.year_label}</td>
+                          <td dir="rtl" style={{ textAlign: 'right' }}>{y.start_date}</td>
+                          <td dir="rtl" style={{ textAlign: 'right' }}>{y.end_date}</td>
                           <td>
                             {y.is_current === 1 || y.is_current === true ? (
                               <span className="status-badge" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid #10b98122' }}>

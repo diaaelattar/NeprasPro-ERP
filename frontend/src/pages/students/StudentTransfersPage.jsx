@@ -1,11 +1,11 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   ArrowLeftRight, Search, Plus, Printer, Edit, Trash2,
   CheckCircle2, AlertCircle, Loader2, Save, FileText, ArrowLeft
 } from 'lucide-react';
-import StudentForm from './StudentForm';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 export default function StudentTransfersPage({ onBack, activeSectionId }) {
   const [activeTab, setActiveTab]         = useState('out'); // 'out' | 'in'

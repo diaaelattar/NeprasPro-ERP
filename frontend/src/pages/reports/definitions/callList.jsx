@@ -145,21 +145,21 @@ function CallListPreview({ students = [], meta = {}, schoolInfo = {} }) {
                     <tr key={s.id || idx}>
                       <td className="cell-num">{classIdx}</td>
                       <td className="cell-name" style={{ fontWeight: 800 }}>{s.full_name_ar}</td>
-                      <td className="cell-id" dir="ltr" style={{ fontFamily: 'Cairo, monospace' }}>{s.national_id || '—'}</td>
-                      <td className="cell-id" style={{ fontFamily: 'Cairo, monospace' }}>{s.birth_date || '—'}</td>
+                      <td className="cell-id" dir="ltr" style={{ fontFamily: 'Cairo, monospace' }}>{s.national_id || ''}</td>
+                      <td className="cell-id" style={{ fontFamily: 'Cairo, monospace' }}>{s.birth_date || ''}</td>
                       <td className="cell-sm">{age.days}</td>
                       <td className="cell-sm">{age.months}</td>
                       <td className="cell-sm">{age.years}</td>
-                      <td className="cell-sm" style={{ fontWeight: 700 }}>{s.gender || '—'}</td>
+                      <td className="cell-sm" style={{ fontWeight: 700 }}>{s.gender || ''}</td>
                       <td className="cell-sm" style={{ direction: 'ltr', fontWeight: 800, color: '#1e1b4b' }}>{s.classroom_name || sec.className}</td>
-                      <td className="cell-sm">{s.religion || '—'}</td>
-                      <td className="cell-sm">{s.nationality_name || '—'}</td>
-                      <td className="cell-sm">{STATUS_LABELS[s.status] || s.enrollment_status || 'منقول'}</td>
-                      <td className="cell-sm">{s.is_merged === 1 ? (s.merge_type || 'مدمج') : 'لا يوجد'}</td>
-                      <td className="cell-name">{s.guardian_name || '—'}</td>
-                      <td className="cell-sm">{s.guardian_job || '—'}</td>
-                      <td className="cell-phone" dir="ltr">{s.guardian_phone || '—'}</td>
-                      <td className="cell-addr" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.address || '—'}</td>
+                      <td className="cell-sm">{s.religion || ''}</td>
+                      <td className="cell-sm">{s.nationality_name || ''}</td>
+                      <td className="cell-sm">{STATUS_LABELS[s.status] || s.enrollment_status || ''}</td>
+                      <td className="cell-sm">{s.is_merged === 1 ? (s.merge_type || 'مدمج') : ''}</td>
+                      <td className="cell-name">{s.guardian_name || ''}</td>
+                      <td className="cell-sm">{s.guardian_job || ''}</td>
+                      <td className="cell-phone" dir="ltr">{s.guardian_phone || ''}</td>
+                      <td className="cell-addr" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.address || ''}</td>
                     </tr>
                   );
                 })}

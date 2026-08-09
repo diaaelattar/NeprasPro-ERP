@@ -27,10 +27,19 @@ router.get('/passing-rules',          controlController.getPassingRules);
 router.post('/passing-rules',         controlController.savePassingRules);
 router.post('/preset-default/save',    controlController.saveGradePresetAsDefault);
 router.post('/preset-default/restore', controlController.restoreGradePresetDefaults);
+router.post('/preset-primary/setup',   controlController.setupPrimaryPreset);
+router.post('/preset-primary3/setup',  controlController.setupPrimary3Preset);
+router.post('/preset-primary456/setup',controlController.setupPrimary456Preset);
+router.post('/preset-prep12/setup',    controlController.setupPrep12Preset);
 router.post('/marks/save',             controlController.saveControlMarks);
+router.post('/marks',                  controlController.saveControlMarks);
+router.post('/marks/single',           controlController.saveSingleMark);
 router.get('/marks',                  controlController.getControlMarks);
 router.get('/marks/grid',             controlController.getControlMarks);
 router.post('/marks/bulk-fill',        controlController.bulkFillSubjectMarks);
+
+const controlReportsRoutes = require('./reports/control.reports.routes');
+router.use('/reports-engine', controlReportsRoutes);
 
 module.exports = router;
 

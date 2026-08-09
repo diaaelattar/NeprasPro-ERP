@@ -62,7 +62,7 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
 
             <div className="header-col-center">
               <h2 className="report-title-main">
-                سجل قيد تلاميذ الصف {selectedGrade?.grade_name_ar || '...............'}
+                سجل قيد تلاميذ {selectedGrade?.grade_name_ar || '...............'}
               </h2>
               <div className="report-subtitle-meta">
                 للعام الدراسي {selectedYear?.year_label || '...............'} | إجمالي المسجلين: {students.length} طالب
@@ -177,7 +177,7 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
 /* ── Report Definition Object ──────────────────────────────────── */
 const studentRegister = {
   id:          'student_register',
-  name:        'سجل قيد تلاميذ الصف (سجل 41 د)',
+  name:        'سجل القيد',
   desc:        'النموذج الرسمي المعتمد من الوزارة لسجل قيد الطلاب',
   category:    'سجلات القيد',
   icon:        '📖',

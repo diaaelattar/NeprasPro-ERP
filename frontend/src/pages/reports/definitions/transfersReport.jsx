@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import API_BASE_URL from '../../../config/api';
 
 function TransfersReportPreview({ students, meta, schoolInfo }) {
   const { selectedYear } = meta;
@@ -6,7 +6,7 @@ function TransfersReportPreview({ students, meta, schoolInfo }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`http://${window.location.hostname}:3001/api/students/transfers/list`)
+    fetch(`${API_BASE_URL}/students/transfers/list`)
       .then(r => r.json())
       .then(d => {
         if (d.success) setTransfers(d.transfers || []);

@@ -158,7 +158,7 @@ function MergeStudentsPreview({ students = [], meta = {}, schoolInfo = {} }) {
 /* ── Report Definition Object ──────────────────────────────────── */
 const mergeStudentsReport = {
   id:          'merge_students_report',
-  name:        'سجل طلاب الدمج والتربية الخاصة',
+  name:        'سجل ذوى الاحتياجات الخاصة',
   desc:        'السجل الرسمي المعتمد لطلاب الدمج مقسماً كشوفاً منفصلة لكل صف ومستندات القرار',
   category:    'سجلات القيد',
   icon:        '♿',

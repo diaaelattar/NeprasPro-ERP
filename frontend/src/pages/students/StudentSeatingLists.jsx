@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Layers, Printer, RefreshCw, CheckCircle, ArrowRight } from 'lucide-react';
 import '../staff/staff.css';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 export default function StudentSeatingLists({ onBack }) {
   const [seatingList, setSeatingList] = useState([]);

@@ -55,7 +55,7 @@ function StudentRegister41Preview({ students = [], meta = {}, schoolInfo = {} })
 
             <div className="header-col-center">
               <h2 className="report-title-main">
-                سجل 41 مستجدين - الصف {selectedGrade?.grade_name_ar || '...............'}
+                سجل 41 مستجدين - {selectedGrade?.grade_name_ar || '...............'}
               </h2>
               <div className="report-subtitle-meta">
                 للعام الدراسي {selectedYear?.year_label || '...............'} | إجمالي الطلاب المستجدين: {students.length} طالب

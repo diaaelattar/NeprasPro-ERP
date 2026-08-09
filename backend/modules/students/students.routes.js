@@ -40,6 +40,11 @@ router.delete('/emis/session',                    ctrl.emisClearSession);
 router.get('/',                                   ctrl.getStudents);
 router.get('/export/excel',                       ctrl.exportExcelTemplate);
 router.get('/export/class-list',                  ctrl.exportClassListExcel);
+router.get('/export/full-class-list',             ctrl.exportFullClassListExcel);
+// ── Report PDF & Desktop Excel Automation ─────────────────
+router.get('/export/classes-for-export',          ctrl.getClassesForExport);
+router.get('/export/report-pdf',                  ctrl.exportReportPdf);
+router.get('/export/open-in-excel',               ctrl.openInExcel);
 
 router.get('/transfers/list',                      ctrl.getTransfersList);
 router.get('/export/transfers',                    ctrl.exportTransfersExcel);

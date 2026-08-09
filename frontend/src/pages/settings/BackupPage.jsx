@@ -3,10 +3,11 @@ import {
   Database, Plus, RefreshCw, Trash2, ArrowUpRight, CheckCircle2,
   AlertCircle, FileArchive, Download, Upload
 } from 'lucide-react';
+import API_BASE_URL from '../../config/api';
 
-const API     = `http://${window.location.hostname}:3001/api/settings/backups`;
-const API_DL  = `http://${window.location.hostname}:3001/api/settings/backups/download`;
-const API_IMP = `http://${window.location.hostname}:3001/api/settings/backups/import`;
+const API     = `${API_BASE_URL}/settings/backups`;
+const API_DL  = `${API_BASE_URL}/settings/backups/download`;
+const API_IMP = `${API_BASE_URL}/settings/backups/import`;
 
 export default function BackupPage() {
   const [backups,       setBackups]       = useState([]);

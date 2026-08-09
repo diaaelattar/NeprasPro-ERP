@@ -6,7 +6,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap');
 
 :root {
-  --font-family: 'Cairo', system-ui, sans-serif;
+  --font-family: 'Caplier', 'Calibri', 'Cairo', system-ui, sans-serif;
 
   /* ── EMIS Core Palette ── */
   --bg-primary:   #f0f2f5;          /* صفحة الخلفية الرمادية الفاتحة */

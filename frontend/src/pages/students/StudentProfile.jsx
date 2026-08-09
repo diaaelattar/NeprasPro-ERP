@@ -4,9 +4,9 @@ import {
   Edit2, Star, FileText, ArrowLeftRight, Calendar, Shield,
   CheckCircle, XCircle, AlertCircle, Hash, Plus
 } from 'lucide-react';
-import TransferForm from './TransferForm';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 const STATUS_CFG = {
   promoted:     { label: 'منقول',        color: '#10b981', bg: '#10b98122' },

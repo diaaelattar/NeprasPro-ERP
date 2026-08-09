@@ -132,7 +132,7 @@ const gradesSheet = {
   id:          'grades_sheet',
   name:        'رصد درجات أعمال السنة',
   desc:        'شبكة المواد والدرجات لكل طالب في الفصل لرصد أعمال السنة',
-  category:    'قوائم الفصول',
+  category:    'سجلات رصد أعمال السنة',
   icon:        '📝',
   orientation: 'landscape',
   available:   true,

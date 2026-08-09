@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Save, X, User, FileText, Phone, Award, ShieldCheck, Briefcase } from 'lucide-react';
 import './staff.css';
+import API_BASE_URL from '../../config/api';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 const CADRE_TITLE_OPTIONS = [
   { group: 'كادر هيئة التعليم (معلمون)', options: ['كبير معلمين', 'معلم خبير', 'معلم أول (أ)', 'معلم أول', 'معلم', 'معلم مساعد'] },
@@ -119,7 +120,7 @@ export default function StaffForm({ staffId, onCancel, onSaved }) {
       <div className="staff-form-header">
         <h2>
           <User size={22} color="#185fa5" />
-          {staffId ? 'تعديل بيانات الموظف والكادر' : 'تسجيل موظف جديد بالكادر'}
+          {staffId ? 'تعديل بيانات الموظف' : 'تسجيل موظف جديد'}
         </h2>
         <button onClick={onCancel} className="staff-page-btn" title="إغلاق">
           <X size={18} />

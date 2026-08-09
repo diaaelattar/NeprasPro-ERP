@@ -500,7 +500,7 @@
 .register-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 10px;
+  font-size: 12px;
   color: #000000;
   direction: rtl;
   table-layout: fixed;
@@ -508,21 +508,21 @@
 
 .register-table th, .register-table td {
   border: 1px solid #000000 !important;
-  padding: 3px 4px;
+  padding: 4px 6px;
   text-align: center;
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
   word-break: keep-all;
-  height: 24px;
+  height: 26px;
 }
 
 .register-table th {
   background: #f1f5f9;
   font-weight: 800;
-  font-size: 10px;
+  font-size: 12px;
   color: #0f172a;
-  padding: 4px 2px;
+  padding: 5px 3px;
 }
 
 .register-table td.cell-nowrap,
@@ -531,6 +531,7 @@
 .register-table td.cell-num,
 .register-table td.cell-phone {
   white-space: nowrap !important;
+  font-size: 11.5px;
 }
 
 .register-table td.cell-name {
@@ -539,6 +540,8 @@
   white-space: nowrap !important;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .printable-page-block {
@@ -568,9 +571,20 @@
 
 @media print {
   @page {
-    size: A4 landscape;
-    margin: 8mm;
+    size: A4 portrait;
+    margin: 6mm;
   }
+
+  body:has(#print-area[data-orientation="landscape"]),
+  #print-area[data-orientation="landscape"] {
+    page: landscape;
+  }
+
+  @page landscape {
+    size: A4 landscape;
+    margin: 6mm;
+  }
+
   body * {
     visibility: hidden;
   }

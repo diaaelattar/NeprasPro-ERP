@@ -54,8 +54,8 @@ function SuspendedRegisterPreview({ students = [], meta = {}, schoolInfo = {} })
             </div>
 
             <div className="header-col-center">
-              <h2 className="report-title-main" style={{ color: '#d97706' }}>
-                سجل الطلاب الموقوف قيدهم - الصف {selectedGrade?.grade_name_ar || 'جميع الصفوف'}
+              <h2 className="report-title-main">
+                سجل الموقوف قيدهم - {selectedGrade?.grade_name_ar || 'جميع الصفوف'}
               </h2>
               <div className="report-subtitle-meta">
                 للعام الدراسي {selectedYear?.year_label || '...............'} | إجمالي الموقوف قيدهم: {students.length} طالب
@@ -170,7 +170,7 @@ function SuspendedRegisterPreview({ students = [], meta = {}, schoolInfo = {} })
 /* ── Report Definition Object ──────────────────────────────────── */
 const suspendedRegister = {
   id:          'suspended-register',
-  name:        'سجل الطلاب الموقوف قيدهم',
+  name:        'سجل الموقوف قيدهم',
   desc:        'السجل الرسمي للطلاب الموقوف قيدهم رسمياً بالمدارس (نفس تنسيق سجل 41)',
   category:    'سجلات القيد',
   icon:        '🛑',

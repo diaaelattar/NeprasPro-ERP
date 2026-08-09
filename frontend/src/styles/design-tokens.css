@@ -1,0 +1,111 @@
+/* ==========================================================================
+   NeprasPro Design Tokens & Core CSS Architecture
+   ========================================================================== */
+
+:root {
+  /* Color Palette — Primary & Neutrals */
+  --primary-900: #0f172a;
+  --primary-800: #1e1b4b;
+  --primary-700: #312e81;
+  --primary-600: #4338ca;
+  --primary-500: #6366f1;
+  --primary-100: #e0e7ff;
+  --primary-50:  #f0fdf4;
+
+  /* Accent Colors */
+  --success-700: #047857;
+  --success-600: #059669;
+  --success-500: #10b981;
+  --success-100: #dcfce7;
+
+  --warning-700: #b45309;
+  --warning-600: #d97706;
+  --warning-100: #fef3c7;
+
+  --danger-700:  #b91c1c;
+  --danger-600:  #dc2626;
+  --danger-100:  #fee2e2;
+
+  --info-600:    #2563eb;
+  --info-100:    #e0f2fe;
+
+  /* Neutrals & Surfaces */
+  --surface-bg:   #f8fafc;
+  --card-bg:      #ffffff;
+  --border-color: #cbd5e1;
+  --border-light: #e2e8f0;
+
+  --text-main:    #1e293b;
+  --text-muted:   #64748b;
+  --text-inverse: #ffffff;
+
+  /* Typography */
+  --font-cairo: 'Caplier', 'Calibri', 'Cairo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Elevation / Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+  /* Border Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+}
+
+/* Main Sidebar Navigation Menu — Prestigious Cairo Font */
+.dashboard-sidebar,
+.dashboard-sidebar *,
+.sidebar-brand,
+.sidebar-brand *,
+.sidebar-nav,
+.sidebar-nav *,
+.sidebar,
+.side-nav,
+.app-sidebar,
+.sidebar *,
+.side-nav *,
+.nav-item,
+.nav-item *,
+.nav-subitem,
+.nav-subitem *,
+.section-tab,
+.sidebar-footer,
+.sidebar-footer * {
+  font-family: 'Cairo', system-ui, sans-serif !important;
+}
+
+/* Global Font & Reset Enhancements — Strict Caplier / Calibri Bold for All Tables & Reports */
+body, html, div, p, span, h1, h2, h3, h4, h5, h6,
+table, th, td, tr, caption,
+input, select, textarea, button, label,
+.printable-area, .printable-secret-area, .report-view, .report-container {
+  font-family: 'Caplier', 'Calibri', 'Cairo', system-ui, sans-serif !important;
+}
+
+/* Table Headers & Cell Data Typography — High Contrast Bold */
+table th, .table th, th, .students-table th {
+  font-family: 'Caplier', 'Calibri', 'Cairo', sans-serif !important;
+  font-weight: 900 !important;
+  color: #0f172a !important;
+  background-color: #f1f5f9 !important;
+  letter-spacing: -0.2px;
+}
+
+table td, .table td, td, table input, .table input, select {
+  font-family: 'Caplier', 'Calibri', 'Cairo', sans-serif !important;
+  font-weight: 800 !important;
+}
+
+/* Smooth Shimmer Animation for Skeleton Loaders */
+@keyframes nepShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.nep-shimmer {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: nepShimmer 1.5s infinite linear;
+}

@@ -1,8 +1,8 @@
 {
   "name": "nepras-pro",
-  "version": "1.0.1",
-  "description": "NeprasPro School ERP Desktop App",
-  "author": "Egypt Smart School ERP",
+  "version": "1.2.0",
+  "description": "NeprasPro School ERP Desktop App — Enterprise Edition",
+  "author": "NeprasPro Educational ERP (Copyright © 2026)",
   "main": "electron/main.js",
   "scripts": {
     "install:frontend": "npm install --prefix frontend",
@@ -12,7 +12,8 @@
     "backend:dev": "node backend/server.js",
     "dev": "concurrently \"npm run react:dev\" \"npm run backend:dev\" \"wait-on http://localhost:5173 && npm run electron:dev\"",
     "build:frontend": "npm run build --prefix frontend",
-    "dist": "npm run build:frontend && electron-builder"
+    "dist": "npm run build:frontend && electron-builder",
+    "generate-key": "node scripts/generate_key.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
@@ -24,7 +25,7 @@
   "build": {
     "appId": "com.nepraspro.erp",
     "productName": "NeprasPro",
-    "copyright": "Egypt Smart School ERP",
+    "copyright": "Copyright © 2026 NeprasPro ERP System. All Rights Reserved. (جميع الحقوق محفوظة لمنظومة نبرأس التعليمية)",
     "directories": {
       "output": "dist"
     },
@@ -50,7 +51,7 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "NeprasPro",
+      "shortcutName": "NeprasPro ERP",
       "runAfterFinish": true,
       "language": "1025"
     }

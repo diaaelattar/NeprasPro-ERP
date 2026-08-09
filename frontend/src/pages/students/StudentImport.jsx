@@ -10,11 +10,12 @@ import {
   Upload, FileSpreadsheet, Download, CheckCircle2, XCircle,
   AlertTriangle, ChevronRight, ChevronLeft, RotateCcw,
   Users, ArrowLeft, Loader2, Info, Check, X,
-  UserPlus, RefreshCw, Tag
+  UserPlus, RefreshCw, Tag, Sliders
 } from 'lucide-react';
+import API_BASE_URL from '../../config/api';
 import './import.css';
 
-const API = `http://${window.location.hostname}:3001/api`;
+const API = API_BASE_URL;
 
 /* ── Field definitions — NEW STUDENTS mode ── */
 const NEW_FIELD_OPTIONS = [
@@ -27,10 +28,10 @@ const NEW_FIELD_OPTIONS = [
   { value: 'national_id',          label: 'الرقم القومي' },
   { value: 'nationality',          label: 'الجنسية' },
   { value: 'religion',             label: 'الديانة' },
-  { value: 'section_name',         label: 'اسم القسم *',                    required: true },
+  { value: 'section_name',         label: 'اسم القسم (اختياري / القسم الفعّال)' },
   { value: 'stage_name',           label: 'اسم المرحلة *',                  required: true },
   { value: 'grade_name',           label: 'اسم الصف *',                     required: true },
-  { value: 'academic_year',        label: 'العام الدراسي *',                required: true },
+  { value: 'academic_year',        label: 'العام الدراسي (اختياري / العام الجاري)' },
   { value: 'guardian_name',        label: 'اسم ولي الأمر' },
   { value: 'guardian_relation',    label: 'صفة ولي الأمر' },
   { value: 'guardian_phone',       label: 'رقم هاتف ولي الأمر' },
@@ -107,6 +108,12 @@ export default function StudentImport({ onBack, activeSectionId }) {
   const [validationResults, setValidationResults] = useState([]);
   const [validSummary, setValidSummary] = useState({ total: 0, valid: 0, errors: 0 });
 
+  // Hierarchical Bulk States
+  const [importMetadata, setImportMetadata] = useState(null);
+  const [bulkSectionId, setBulkSectionId]   = useState('');
+  const [bulkStageId, setBulkStageId]       = useState('');
+  const [bulkGradeId, setBulkGradeId]       = useState('');
+
   // Step 4
   const [importResults, setImportResults] = useState(null);
 
@@ -153,6 +160,7 @@ export default function StudentImport({ onBack, activeSectionId }) {
       setPreviewCells(data.preview || []);
       setValidationResults(data.results);
       setValidSummary(data.summary || { total: 0, valid: 0, errors: 0 });
+      setImportMetadata(data.metadata || null);
       setStep(2);
     } catch (err) {
       setError(err.message || 'فشل قراءة الملف');
@@ -192,12 +200,100 @@ export default function StudentImport({ onBack, activeSectionId }) {
 
       setValidationResults(data.results);
       setValidSummary(data.summary);
+      setImportMetadata(data.metadata || null);
       setStep(3);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Bulk Apply Section to ALL rows
+  const handleApplyBulkSection = () => {
+    if (!bulkSectionId || !importMetadata) return;
+    const secObj = importMetadata.sections.find(s => String(s.id) === String(bulkSectionId));
+    if (!secObj) return;
+
+    setValidationResults(prev => {
+      const next = prev.map(row => {
+        const newData = { ...row.data, sectionId: secObj.id, sectionName: secObj.name };
+        return { ...row, data: newData, status: 'valid', errors: [] };
+      });
+      const vCount = next.filter(r => r.status === 'valid').length;
+      const eCount = next.filter(r => r.status === 'error').length;
+      setValidSummary({ total: next.length, valid: vCount, errors: eCount });
+      return next;
+    });
+  };
+
+  // Bulk Apply Stage to rows
+  const handleApplyBulkStage = () => {
+    if (!bulkStageId || !importMetadata) return;
+    const stgObj = importMetadata.stages.find(st => String(st.id) === String(bulkStageId));
+    if (!stgObj) return;
+
+    setValidationResults(prev => {
+      const next = prev.map(row => {
+        const newData = { ...row.data, stageId: stgObj.id, stageName: stgObj.name };
+        return { ...row, data: newData, status: 'valid', errors: [] };
+      });
+      const vCount = next.filter(r => r.status === 'valid').length;
+      const eCount = next.filter(r => r.status === 'error').length;
+      setValidSummary({ total: next.length, valid: vCount, errors: eCount });
+      return next;
+    });
+  };
+
+  // Bulk Apply Grade (Scoped strictly under Stage) to rows
+  const handleApplyBulkGrade = () => {
+    if (!bulkGradeId || !importMetadata) return;
+    const grdObj = importMetadata.grades.find(g => String(g.id) === String(bulkGradeId));
+    if (!grdObj) return;
+
+    setValidationResults(prev => {
+      const next = prev.map(row => {
+        const newData = { ...row.data, gradeId: grdObj.id, gradeName: grdObj.name };
+        return { ...row, data: newData, status: 'valid', errors: [] };
+      });
+      const vCount = next.filter(r => r.status === 'valid').length;
+      const eCount = next.filter(r => r.status === 'error').length;
+      setValidSummary({ total: next.length, valid: vCount, errors: eCount });
+      return next;
+    });
+  };
+
+  // Inline row update for an individual student row
+  const handleInlineRowUpdate = (rowIndex, field, value) => {
+    if (!importMetadata) return;
+    setValidationResults(prev => {
+      const next = [...prev];
+      const targetRow = { ...next[rowIndex] };
+      const newData = { ...targetRow.data };
+
+      if (field === 'section') {
+        const secObj = importMetadata.sections.find(s => String(s.id) === String(value));
+        if (secObj) { newData.sectionId = secObj.id; newData.sectionName = secObj.name; }
+      } else if (field === 'stage') {
+        const stgObj = importMetadata.stages.find(st => String(st.id) === String(value));
+        if (stgObj) { newData.stageId = stgObj.id; newData.stageName = stgObj.name; }
+      } else if (field === 'grade') {
+        const grdObj = importMetadata.grades.find(g => String(g.id) === String(value));
+        if (grdObj) { newData.gradeId = grdObj.id; newData.gradeName = grdObj.name; }
+      }
+
+      targetRow.data = newData;
+      if (newData.stageId && newData.gradeId) {
+        targetRow.status = 'valid';
+        targetRow.errors = [];
+      }
+      next[rowIndex] = targetRow;
+
+      const vCount = next.filter(r => r.status === 'valid').length;
+      const eCount = next.filter(r => r.status === 'error').length;
+      setValidSummary({ total: next.length, valid: vCount, errors: eCount });
+      return next;
+    });
   };
 
   /* ── Step 3 → 4 ── */
@@ -232,6 +328,34 @@ export default function StudentImport({ onBack, activeSectionId }) {
   };
 
   const switchMode = (m) => { setImportMode(m); setFile(null); setError(''); };
+
+  const exportFailedRowsToExcel = () => {
+    let rowsToExport = [];
+    if (step === 3) {
+      rowsToExport = validationResults.filter(r => r.status === 'error' || (r.errors && r.errors.length > 0));
+    } else if (step === 4 && importResults) {
+      rowsToExport = importResults.results.filter(r => r.status === 'failed' || r.error);
+    }
+
+    if (rowsToExport.length === 0) return;
+
+    let csvContent = "\uFEFF";
+    csvContent += "رقم الصف,اسم الطالب / الحساب,القسم / المرحلة / الصف,الأخطاء والسبب\n";
+
+    rowsToExport.forEach(r => {
+      const rowNum = r.rowNum || '—';
+      const name = (r.data?.fullNameAr || r.data?.matchedName || r.name || '—').replace(/"/g, '""');
+      const hierarchy = `${r.data?.sectionName || ''} / ${r.data?.stageName || ''} / ${r.data?.gradeName || ''}`.replace(/"/g, '""');
+      const errs = (r.errors?.join(' | ') || r.error || r.warnings?.join(' | ') || 'خطأ في التحقق').replace(/"/g, '""');
+      csvContent += `"${rowNum}","${name}","${hierarchy}","${errs}"\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `تقرير_سجلات_لم_يتم_استيرادها_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
 
   /* ══════════════════════════════════════════════════════════════ */
   return (
@@ -508,6 +632,101 @@ export default function StudentImport({ onBack, activeSectionId }) {
               </div>
             </div>
 
+            {/* Hierarchical Bulk Correction Bar */}
+            {importMode === 'new' && importMetadata && (
+              <div style={{
+                background: '#ffffff',
+                padding: '16px 20px',
+                borderRadius: '12px',
+                border: '2px solid #cbd5e1',
+                marginBottom: '20px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
+              }}>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: '14.5px', fontWeight: 800, color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Sliders size={18} color="#2563eb" />
+                  شريط التعيين والتعديل التراتبي (تعديل القسم للجميع ← المرحلة للمجموعة ← الصف للمرحلة)
+                </h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', alignItems: 'center' }}>
+                  
+                  {/* 1. Section Bulk */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', padding: '6px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>1. القسم:</span>
+                    <select
+                      value={bulkSectionId}
+                      onChange={e => setBulkSectionId(e.target.value)}
+                      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, background: '#fff' }}
+                    >
+                      <option value="">-- اختر القسم للجميع --</option>
+                      {importMetadata.sections.map(sec => (
+                        <option key={sec.id} value={sec.id}>{sec.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkSection}
+                      disabled={!bulkSectionId}
+                      style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer' }}
+                    >
+                      تعديل القسم للجميع
+                    </button>
+                  </div>
+
+                  {/* 2. Stage Bulk */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', padding: '6px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>2. المرحلة:</span>
+                    <select
+                      value={bulkStageId}
+                      onChange={e => { setBulkStageId(e.target.value); setBulkGradeId(''); }}
+                      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, background: '#fff' }}
+                    >
+                      <option value="">-- اختر المرحلة --</option>
+                      {(bulkSectionId
+                        ? importMetadata.stages.filter(st => String(st.sectionId) === String(bulkSectionId))
+                        : importMetadata.stages
+                      ).map(st => (
+                        <option key={st.id} value={st.id}>{st.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkStage}
+                      disabled={!bulkStageId}
+                      style={{ background: '#059669', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer' }}
+                    >
+                      تعديل المرحلة
+                    </button>
+                  </div>
+
+                  {/* 3. Grade Bulk (Scoped strictly under Stage to prevent overlaps!) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', padding: '6px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: '#1e293b' }}>3. الصف:</span>
+                    <select
+                      value={bulkGradeId}
+                      onChange={e => setBulkGradeId(e.target.value)}
+                      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 700, background: '#fff' }}
+                    >
+                      <option value="">-- اختر الصف (حسب المرحلة) --</option>
+                      {(bulkStageId
+                        ? importMetadata.grades.filter(gr => String(gr.stageId) === String(bulkStageId))
+                        : importMetadata.grades
+                      ).map(grd => (
+                        <option key={grd.id} value={grd.id}>{grd.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkGrade}
+                      disabled={!bulkGradeId}
+                      style={{ background: '#7c3aed', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer' }}
+                    >
+                      تعديل الصف للمجموعة
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            )}
+
             <div className="validation-table-wrap">
               <table className="validation-table">
                 <thead>
@@ -611,6 +830,11 @@ export default function StudentImport({ onBack, activeSectionId }) {
               <button className="btn-secondary-import" onClick={() => { setError(''); setStep(2); }}>
                 <ChevronRight size={16} /> تعديل المطابقة
               </button>
+              {validSummary.errors > 0 && (
+                <button className="btn-secondary-import" onClick={exportFailedRowsToExcel} style={{ borderColor: '#ef4444', color: '#ef4444' }}>
+                  <Download size={16} /> تصدير السجلات المرفوضة (Excel)
+                </button>
+              )}
               <button className="btn-primary-import"
                 onClick={handleExecuteImport}
                 disabled={loading || validSummary.valid === 0}>
@@ -690,6 +914,11 @@ export default function StudentImport({ onBack, activeSectionId }) {
               <button className="btn-secondary-import" onClick={reset}>
                 <RotateCcw size={16} /> استيراد ملف آخر
               </button>
+              {importResults.summary.failed > 0 && (
+                <button className="btn-secondary-import" onClick={exportFailedRowsToExcel} style={{ borderColor: '#ef4444', color: '#ef4444' }}>
+                  <Download size={16} /> تصدير الأخطاء (Excel)
+                </button>
+              )}
               <button className="btn-primary-import" onClick={onBack}>
                 <Users size={16} /> العودة لقائمة الطلاب
               </button>
