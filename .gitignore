@@ -1,7 +1,6 @@
 node_modules/
 backend/node_modules/
 frontend/node_modules/
-build/
 dist/
 .env
 .DS_Store
@@ -9,3 +8,10 @@ dist/
 test_out.txt
 scratch/
 frontend/vite.config.js.timestamp-*.mjs
+# Allow build scripts (installer NSH + license) but ignore compiled output
+build/win-unpacked/
+build/linux-unpacked/
+build/mac/
+build/*.exe
+build/*.AppImage
+build/*.deb

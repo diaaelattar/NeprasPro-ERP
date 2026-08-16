@@ -271,11 +271,7 @@ function App() {
         if (data.schoolName) setSchoolName(data.schoolName);
         if (data.logoUrl) setSchoolLogo(data.logoUrl);
         
-        if (data.databaseConfigured && !data.initialized) {
-          setStep(2);
-          setIsLoggedIn(false);
-          setCurrentUser(null);
-        } else if (!data.databaseConfigured) {
+        if (!data.initialized) {
           setStep(1);
           setIsLoggedIn(false);
           setCurrentUser(null);
@@ -361,8 +357,8 @@ function App() {
     setWizardLoading(true);
     setWizardError('');
 
-    if (!schoolForm.schoolName || !schoolForm.schoolName.trim() || !configuredSections || !configuredSections.length) {
-      setWizardError('اسم المدرسة والأقسام المقررة حقول إيجابية ملزمة.');
+    if (!schoolForm.schoolName || !schoolForm.schoolName.trim() || !schoolForm.schoolCode) {
+      setWizardError('يرجى إدخال اسم المدرسة والكود الوزاري.');
       setWizardLoading(false);
       return;
     }
@@ -708,11 +704,12 @@ function App() {
         {/* Sidebar */}
         <aside className="dashboard-sidebar">
           <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {schoolLogo ? (
-              <img src={schoolLogo} alt="Logo" style={{ width: 28, height: 28, objectFit: 'contain', borderRadius: 4 }} />
-            ) : (
-              <Layers size={28} />
-            )}
+            <img 
+              src={schoolLogo || '/app-logo.png'} 
+              alt="Logo" 
+              style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6 }} 
+              onError={(e) => { e.currentTarget.src = '/app-logo.png'; }}
+            />
             <span>نبراس برو ERP</span>
           </div>
           <p className="school-tagline">{schoolName}</p>
@@ -1385,7 +1382,7 @@ function App() {
     );
   }
 
-  // --- SETUP WIZARD SCREENS ---
+  // --- SETUP WIZARD SCREENS (3-STEP STREAMLINED) ---
   return (
     <div className="app-container">
       {/* Glow ornaments */}
@@ -1393,125 +1390,41 @@ function App() {
       <div className="glow-effect bottom-right"></div>
 
       <div className="glass-panel main-card">
-        {/* Progress header */}
-        <div className="wizard-progress">
-          <div className={`step-dot ${step >= 1 ? 'active' : ''}`} title="قاعدة البيانات">1</div>
-          <div className="step-line"></div>
-          <div className={`step-dot ${step >= 2 ? 'active' : ''}`} title="بيانات المدرسة">2</div>
-          <div className="step-line"></div>
-          <div className={`step-dot ${step >= 3 ? 'active' : ''}`} title="المراحل والصفوف">3</div>
-          <div className="step-line"></div>
-          <div className={`step-dot ${step >= 4 ? 'active' : ''}`} title="اللغة الثانية">4</div>
-          <div className="step-line"></div>
-          <div className={`step-dot ${step >= 5 ? 'active' : ''}`} title="حساب المدير">5</div>
+        {/* Official Brand Logo */}
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <img 
+            src="/app-logo.png" 
+            alt="نبراس برو ERP" 
+            style={{ width: 72, height: 72, objectFit: 'contain', margin: '0 auto 8px', display: 'block' }} 
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+          <h1 style={{ fontSize: 20, fontWeight: 900, color: '#1e3a8a', margin: '0 0 4px' }}>
+            منظومة نبراس برو لإدارة المدارس والكنترول
+          </h1>
+          <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>معالج التأسيس الأولي للمؤسسة التعليمية</p>
         </div>
+
+        {/* 3-Step Progress Header */}
+        {step <= 3 && (
+          <div className="wizard-progress" style={{ maxWidth: 460, margin: '0 auto 24px' }}>
+            <div className={`step-dot ${step >= 1 ? 'active' : ''}`} title="بيانات المؤسسة">1</div>
+            <div className="step-line"></div>
+            <div className={`step-dot ${step >= 2 ? 'active' : ''}`} title="حساب المشرف العام">2</div>
+            <div className="step-line"></div>
+            <div className={`step-dot ${step >= 3 ? 'active' : ''}`} title="الترخيص والتفعيل">3</div>
+          </div>
+        )}
 
         {wizardError && <div className="alert alert-danger text-right">{wizardError}</div>}
         {wizardSuccess && <div className="alert alert-success text-right">{wizardSuccess}</div>}
 
-        {/* STEP 1: DATABASE TYPE SELECTION */}
+        {/* STEP 1: GENERAL SCHOOL INFO */}
         {step === 1 && (
           <div>
             <div className="step-header text-right">
-              <Database size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
-              <h2>الخطوة 1: اختر نمط قاعدة البيانات</h2>
-              <p>اختر الطريقة المناسبة لتخزين بيانات منظومتك حسب حجم واحتياجات مؤسستك.</p>
-            </div>
-
-            {/* Two-option cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 25 }}>
-              {/* SQLite Card */}
-              <div 
-                className="section-config-box"
-                onClick={() => setDbTypeChoice('sqlite')}
-                style={{ 
-                  cursor: 'pointer', 
-                  borderColor: dbTypeChoice === 'sqlite' ? 'var(--primary)' : 'var(--border-color)',
-                  boxShadow: dbTypeChoice === 'sqlite' ? '0 0 0 2px var(--primary-glow)' : 'none',
-                  transition: 'all 0.2s'
-                }}
-              >
-                <div style={{ fontSize: 32, marginBottom: 10 }}>💾</div>
-                <h3 style={{ color: 'var(--text-primary)', marginBottom: 8, fontSize: 16 }}>مدمج (SQLite)</h3>
-                <div style={{ display: 'inline-block', background: 'rgba(34,197,94,0.15)', color: '#4ade80', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, marginBottom: 10 }}>⭐ موصى به للبداية</div>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 12.5, lineHeight: 1.7 }}>
-                  قاعدة بيانات مدمجة داخل التطبيق.<br/>لا يحتاج تثبيت أي برنامج خارجي.<br/>مثالي للجهاز الواحد والشبكة المحلية الصغيرة.
-                </p>
-              </div>
-
-              {/* PostgreSQL Card */}
-              <div 
-                className="section-config-box"
-                onClick={() => setDbTypeChoice('postgres')}
-                style={{ 
-                  cursor: 'pointer',
-                  borderColor: dbTypeChoice === 'postgres' ? 'var(--primary)' : 'var(--border-color)',
-                  boxShadow: dbTypeChoice === 'postgres' ? '0 0 0 2px var(--primary-glow)' : 'none',
-                  transition: 'all 0.2s'
-                }}
-              >
-                <div style={{ fontSize: 32, marginBottom: 10 }}>🐘</div>
-                <h3 style={{ color: 'var(--text-primary)', marginBottom: 8, fontSize: 16 }}>شبكة (PostgreSQL)</h3>
-                <div style={{ display: 'inline-block', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, marginBottom: 10 }}>للشبكات الكبيرة</div>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 12.5, lineHeight: 1.7 }}>
-                  قاعدة بيانات مركزية على سيرفر.<br/>تتصل بها جميع أجهزة الشبكة.<br/>يحتاج تثبيت PostgreSQL مسبقاً.
-                </p>
-              </div>
-            </div>
-
-            {/* PostgreSQL form if chosen */}
-            {dbTypeChoice === 'postgres' && (
-              <form onSubmit={handleDbSubmit}>
-                <div className="form-grid" style={{ marginTop: 0 }}>
-                  <div className="form-group">
-                    <label>المضيف (Host)</label>
-                    <input type="text" value={dbForm.host} required onChange={(e) => setDbForm({ ...dbForm, host: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label>المنفذ (Port)</label>
-                    <input type="text" value={dbForm.port} required onChange={(e) => setDbForm({ ...dbForm, port: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label>اسم المستخدم</label>
-                    <input type="text" value={dbForm.user} required onChange={(e) => setDbForm({ ...dbForm, user: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label>كلمة المرور</label>
-                    <input type="password" value={dbForm.password} onChange={(e) => setDbForm({ ...dbForm, password: e.target.value })} />
-                  </div>
-                  <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                    <label>اسم قاعدة البيانات</label>
-                    <input type="text" value={dbForm.database} required onChange={(e) => setDbForm({ ...dbForm, database: e.target.value })} />
-                  </div>
-                </div>
-                <div className="wizard-actions">
-                  <div />
-                  <button type="submit" className="btn-primary" disabled={wizardLoading}>
-                    {wizardLoading ? 'جاري الاتصال...' : 'اتصال وتهيئة PostgreSQL'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* SQLite action */}
-            {dbTypeChoice === 'sqlite' && (
-              <div className="wizard-actions">
-                <div />
-                <button className="btn-primary" disabled={wizardLoading} onClick={handleSQLiteInit} style={{ fontSize: 15, padding: '14px 28px' }}>
-                  {wizardLoading ? 'جاري التهيئة...' : '⚡ تفعيل فوري بدون إعداد'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* STEP 2: GENERAL SCHOOL INFO */}
-        {step === 2 && (
-          <div>
-            <div className="step-header text-right">
               <Settings size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
-              <h2>الخطوة 2: معلومات المؤسسة التعليمية</h2>
-              <p>يرجى إدخال البيانات المعتمدة والرموز الوزارية لترويس الشهادات الرسمية.</p>
+              <h2>الخطوة 1: معلومات المؤسسة التعليمية</h2>
+              <p>يرجى إدخال البيانات المعتمدة والرموز الوزارية لترويس الشهادات الرسمية والتقارير.</p>
             </div>
 
             <div className="form-grid">
@@ -1552,7 +1465,7 @@ function App() {
                   <option value="">اختر المحافظة...</option>
                   {['القاهرة','الجيزة','الإسكندرية','الدقهلية','البحيرة','الفيوم','الغربية','الإسماعيلية',
                     'المنوفية','المنيا','القليوبية','السويس','الشرقية','أسوان','أسيوط','بني سويف','بورسعيد',
-                    'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج','الأقصر'
+                    'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج'
                   ].filter((v, i, a) => a.indexOf(v) === i).map(g => (
                     <option key={g} value={g}>{g}</option>
                   ))}
@@ -1609,7 +1522,7 @@ function App() {
                   onChange={(e) => setStartYearInput(parseInt(e.target.value) || 2026)}
                 />
                 <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 800, marginTop: 4, display: 'block' }}>
-                  📅 العام الدراسي الحالي: {startYearInput} / {startYearInput + 1} (من 01-09-{startYearInput} إلى 31-08-{startYearInput + 1})
+                  📅 العام الدراسي: {startYearInput} / {startYearInput + 1} (من 01-09-{startYearInput} إلى 31-08-{startYearInput + 1})
                 </span>
               </div>
 
@@ -1626,260 +1539,53 @@ function App() {
                 </select>
               </div>
 
+              <div className="form-group">
+                <label>رقم هاتف المدرسة (اختياري)</label>
+                <input 
+                  type="text" 
+                  value={schoolForm.phone} 
+                  placeholder="022..." 
+                  onChange={(e) => setSchoolForm({ ...schoolForm, phone: e.target.value })} 
+                />
+              </div>
+
+              <div className="form-group">
+                <label>عنوان المدرسة (اختياري)</label>
+                <input 
+                  type="text" 
+                  value={schoolForm.address} 
+                  placeholder="الشارع، الحي، المحافظة" 
+                  onChange={(e) => setSchoolForm({ ...schoolForm, address: e.target.value })} 
+                />
+              </div>
             </div>
 
-
             <div className="wizard-actions">
-              <button className="btn-secondary" onClick={() => setStep(1)}>
-                <ArrowLeft size={16} />
-                <span>رجوع</span>
-              </button>
+              <div />
               <button 
                 className="btn-primary" 
                 disabled={!schoolForm.schoolCode || !schoolForm.schoolName}
-                onClick={() => setStep(3)}
+                onClick={() => setStep(2)}
               >
-                <span>التالي</span>
+                <span>الانتقال لحساب المشرف العام</span>
                 <ArrowRight size={16} />
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 3: MASTER MULTI-SECTION ARCHITECTURE BUILDER */}
-        {step === 3 && (
-          <div>
-            <div className="step-header text-right">
-              <Layers size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
-              <h2>الخطوة 3: هيكلة الأقسام ونوعية التعليم والمراحل والصفوف</h2>
-              <p>حدد أقسام المؤسسة ونوعية التعليم بكل قسم، ثم اختر المراحل والصفوف التابعة لكل مرحلة.</p>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              {configuredSections.map((sec, secIdx) => (
-                <div key={secIdx} style={{
-                  background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '2px solid #cbd5e1',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.05)', position: 'relative'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid #e2e8f0', paddingBottom: 10 }}>
-                    <h3 style={{ margin: 0, fontWeight: 900, color: '#1e3a8a', fontSize: 16 }}>
-                      📌 القسم الرقم ({secIdx + 1})
-                    </h3>
-                    {configuredSections.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setConfiguredSections(prev => prev.filter((_, i) => i !== secIdx))}
-                        style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', padding: '4px 10px', borderRadius: '6px', fontWeight: 800, cursor: 'pointer', fontSize: 12 }}
-                      >
-                        🗑️ حذف هذا القسم
-                      </button>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                    <div>
-                      <label style={{ display: 'block', fontWeight: 800, marginBottom: 6, fontSize: 13 }}>اختيار القسم (من المعجم المرجعي)</label>
-                      <select
-                        value={sec.sectionMasterId}
-                        onChange={e => {
-                          const val = parseInt(e.target.value);
-                          setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionMasterId: val } : s));
-                        }}
-                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontWeight: 800 }}
-                      >
-                        {masterLookups.sections.map(s => (
-                          <option key={s.id} value={s.id}>{s.name_ar}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontWeight: 800, marginBottom: 6, fontSize: 13 }}>تحديد نوعية التعليم بالقسم</label>
-                      <select
-                        value={sec.educationTypeId}
-                        onChange={e => {
-                          const val = parseInt(e.target.value);
-                          setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, educationTypeId: val } : s));
-                        }}
-                        style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #94a3b8', fontWeight: 800 }}
-                      >
-                        {masterLookups.educationTypes.map(t => (
-                          <option key={t.id} value={t.id}>{t.name_ar}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Stages and Grades for this section */}
-                  <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontWeight: 900, color: '#0f172a', fontSize: 14 }}>
-                      🏫 المراحل والصفوف المتاحة بالقسم:
-                    </h4>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                      {masterLookups.stages.map(stg => {
-                        const stgConfig = sec.stages.find(s => s.stageMasterId === stg.id);
-                        const isStageSelected = !!stgConfig;
-                        const stageGrades = masterLookups.grades.filter(g => g.stage_code === stg.code);
-
-                        return (
-                          <div key={stg.id} style={{ padding: '10px', borderRadius: '8px', background: isStageSelected ? '#f0f9ff' : '#f8fafc', border: isStageSelected ? '1px solid #7dd3fc' : '1px dashed #cbd5e1' }}>
-                            <label className="checkbox-label" style={{ fontWeight: 800, fontSize: 14, color: isStageSelected ? '#0369a1' : '#475569' }}>
-                              <input
-                                type="checkbox"
-                                checked={isStageSelected}
-                                onChange={e => {
-                                  if (e.target.checked) {
-                                    // Add stage with all its specific grades selected by default
-                                    const defaultGrades = stageGrades.map(g => g.id);
-                                    setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? {
-                                      ...s,
-                                      stages: [...s.stages, { stageMasterId: stg.id, grades: defaultGrades }]
-                                    } : s));
-                                  } else {
-                                    // Remove stage
-                                    setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? {
-                                      ...s,
-                                      stages: s.stages.filter(st => st.stageMasterId !== stg.id)
-                                    } : s));
-                                  }
-                                }}
-                              />
-                              <span>مرحلة ({stg.name_ar})</span>
-                            </label>
-
-                            {isStageSelected && (
-                              <div style={{ marginTop: 10, marginRight: 24, display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                                {stageGrades.map(grd => {
-                                  const isGradeSelected = stgConfig.grades.includes(grd.id);
-                                  return (
-                                    <label key={grd.id} className="checkbox-label" style={{ fontSize: 12.5, fontWeight: 700 }}>
-                                      <input
-                                        type="checkbox"
-                                        checked={isGradeSelected}
-                                        onChange={e => {
-                                          const newGrades = e.target.checked
-                                            ? [...stgConfig.grades, grd.id]
-                                            : stgConfig.grades.filter(gId => gId !== grd.id);
-
-                                          setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? {
-                                            ...s,
-                                            stages: s.stages.map(st => st.stageMasterId === stg.id ? { ...st, grades: newGrades } : st)
-                                          } : s));
-                                        }}
-                                      />
-                                      <span>{grd.name_ar}</span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <button
-                type="button"
-                onClick={() => {
-                  setConfiguredSections(prev => [
-                    ...prev,
-                    {
-                      sectionMasterId: prev.length < masterLookups.sections.length ? masterLookups.sections[prev.length].id : 1,
-                      educationTypeId: 1,
-                      stages: [{ stageMasterId: 3, grades: [1, 2, 3, 4, 5, 6] }]
-                    }
-                  ]);
-                }}
-                style={{
-                  background: '#047857', color: '#fff', padding: '12px 20px', borderRadius: '8px', border: 'none',
-                  fontWeight: 900, fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                }}
-              >
-                ➕ إضافة قسم آخر للمؤسسة (قسم لغات / دولي...)
-              </button>
-            </div>
-
-            <div className="wizard-actions" style={{ marginTop: 24 }}>
-              <button className="btn-secondary" onClick={() => setStep(2)}>
-                <ArrowLeft size={16} />
-                <span>رجوع</span>
-              </button>
-              <button 
-                className="btn-primary" 
-                disabled={configuredSections.length === 0}
-                onClick={() => setStep(4)}
-              >
-                <span>التالي</span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 4: SECOND LANGUAGE */}
-        {step === 4 && (
-          <div>
-            <div className="step-header text-right">
-              <FileText size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
-              <h2>الخطوة 4: اللغة الأجنبية الثانية</h2>
-              <p>اختر اللغة الثانية المعتمدة للمؤسسة. سيتم إدراج حقل مخصص ديناميكي للطلاب لتسجيل لغتهم تلقائياً.</p>
-            </div>
-
-            <div className="form-group text-right" style={{ maxWidth: 360, margin: '20px 0' }}>
-              <label style={{ color: 'var(--text-main)', fontWeight: 700, marginBottom: 8, display: 'block' }}>اختر اللغة الثانية الرئيسية</label>
-              <select 
-                value={secondLanguage}
-                onChange={(e) => setSecondLanguage(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  backgroundColor: '#ffffff',
-                  border: '2px solid var(--primary)',
-                  borderRadius: 6,
-                  color: '#0f172a',
-                  fontSize: '15px',
-                  fontWeight: 600,
-                  fontFamily: 'var(--font-family)',
-                  cursor: 'pointer'
-                }}
-              >
-                <option value="فرنسي" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>اللغة الفرنسية</option>
-                <option value="ألماني" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>اللغة الألمانية</option>
-                <option value="إيطالي" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>اللغة الإيطالية</option>
-                <option value="حسب اختيار الطالب" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>حسب اختيار الطالب (متعددة / اختياري)</option>
-                <option value="لا يوجد" style={{ color: '#0f172a', backgroundColor: '#ffffff' }}>لا يوجد لغة ثانية</option>
-              </select>
-            </div>
-
-            <div className="wizard-actions">
-              <button className="btn-secondary" onClick={() => setStep(3)}>
-                <ArrowLeft size={16} />
-                <span>رجوع</span>
-              </button>
-              <button className="btn-primary" onClick={() => setStep(5)}>
-                <span>التالي</span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 5: CREATING ADMINISTRATOR ACCOUNT */}
-        {step === 5 && (
+        {/* STEP 2: CREATING ADMINISTRATOR ACCOUNT */}
+        {step === 2 && (
           <div>
             <div className="step-header text-right">
               <UserPlus size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
-              <h2>الخطوة 3: حساب المسؤول الأول (Super Admin)</h2>
-              <p>تأسيس الحساب الرئيسي للمدير العام الذي يمتلك الصلاحية الكاملة لتوزيع المهام والأدوار.</p>
+              <h2>الخطوة 2: حساب المشرف العام (Super Admin)</h2>
+              <p>تأسيس الحساب الرئيسي للمدير العام الذي يمتلك الصلاحية الكاملة لتوزيع المهام وإدارة المنظومة.</p>
             </div>
 
             <div className="form-grid">
               <div className="form-group">
-                <label>اسم المستخدم (الدخول)</label>
+                <label>اسم المستخدم للدخول</label>
                 <input 
                   type="text" 
                   value={adminForm.username} 
@@ -1890,7 +1596,7 @@ function App() {
               </div>
 
               <div className="form-group">
-                <label>الاسم الكامل باللغة العربية</label>
+                <label>الاسم الكامل للمشرف باللغة العربية</label>
                 <input 
                   type="text" 
                   value={adminForm.fullName} 
@@ -1901,7 +1607,7 @@ function App() {
               </div>
 
               <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                <label>الرقم القومي (الافتراضي: admin)</label>
+                <label>الرقم القومي للمشرف (الافتراضي: admin أو 14 رقماً)</label>
                 <input 
                   type="text" 
                   value={adminForm.nationalId} 
@@ -1933,36 +1639,80 @@ function App() {
             </div>
 
             <div className="wizard-actions">
+              <button className="btn-secondary" onClick={() => setStep(1)}>
+                <ArrowLeft size={16} />
+                <span>رجوع</span>
+              </button>
+              <button 
+                className="btn-primary" 
+                disabled={!adminForm.username || !adminForm.fullName || !adminForm.password}
+                onClick={() => setStep(3)}
+              >
+                <span>الانتقال للترخيص والاعتماد</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: LICENSE & ACTIVATION */}
+        {step === 3 && (
+          <div>
+            <div className="step-header text-right">
+              <ShieldCheck size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
+              <h2>الخطوة 3: مراجعة البيانات والاعتماد وتفعيل المنظومة</h2>
+              <p>مراجعة الملخص النهائي واعتماد تفعيل المنظومة للبدء الفوري.</p>
+            </div>
+
+            {/* Summary Box */}
+            <div style={{ background: '#f8fafc', padding: '18px 20px', borderRadius: 10, border: '1px solid #cbd5e1', marginBottom: 20 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 900, color: '#1e3a8a', margin: '0 0 12px' }}>📋 ملخص بيانات التأسيس المعتمدة:</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px 16px', fontSize: 13.5 }}>
+                <div><strong>المدرسة:</strong> {schoolForm.schoolName}</div>
+                <div><strong>الكود الوزاري:</strong> {schoolForm.schoolCode}</div>
+                <div><strong>المحافظة والإدارة:</strong> {schoolForm.governorate} - {schoolForm.directorate || 'غير محدد'}</div>
+                <div><strong>العام الدراسي:</strong> {startYearInput} / {startYearInput + 1}</div>
+                <div><strong>المشرف العام:</strong> {adminForm.fullName} ({adminForm.username})</div>
+                <div><strong>قاعدة البيانات:</strong> SQLite مدمجة مشفرة وآمنة</div>
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(37,99,235,0.06)', border: '1px solid rgba(37,99,235,0.2)', padding: '14px 18px', borderRadius: 8, marginBottom: 24, fontSize: 13, color: '#1e40af', lineHeight: 1.7 }}>
+              💡 <strong>ملاحظة هامة:</strong> المراحل والصفوف الدراسية واللغات والفصول يتم إدارتها وتخصيصها وتعديلها بالكامل من <strong>داخل لوحة الإعدادات</strong> بعد تسجيل الدخول.
+            </div>
+
+            <div className="wizard-actions">
               <button className="btn-secondary" onClick={() => setStep(2)}>
                 <ArrowLeft size={16} />
                 <span>رجوع</span>
               </button>
               <button 
                 className="btn-primary" 
-                disabled={wizardLoading || !adminForm.username || !adminForm.fullName || !adminForm.password}
+                disabled={wizardLoading}
                 onClick={handleWizardSubmit}
+                style={{ fontSize: 15, padding: '12px 28px', background: '#16a34a' }}
               >
-                {wizardLoading ? 'جاري التأسيس وحفظ البنية...' : 'إتمام وتفعيل النظام'}
+                {wizardLoading ? 'جاري التأسيس والاعتماد...' : '⚡ اعتماد وتفعيل المنظومة وبدء التشغيل'}
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 6: SUCCESS AND LAUNCH */}
+        {/* STEP 6 / SUCCESS AND LAUNCH */}
         {step === 6 && (
           <div className="text-center" style={{ padding: '20px 0' }}>
             <CheckCircle2 size={70} style={{ color: 'var(--success)', marginBottom: 20 }} className="pulse-animation" />
             <h2>تهانينا! تم تفعيل نظام نبراس برو بنجاح!</h2>
             <p style={{ color: 'var(--text-secondary)', marginTop: 10, marginBottom: 30 }}>
-              تم إنشاء قاعدة البيانات والهياكل والمراحل والصفوف الدراسية وحساب المسؤول الرئيسي لـ: <br />
-              <strong>{schoolName}</strong>
+              تم تأسيس قاعدة البيانات وحفظ الهوية المعتمدة وإنشاء حساب المشرف العام لـ: <br />
+              <strong style={{ fontSize: 16, color: '#1e3a8a' }}>{schoolName}</strong>
             </p>
 
-            <button className="btn-primary" style={{ padding: '12px 30px' }} onClick={() => {
+            <button className="btn-primary" style={{ padding: '12px 30px', fontSize: 15 }} onClick={() => {
               setInitialized(true);
-              setIsLoggedIn(true); // Auto logs in as admin for preview
+              setIsLoggedIn(false); // Transitions straight to LoginGateway
             }}>
-              الدخول للوحة التحكم
+              الانتقال لبوابة الدخول الموحدة
             </button>
           </div>
         )}

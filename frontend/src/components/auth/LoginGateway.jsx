@@ -17,7 +17,33 @@ const DOMAINS = [
     desc: 'سجلات وقوائم الطلاب، تسكين الفصول، شهادات القيد، والتحويلات',
     color: '#1a3c6e',
     accent: '#3b82f6',
-    requireStage: false
+    requireStage: false,
+    isLocked: false
+  },
+  {
+    key: 'admin',
+    title: 'الإدارة العامة والتحكم',
+    icon: '👑',
+    iconImg: '/assets/icons/domains/admin.png',
+    badge: 'الإدارة والضبط',
+    desc: 'الرؤية الشاملة للمؤسسة، إعدادات المراحل والفصول، إدارة الصلاحيات، والنسخ الاحتياطي',
+    color: '#0f172a',
+    accent: '#6366f1',
+    requireStage: false,
+    isLocked: false
+  },
+  {
+    key: 'control',
+    title: 'الكنترول والامتحانات',
+    icon: '📋',
+    iconImg: '/assets/icons/domains/control.png',
+    badge: 'الامتحانات والشهادات',
+    desc: 'أرقام الجلوس، اللجان، الترقيم السري، رصد الدرجات، الشيتات، وطباعة الشهادات',
+    color: '#831843',
+    accent: '#ec4899',
+    requireStage: true,
+    isLocked: true,
+    lockedReason: 'قسم الكنترول والامتحانات مغلق في هذه النسخة للجميع بما فيهم المدير.'
   },
   {
     key: 'staff',
@@ -29,18 +55,9 @@ const DOMAINS = [
     color: '#065f46',
     accent: '#10b981',
     requireStage: false,
-    defaultAll: true
-  },
-  {
-    key: 'control',
-    title: 'الكنترول والامتحانات',
-    icon: '📋',
-    iconImg: '/assets/icons/domains/control.png',
-    badge: 'الامتحانات والشهادات',
-    desc: 'أرقام الجلوس، اللجان، الترقيم السري، رصد الدرجات، الشيتات، وطباعة الشهادات',
-    color: '#831843',
-    accent: '#ec4899',
-    requireStage: true
+    defaultAll: true,
+    isLocked: true,
+    lockedReason: 'قسم شؤون العاملين مغلق في هذه النسخة للجميع بما فيهم المدير.'
   },
   {
     key: 'finance',
@@ -51,18 +68,9 @@ const DOMAINS = [
     desc: 'تحصيل المصروفات الدراسية، أقساط الباص والكتب، أذونات الصرف، وسندات القبض',
     color: '#78350f',
     accent: '#f59e0b',
-    requireStage: false
-  },
-  {
-    key: 'admin',
-    title: 'الإدارة العامة والتحكم',
-    icon: '👑',
-    iconImg: '/assets/icons/domains/admin.png',
-    badge: 'الإدارة والضبط',
-    desc: 'الرؤية الشاملة للمؤسسة، إعدادات المراحل والفصول، إدارة الصلاحيات، والنسخ الاحتياطي',
-    color: '#0f172a',
-    accent: '#6366f1',
-    requireStage: false
+    requireStage: false,
+    isLocked: true,
+    lockedReason: 'قسم الحسابات والماليات مغلق في هذه النسخة للجميع بما فيهم المدير.'
   }
 ];
 
@@ -101,7 +109,15 @@ const LoginGateway = ({
       .finally(() => setLoadingStructure(false));
   }, []);
 
+  const [lockedModalInfo, setLockedModalInfo] = useState(null);
+
   const handleSelectDomain = (domainKey, adminDirectTab = null) => {
+    const domObj = DOMAINS.find(d => d.key === domainKey);
+    if (domObj && domObj.isLocked) {
+      setLockedModalInfo(domObj);
+      return;
+    }
+
     setSelectedDomain(domainKey);
     setTargetAdminTab(adminDirectTab);
 
@@ -177,11 +193,12 @@ const LoginGateway = ({
           <div className="gateway-header-top">
             <div className="gateway-brand-info">
               <div className="gateway-logo-wrapper">
-                {schoolLogo ? (
-                  <img src={schoolLogo} alt="Logo" className="gateway-school-logo" />
-                ) : (
-                  <div className="gateway-default-logo">🏫</div>
-                )}
+                <img 
+                  src={schoolLogo || '/app-logo.png'} 
+                  alt="Logo" 
+                  className="gateway-school-logo" 
+                  onError={(e) => { e.currentTarget.src = '/app-logo.png'; }}
+                />
               </div>
               <div>
                 <h1 className="gateway-school-name">{schoolName || 'منظومة نبراس برو التعليمية'}</h1>
@@ -219,25 +236,44 @@ const LoginGateway = ({
               {DOMAINS.map(dom => (
                 <div 
                   key={dom.key}
-                  className="gateway-domain-card"
+                  className={`gateway-domain-card ${dom.isLocked ? 'is-locked-card' : ''}`}
                   onClick={() => handleSelectDomain(dom.key)}
-                  style={{ '--accent-color': dom.accent }}
+                  style={{ 
+                    '--accent-color': dom.accent,
+                    opacity: dom.isLocked ? 0.78 : 1,
+                    position: 'relative'
+                  }}
                 >
                   <div className="domain-header">
                     <span className="domain-icon">
                       {dom.iconImg ? (
-                        <img src={dom.iconImg} alt={dom.title} style={{ width: 44, height: 44, objectFit: 'contain', filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.25))' }} />
+                        <img src={dom.iconImg} alt={dom.title} style={{ width: 44, height: 44, objectFit: 'contain', filter: dom.isLocked ? 'grayscale(40%) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' : 'drop-shadow(0 4px 6px rgba(0,0,0,0.25))' }} />
                       ) : (
                         dom.icon
                       )}
                     </span>
-                    <span className="domain-badge">{dom.badge}</span>
+                    {dom.isLocked ? (
+                      <span className="domain-badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', fontWeight: 800 }}>
+                        🔒 مغلق في هذه النسخة
+                      </span>
+                    ) : (
+                      <span className="domain-badge">{dom.badge}</span>
+                    )}
                   </div>
                   <h3 className="domain-title">{dom.title}</h3>
                   <p className="domain-description">{dom.desc}</p>
-                  <div className="domain-card-action">
-                    <span>دخول وتخصيص النطاق</span>
-                    <ArrowLeft size={15} />
+                  <div className="domain-card-action" style={{ color: dom.isLocked ? '#92400e' : undefined }}>
+                    {dom.isLocked ? (
+                      <>
+                        <span>🔒 محمي ومغلق للجميع</span>
+                        <Lock size={15} />
+                      </>
+                    ) : (
+                      <>
+                        <span>دخول وتخصيص النطاق</span>
+                        <ArrowLeft size={15} />
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -403,6 +439,45 @@ const LoginGateway = ({
               </button>
             </div>
 
+          </div>
+        )}
+
+        {/* LOCKED MODULE NOTIFICATION MODAL */}
+        {lockedModalInfo && (
+          <div className="modal-overlay" onClick={() => setLockedModalInfo(null)}>
+            <div className="modal-card glass-panel text-right" onClick={e => e.stopPropagation()} style={{ maxWidth: 460, border: '2px solid #f59e0b', background: '#ffffff' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+                  🔒
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, color: '#92400e', fontWeight: 900 }}>
+                    القسم مغلق ومحمي في هذه النسخة
+                  </h3>
+                  <span style={{ fontSize: 12, color: '#78350f' }}>{lockedModalInfo.title}</span>
+                </div>
+              </div>
+
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '14px 16px', borderRadius: 8, fontSize: 13.5, color: '#92400e', lineHeight: 1.8, marginBottom: 20 }}>
+                {lockedModalInfo.lockedReason || 'هذا القسم مغلق في هذه النسخة للجميع بما فيهم المدير العام.'}<br />
+                ✨ <strong>المنظومة مفعلة حالياً بالكامل لـ:</strong>
+                <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+                  <li>شؤون الطلاب والقبول وسجلات القيد وسجل 41.</li>
+                  <li>الإدارة العامة والتحكم وإعدادات الهياكل والنسخ الاحتياطي.</li>
+                </ul>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button 
+                  type="button" 
+                  className="btn-primary" 
+                  onClick={() => setLockedModalInfo(null)}
+                  style={{ padding: '10px 24px', fontSize: 13, fontWeight: 800 }}
+                >
+                  فهمت ذلك
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

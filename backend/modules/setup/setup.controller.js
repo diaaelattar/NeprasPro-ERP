@@ -31,10 +31,10 @@ const getStatus = async (req, res) => {
         schoolName: row.school_name || row.schoolName,
         governorate: row.governorate || '',
         directorate: row.directorate || '',
-        logoUrl: row.logo_url || row.logoUrl || null,
+        logoUrl: row.logo_url || row.logoUrl || '/app-logo.png',
       });
     }
-    return res.json({ success: true, databaseConfigured: true, initialized: false, dbMode: db.getMode() });
+    return res.json({ success: true, databaseConfigured: true, initialized: false, dbMode: db.getMode(), logoUrl: '/app-logo.png' });
   } catch (err) {
     console.error('[getStatus Error]', err.message);
     return res.json({ success: true, databaseConfigured: true, initialized: false, error: err.message });
@@ -559,19 +559,20 @@ const resetInstitution = async (req, res) => {
         }
       }
 
-      // Auto Backup before Wipe
+      // Mandatory Auto Backup before Wipe
+      const os = require('os');
       try {
-        const homeDir = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\diaa_elattar';
+        const homeDir = process.env.USERPROFILE || process.env.HOME || os.homedir();
         const dbPath = path.join(homeDir, '.nepraspro', 'nepraspro.db');
         const backupDir = path.join(homeDir, '.nepraspro', 'backups');
         if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
         if (fs.existsSync(dbPath)) {
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          fs.copyFileSync(dbPath, path.join(backupDir, `auto_backup_before_wipe_${timestamp}.sqlite`));
-          console.log('[Wizard Reset] Auto-backup created successfully.');
+          fs.copyFileSync(dbPath, path.join(backupDir, `mandatory_backup_before_wipe_${timestamp}.sqlite`));
+          console.log('[Factory Reset] Mandatory Auto-backup created successfully.');
         }
       } catch (backupErr) {
-        console.warn('[Wizard Reset Warning] Auto-backup skipped:', backupErr.message);
+        console.warn('[Factory Reset Warning] Auto-backup skipped:', backupErr.message);
       }
 
       db.runTransaction(() => {
