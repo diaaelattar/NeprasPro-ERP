@@ -13,11 +13,13 @@
     "dev": "concurrently \"npm run react:dev\" \"npm run backend:dev\" \"wait-on http://localhost:5173 && npm run electron:dev\"",
     "build": "npm run build --prefix frontend",
     "build:frontend": "npm run build --prefix frontend",
-    "dist": "npm run build:frontend && electron-builder",
+    "build:electron": "cross-env ELECTRON_BUILD=true npm run build --prefix frontend",
+    "dist": "npm run build:electron && electron-builder",
     "generate-key": "node scripts/generate_key.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
     "electron": "^28.2.0",
     "electron-builder": "^24.9.1",
     "pdf-parse": "^2.4.5",
@@ -59,7 +61,9 @@
       "shortcutName": "نبرأس برو - نظام إدارة المدارس",
       "runAfterFinish": true,
       "language": "1025",
-      "installerLanguages": ["1025"],
+      "installerLanguages": [
+        "1025"
+      ],
       "license": "build/license_ar.txt",
       "script": "build/installer.nsh",
       "installerHeader": "electron/icon.ico",
