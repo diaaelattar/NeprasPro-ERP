@@ -1,6 +1,7 @@
 const db = require('../../config/db');
 const bcrypt = require('bcryptjs');
 const { TextDecoder } = require('util');
+const { getSchoolMasterInfo } = require('../../utils/schoolHelper');
 
 // Decode sql.js getAsObject() rows — converts Uint8Array fields to UTF-8 strings
 const _td = new TextDecoder('utf-8');
@@ -231,12 +232,101 @@ const getPermissions = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const permissions = _all(sqliteDb, 'SELECT id, perm_key, perm_name_ar FROM permissions ORDER BY perm_key');
+    const permissions = _all(sqliteDb, 'SELECT id, perm_key, perm_name_ar, category FROM permissions ORDER BY category, id');
     return res.json({ success: true, permissions });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 };
+
+// PUT /api/settings/roles/:id/permissions
+const updateRolePermissions = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { id } = req.params;
+  const { permissionIds } = req.body;
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const role = _get(sqliteDb, 'SELECT id, role_name FROM roles WHERE id = ?', [id]);
+    if (!role) return res.status(404).json({ success: false, error: 'الدور الوظيفي غير موجود.' });
+
+    if (role.role_name === 'super_admin') {
+      return res.status(400).json({ success: false, error: 'لا يمكن تعديل صلاحيات المدير العام الكاملة.' });
+    }
+
+    db.runTransaction(() => {
+      sqliteDb.run('DELETE FROM role_permissions WHERE role_id = ?', [id]);
+      if (Array.isArray(permissionIds)) {
+        for (const pId of permissionIds) {
+          sqliteDb.run('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [id, pId]);
+        }
+      }
+    });
+
+    return res.json({ success: true, message: 'تم حفظ مصفوفة الصلاحيات بنجاح.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// POST /api/settings/roles
+const createRole = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { roleName, roleNameAr, description, permissionIds } = req.body;
+  if (!roleName || !roleNameAr) {
+    return res.status(400).json({ success: false, error: 'اسم ومسمى الدور مطلوبان.' });
+  }
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const cleanKey = roleName.trim().toLowerCase().replace(/\s+/g, '_');
+    const exists = _get(sqliteDb, 'SELECT id FROM roles WHERE role_name = ?', [cleanKey]);
+    if (exists) return res.status(400).json({ success: false, error: 'هذا الدور موجود بالفعل.' });
+
+    let newRoleId;
+    db.runTransaction(() => {
+      sqliteDb.run('INSERT INTO roles (role_name, role_name_ar, description) VALUES (?, ?, ?)', [cleanKey, roleNameAr.trim(), description || '']);
+      newRoleId = _lastId(sqliteDb);
+      if (Array.isArray(permissionIds)) {
+        for (const pId of permissionIds) {
+          sqliteDb.run('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [newRoleId, pId]);
+        }
+      }
+    });
+
+    return res.status(201).json({ success: true, message: 'تم إنشاء الدور الوظيفي بنجاح.', roleId: newRoleId });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// DELETE /api/settings/roles/:id
+const deleteRole = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { id } = req.params;
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const role = _get(sqliteDb, 'SELECT id, role_name FROM roles WHERE id = ?', [id]);
+    if (!role) return res.status(404).json({ success: false, error: 'الدور غير موجود.' });
+
+    if (['super_admin', 'data_entry', 'hr_officer', 'head_control', 'accountant', 'viewer'].includes(role.role_name)) {
+      return res.status(400).json({ success: false, error: 'لا يمكن حذف الأدوار القياسية الأساسية للنظام.' });
+    }
+
+    db.runTransaction(() => {
+      sqliteDb.run('DELETE FROM role_permissions WHERE role_id = ?', [id]);
+      sqliteDb.run('DELETE FROM user_roles WHERE role_id = ?', [id]);
+      sqliteDb.run('DELETE FROM roles WHERE id = ?', [id]);
+    });
+
+    return res.json({ success: true, message: 'تم حذف الدور الوظيفي بنجاح.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const { formatClassroomLabel, extractClassNumber } = require('../../utils/classroomFormatter');
 
 // GET /api/settings/classrooms
 const getClassrooms = async (req, res) => {
@@ -245,10 +335,15 @@ const getClassrooms = async (req, res) => {
   try {
     const sqliteDb = db.getSQLiteDb();
     let query = `
-      SELECT c.id, c.grade_id, c.academic_year_id, c.class_name, c.class_code, c.capacity,
-             g.grade_name_ar, ay.year_label
+      SELECT c.id, c.grade_id, c.academic_year_id, c.class_name, c.class_number, c.display_order, c.class_code, c.capacity,
+             g.grade_name_ar, g.grade_number, g.stage_id, st.section_id,
+             st.stage_name,
+             sec.name AS section_name, sec.type AS section_type,
+             ay.year_label
       FROM classes c
       JOIN grades_lookup g ON g.id = c.grade_id
+      LEFT JOIN stages_lookup st ON st.id = g.stage_id
+      LEFT JOIN sections sec ON sec.id = st.section_id
       JOIN academic_years ay ON ay.id = c.academic_year_id
       WHERE 1=1
     `;
@@ -261,13 +356,21 @@ const getClassrooms = async (req, res) => {
       query += ' AND c.academic_year_id = ?';
       params.push(academicYearId);
     }
-    query += ' ORDER BY CASE WHEN c.class_code IS NOT NULL AND c.class_code != "" THEN CAST(c.class_code AS INTEGER) ELSE c.id END ASC, c.id ASC';
+    query += ' ORDER BY COALESCE(c.class_number, CAST(c.class_name AS INTEGER), c.id) ASC, c.id ASC';
     const classrooms = _all(sqliteDb, query, params);
     
-    // For each classroom, we can also count current enrolled students
+    // For each classroom, calculate formatted_name and current enrolled students
     for (const c of classrooms) {
       const cnt = _get(sqliteDb, 'SELECT COUNT(*) as n FROM class_enrollments WHERE class_id = ?', [c.id])?.n || 0;
       c.enrolledCount = cnt;
+      c.formatted_name = formatClassroomLabel({
+        classNumber: c.class_number,
+        className: c.class_name,
+        gradeNumber: c.grade_number,
+        stageCode: c.stage_id,
+        stageName: c.stage_name,
+        sectionType: c.section_type
+      });
     }
     
     return res.json({ success: true, classrooms });
@@ -279,59 +382,83 @@ const getClassrooms = async (req, res) => {
 // POST /api/settings/classrooms
 const createClassroom = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
-  const { gradeId, academicYearId, className, classCode, capacity } = req.body;
-  if (!gradeId || !academicYearId || !className) {
-    return res.status(400).json({ success: false, error: 'الصف الدراسي، العام الدراسي، واسم الفصل حقول إلزامية.' });
+  const { gradeId, academicYearId, classNumber, className, classCode, capacity } = req.body;
+  if (!gradeId || !academicYearId) {
+    return res.status(400).json({ success: false, error: 'الصف الدراسي والعام الدراسي حقول إلزامية.' });
   }
   try {
     const sqliteDb = db.getSQLiteDb();
-    // Check unique constraint
-    const exists = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND class_name = ?', [gradeId, academicYearId, className]);
+    
+    // Find grade, stage, and section info
+    const grade = _get(sqliteDb, 'SELECT grade_number, stage_id FROM grades_lookup WHERE id = ?', [gradeId]);
+    const gradeNum = grade?.grade_number || 1;
+    const stage = grade ? _get(sqliteDb, 'SELECT stage_name, section_id FROM stages_lookup WHERE id = ?', [grade.stage_id]) : null;
+    const section = stage ? _get(sqliteDb, 'SELECT name, code, type FROM sections WHERE id = ?', [stage.section_id]) : null;
+
+    // Determine numeric classNumber
+    let num = parseInt(classNumber, 10);
+    if (!num || isNaN(num)) {
+      const existingClasses = _all(sqliteDb, 'SELECT class_number FROM classes WHERE grade_id = ? AND academic_year_id = ? ORDER BY class_number DESC', [gradeId, academicYearId]);
+      const maxNum = existingClasses && existingClasses.length > 0 ? Math.max(...existingClasses.map(c => c.class_number || 0)) : 0;
+      num = maxNum + 1;
+    }
+
+    // Determine standard class_name
+    let finalClassName = className ? String(className).trim() : '';
+    if (!finalClassName) {
+      finalClassName = formatClassroomLabel({
+        classNumber: num,
+        gradeNumber: gradeNum,
+        stageCode: grade?.stage_id,
+        stageName: stage?.stage_name,
+        sectionType: section?.type || section?.code
+      });
+    }
+
+    // Check unique constraint (by class_number or class_name)
+    const exists = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND (class_name = ? OR class_number = ?)', [gradeId, academicYearId, finalClassName, num]);
     if (exists) {
-      return res.status(400).json({ success: false, error: 'هذا الفصل مسجل بالفعل في هذا الصف لنفس العام الدراسي.' });
+      return res.status(400).json({ success: false, error: `الفصل رقم (${num}) أو الاسم (${finalClassName}) مسجل بالفعل في هذا الصف لنفس العام الدراسي.` });
+    }
+
+    let stageCode = 3;
+    if (stage) {
+      const sn = stage.stage_name || '';
+      if (sn.includes('تمهيدي'))        stageCode = 1;
+      else if (sn.includes('رياض') || sn.includes('حضانة')) stageCode = 2;
+      else if (sn.includes('ابتدائي')) stageCode = 3;
+      else if (sn.includes('إعدادي') || sn.includes('اعدادي')) stageCode = 4;
+      else if (sn.includes('ثانوي'))   stageCode = 5;
+    }
+
+    let secCode = 1;
+    if (section) {
+      const secName = section.name || '';
+      if (secName.includes('لغات') || section.code === 'languages') secCode = 2;
+      else if (secName.includes('دولي') || section.code === 'international') secCode = 3;
     }
 
     let finalClassCode = classCode;
-
     if (!finalClassCode) {
-      // Find grade info
-      const grade = _get(sqliteDb, 'SELECT grade_number, stage_id, section_id FROM grades_lookup WHERE id = ?', [gradeId]);
-      const gradeNum = grade?.grade_number || 1;
-      
-      const stage = grade ? _get(sqliteDb, 'SELECT stage_name FROM stages_lookup WHERE id = ?', [grade.stage_id]) : null;
-      let stageCode = 3;
-      if (stage) {
-        const sn = stage.stage_name || '';
-        if (sn.includes('تمهيدي'))        stageCode = 1;
-        else if (sn.includes('رياض'))     stageCode = 2;
-        else if (sn.includes('ابتدائي')) stageCode = 3;
-        else if (sn.includes('إعدادي') || sn.includes('اعدادي')) stageCode = 4;
-        else if (sn.includes('ثانوي'))   stageCode = 5;
-      }
-
-      const section = grade ? _get(sqliteDb, 'SELECT name, code FROM sections WHERE id = ?', [grade.section_id]) : null;
-      let secCode = 1;
-      if (section) {
-        const secName = section.name || '';
-        if (secName.includes('لغات') || section.code === 'languages') secCode = 2;
-        else if (secName.includes('دولي') || section.code === 'international') secCode = 3;
-      }
-
-      // Count existing classes for this grade and year to find next index
-      const existingClasses = _all(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
-      const nextIndex = (existingClasses ? existingClasses.length : 0) + 1;
-      const classNumStr = String(nextIndex).padStart(2, '0');
+      const classNumStr = String(num).padStart(2, '0');
       finalClassCode = `${secCode}${stageCode}${gradeNum}${classNumStr}`;
     }
 
     const safeCap = Math.min(49, Math.max(1, parseInt(capacity) || 40));
 
     sqliteDb.run(`
-      INSERT INTO classes (grade_id, academic_year_id, class_name, class_code, capacity)
-      VALUES (?, ?, ?, ?, ?)
-    `, [gradeId, academicYearId, className, finalClassCode, safeCap]);
+      INSERT INTO classes (grade_id, academic_year_id, class_name, class_number, display_order, class_code, capacity)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [gradeId, academicYearId, finalClassName, num, num, finalClassCode, safeCap]);
     const classroomId = _lastId(sqliteDb);
-    return res.status(201).json({ success: true, message: 'تم إضافة الفصل بنجاح.', classroomId, classCode: finalClassCode });
+    return res.status(201).json({
+      success: true,
+      message: `تم إضافة فصل (${finalClassName}) بنجاح.`,
+      classroomId,
+      classNumber: num,
+      className: finalClassName,
+      classCode: finalClassCode
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -341,17 +468,21 @@ const createClassroom = async (req, res) => {
 const updateClassroom = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   const { id } = req.params;
-  const { className, classCode, capacity } = req.body;
+  const { classNumber, className, classCode, capacity } = req.body;
   try {
     const sqliteDb = db.getSQLiteDb();
-    const classroom = _get(sqliteDb, 'SELECT id, grade_id, academic_year_id FROM classes WHERE id = ?', [id]);
+    const classroom = _get(sqliteDb, 'SELECT id, grade_id, academic_year_id, class_number, class_name FROM classes WHERE id = ?', [id]);
     if (!classroom) return res.status(404).json({ success: false, error: 'الفصل غير موجود.' });
 
-    // Check unique constraint if name changes
-    if (className) {
-      const exists = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND class_name = ? AND id != ?', [classroom.grade_id, classroom.academic_year_id, className, id]);
+    const newNum = classNumber ? parseInt(classNumber, 10) : classroom.class_number;
+
+    // Check unique constraint if name or number changes
+    if (className || classNumber) {
+      const exists = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND (class_name = ? OR class_number = ?) AND id != ?', [
+        classroom.grade_id, classroom.academic_year_id, className || classroom.class_name, newNum, id
+      ]);
       if (exists) {
-        return res.status(400).json({ success: false, error: 'هناك فصل آخر بنفس الاسم مسجل في هذا الصف.' });
+        return res.status(400).json({ success: false, error: 'هناك فصل آخر بنفس الرقم أو الاسم مسجل في هذا الصف.' });
       }
     }
 
@@ -359,11 +490,13 @@ const updateClassroom = async (req, res) => {
 
     sqliteDb.run(`
       UPDATE classes
-      SET class_name = COALESCE(?, class_name),
-          class_code = COALESCE(?, class_code),
-          capacity   = COALESCE(?, capacity)
+      SET class_name   = COALESCE(?, class_name),
+          class_number = COALESCE(?, class_number),
+          display_order= COALESCE(?, display_order),
+          class_code   = COALESCE(?, class_code),
+          capacity     = COALESCE(?, capacity)
       WHERE id = ?
-    `, [className || null, classCode || null, safeCap, id]);
+    `, [className || null, newNum, newNum, classCode || null, safeCap, id]);
 
     return res.json({ success: true, message: 'تم تحديث بيانات الفصل بنجاح.' });
   } catch (err) {
@@ -513,6 +646,7 @@ const bulkEnrollStudents = async (req, res) => {
         enrolledCount++;
       }
     });
+    db.flushSQLite();
 
     return res.json({ success: true, message: `تم توزيع ${enrolledCount} طالب بنجاح.`, enrolled: enrolledCount });
   } catch (err) {
@@ -526,7 +660,15 @@ const getAcademicYears = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const years = _all(sqliteDb, 'SELECT id, year_label, start_date, end_date, is_current FROM academic_years ORDER BY id DESC');
+    // جلب العام الدراسي الوحيد المعتمد والنشط بالنظام فقط
+    let years = _all(sqliteDb, 'SELECT id, year_label, start_date, end_date, is_current FROM academic_years WHERE is_current = 1 ORDER BY id DESC LIMIT 1');
+    if (!years || years.length === 0) {
+      years = _all(sqliteDb, 'SELECT id, year_label, start_date, end_date, is_current FROM academic_years ORDER BY id DESC LIMIT 1');
+      if (years && years.length > 0) {
+        sqliteDb.run('UPDATE academic_years SET is_current = 1 WHERE id = ?', [years[0].id]);
+        years[0].is_current = 1;
+      }
+    }
     return res.json({ success: true, academicYears: years });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -548,20 +690,29 @@ const createAcademicYear = async (req, res) => {
     }
 
     db.runTransaction(() => {
-      if (isCurrent) {
-        sqliteDb.run('UPDATE academic_years SET is_current = 0');
-      }
+      sqliteDb.run('UPDATE academic_years SET is_current = 0');
       sqliteDb.run(`
         INSERT INTO academic_years (year_label, start_date, end_date, is_current)
-        VALUES (?, ?, ?, ?)
-      `, [yearLabel, startDate, endDate, isCurrent ? 1 : 0]);
+        VALUES (?, ?, ?, 1)
+      `, [yearLabel, startDate, endDate]);
+      const yearId = _lastId(sqliteDb);
+
+      // تحديث النظام بالكامل على هذا العام الجديد المعتمد
+      sqliteDb.run('UPDATE students SET academic_year_id = ? WHERE is_deleted IS NULL OR is_deleted = 0', [yearId]);
+      sqliteDb.run('UPDATE classes SET academic_year_id = ?', [yearId]);
+      sqliteDb.run('UPDATE class_enrollments SET academic_year_id = ?', [yearId]);
+
+      // إزالة أي أعوام متداخلة أخرى
+      try {
+        sqliteDb.run('DELETE FROM academic_years WHERE id != ?', [yearId]);
+      } catch (_) {}
 
       sqliteDb.run(`
         INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
         VALUES ('academic_years', 'create_year', NULL, ?, 'admin')
       `, [`label:${yearLabel}`]);
     });
-    return res.status(201).json({ success: true, message: 'تم إضافة العام الدراسي بنجاح.' });
+    return res.status(201).json({ success: true, message: 'تم اعتماد العام الدراسي للنظام بالكامل بنجاح.' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -586,21 +737,29 @@ const updateAcademicYear = async (req, res) => {
     }
 
     db.runTransaction(() => {
-      if (isCurrent) {
-        sqliteDb.run('UPDATE academic_years SET is_current = 0');
-      }
+      sqliteDb.run('UPDATE academic_years SET is_current = 0');
       sqliteDb.run(`
         UPDATE academic_years
-        SET year_label = ?, start_date = ?, end_date = ?, is_current = ?
+        SET year_label = ?, start_date = ?, end_date = ?, is_current = 1
         WHERE id = ?
-      `, [yearLabel, startDate, endDate, isCurrent ? 1 : 0, id]);
+      `, [yearLabel, startDate, endDate, id]);
+
+      // تحديث كافة سجلات النظام والطلاب على هذا العام المحدث
+      sqliteDb.run('UPDATE students SET academic_year_id = ? WHERE is_deleted IS NULL OR is_deleted = 0', [id]);
+      sqliteDb.run('UPDATE classes SET academic_year_id = ?', [id]);
+      sqliteDb.run('UPDATE class_enrollments SET academic_year_id = ?', [id]);
+
+      // إزالة أي أعوام متداخلة أخرى
+      try {
+        sqliteDb.run('DELETE FROM academic_years WHERE id != ?', [id]);
+      } catch (_) {}
 
       sqliteDb.run(`
         INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
         VALUES ('academic_years', 'update_year', ?, ?, 'admin')
-      `, [`id:${id}`, `label:${yearLabel},current:${isCurrent ? 1 : 0}`]);
+      `, [`id:${id}`, `label:${yearLabel},current:1`]);
     });
-    return res.json({ success: true, message: 'تم تحديث العام الدراسي بنجاح.' });
+    return res.json({ success: true, message: 'تم تحديث واعتماد العام الدراسي للنظام بالكامل بنجاح.' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -616,31 +775,7 @@ const deleteAcademicYear = async (req, res) => {
     if (!year) return res.status(404).json({ success: false, error: 'العام الدراسي غير موجود.' });
 
     if (year.is_current === 1 || year.is_current === true) {
-      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي الحالي النشط.' });
-    }
-
-    // Check for enrolled students — cannot delete if students exist
-    const hasStudents = _get(sqliteDb, 'SELECT COUNT(*) as n FROM students WHERE academic_year_id = ?', [id])?.n || 0;
-    if (hasStudents > 0) {
-      return res.status(400).json({ success: false, error: `لا يمكن حذف العام الدراسي لوجود ${hasStudents} طالب مسجل فيه.` });
-    }
-
-    // Check for control_marks
-    const hasControlMarks = _get(sqliteDb, 'SELECT COUNT(*) as n FROM control_marks WHERE academic_year_id = ?', [id])?.n || 0;
-    if (hasControlMarks > 0) {
-      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود درجات طلاب مسجلة فيه.' });
-    }
-
-    // Check for control_committees
-    const hasCommittees = _get(sqliteDb, 'SELECT COUNT(*) as n FROM control_committees WHERE academic_year_id = ?', [id])?.n || 0;
-    if (hasCommittees > 0) {
-      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود لجان امتحانية مسجلة فيه.' });
-    }
-
-    // Check for classes
-    const hasClasses = _get(sqliteDb, 'SELECT COUNT(*) as n FROM classes WHERE academic_year_id = ?', [id])?.n || 0;
-    if (hasClasses > 0) {
-      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي لوجود فصول مسجلة فيه.' });
+      return res.status(400).json({ success: false, error: 'لا يمكن حذف العام الدراسي الحالي المعتمد.' });
     }
 
     sqliteDb.run('DELETE FROM academic_years WHERE id = ?', [id]);
@@ -666,12 +801,83 @@ const setCurrentAcademicYear = async (req, res) => {
     db.runTransaction(() => {
       sqliteDb.run('UPDATE academic_years SET is_current = 0');
       sqliteDb.run('UPDATE academic_years SET is_current = 1 WHERE id = ?', [id]);
+
+      // تحديث كافة سجلات الطلاب والفصول لتكون على هذا العام المعتمد
+      sqliteDb.run('UPDATE students SET academic_year_id = ? WHERE is_deleted IS NULL OR is_deleted = 0', [id]);
+      sqliteDb.run('UPDATE classes SET academic_year_id = ?', [id]);
+      sqliteDb.run('UPDATE class_enrollments SET academic_year_id = ?', [id]);
+
+      // إزالة أي أعوام متداخلة أخرى
+      try {
+        sqliteDb.run('DELETE FROM academic_years WHERE id != ?', [id]);
+      } catch (_) {}
+
       sqliteDb.run(`
         INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
         VALUES ('academic_years', 'set_current_year', NULL, ?, 'admin')
       `, [`id:${id}`]);
     });
-    return res.json({ success: true, message: 'تم تعيين العام الدراسي كالعام الحالي بنجاح.' });
+    return res.json({ success: true, message: 'تم تعيين وتحديث النظام بالكامل على هذا العام الدراسي.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// POST /api/settings/academic-years/set-single
+const setSingleAcademicYear = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { startYear } = req.body;
+  const yearNum = parseInt(startYear);
+  if (!yearNum || yearNum < 2020 || yearNum > 2050) {
+    return res.status(400).json({ success: false, error: 'سنة بدء العام الدراسي غير صالحة.' });
+  }
+
+  const endYearNum = yearNum + 1;
+  const formattedLabel = `${yearNum} / ${endYearNum} م`;
+  const startDate = `${yearNum}-09-01`;
+  const endDate = `${endYearNum}-08-31`;
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    db.runTransaction(() => {
+      sqliteDb.run('UPDATE academic_years SET is_current = 0');
+      const existing = _get(sqliteDb, 'SELECT id FROM academic_years WHERE year_label LIKE ? OR year_label LIKE ? OR year_label LIKE ?', [
+        `%${yearNum}%${endYearNum}%`,
+        `${yearNum}/${endYearNum}`,
+        formattedLabel
+      ]);
+
+      let yearId;
+      if (existing) {
+        yearId = existing.id;
+        sqliteDb.run(
+          'UPDATE academic_years SET year_label = ?, start_date = ?, end_date = ?, is_current = 1 WHERE id = ?',
+          [formattedLabel, startDate, endDate, yearId]
+        );
+      } else {
+        sqliteDb.run(
+          'INSERT INTO academic_years (year_label, start_date, end_date, is_current) VALUES (?, ?, ?, 1)',
+          [formattedLabel, startDate, endDate]
+        );
+        yearId = _lastId(sqliteDb);
+      }
+
+      // تحديث النظام بالكامل: الطلاب، الفصول، والتسجيلات على هذا العام المعتمد
+      sqliteDb.run('UPDATE students SET academic_year_id = ? WHERE is_deleted IS NULL OR is_deleted = 0', [yearId]);
+      sqliteDb.run('UPDATE classes SET academic_year_id = ?', [yearId]);
+      sqliteDb.run('UPDATE class_enrollments SET academic_year_id = ?', [yearId]);
+
+      // إزالة أي أعوام دراسية سابقة أو متداخلة لضمان بقاء عام واحد فقط
+      try {
+        sqliteDb.run('DELETE FROM academic_years WHERE id != ?', [yearId]);
+      } catch (_) {}
+    });
+
+    return res.json({
+      success: true,
+      message: `تم اعتماد وتحديث النظام بالكامل على العام الدراسي ${formattedLabel}.`,
+      yearLabel: formattedLabel
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -682,8 +888,38 @@ const getInstitution = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const config = _get(sqliteDb, 'SELECT * FROM institution_config LIMIT 1');
-    return res.json({ success: true, institution: config || null });
+    const inst = getSchoolMasterInfo(sqliteDb);
+    
+    // Fetch staff list to easily link/select school director
+    const staffList = _all(sqliteDb, `
+      SELECT id, full_name_ar, national_id, COALESCE(title, job_class, cadre_title, '') AS position_title, phone
+      FROM staff
+      WHERE status = 'نشط' OR status = 'active' OR status IS NULL
+      ORDER BY full_name_ar ASC
+    `);
+
+    const governorates = _all(sqliteDb, `SELECT id, name_ar FROM governorates ORDER BY id ASC`);
+    const administrations = _all(sqliteDb, `SELECT id, governorate_id, name_ar FROM educational_administrations ORDER BY name_ar ASC`);
+
+    const EDUCATION_TYPES = [
+      'رسمي',
+      'رسمي لغات',
+      'رسمي لغات متميز',
+      'خاص عربي',
+      'خاص لغات',
+      'دولي',
+      'ثقافي',
+      'مجتمعي'
+    ];
+
+    return res.json({
+      success: true,
+      institution: inst || null,
+      educationTypes: EDUCATION_TYPES,
+      staffList: staffList || [],
+      governorates: governorates || [],
+      administrations: administrations || []
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -693,173 +929,105 @@ const getInstitution = async (req, res) => {
 const updateInstitution = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   const {
-    schoolCode, schoolName, schoolNameEn, governorate, directorate, address, phone, email, website, logoUrl,
-    educationType, directorName, directorQualification, directorNationalId, directorPhone,
+    schoolCode, schoolName, schoolNameEn, governorate, directorate,
+    governorateId, administrationId, address, phone, email, website, logoUrl,
+    educationType, directorName, directorId,
     sectionsCount, stagesCount, hasMultipleSections, sections
   } = req.body;
+
   if (!schoolCode || !schoolName || !governorate || !directorate) {
     return res.status(400).json({ success: false, error: 'كود المدرسة، اسم المدرسة، المحافظة والإدارة التعليمية حقول إلزامية.' });
   }
+
   try {
-    if (db.getMode() === 'sqlite') {
-      const sqliteDb = db.getSQLiteDb();
-      const exists = _get(sqliteDb, 'SELECT id FROM institution_config LIMIT 1');
-      
-      db.runTransaction(() => {
-        if (exists) {
-          sqliteDb.run(`
-            UPDATE institution_config
-            SET school_code = ?, school_name = ?, school_name_en = ?, governorate = ?, directorate = ?,
-                address = ?, phone = ?, email = ?, website = ?, logo_url = ?,
-                education_type = ?, director_name = ?, director_qualification = ?,
-                director_national_id = ?, director_phone = ?, sections_count = ?, stages_count = ?, has_multiple_sections = ?
-            WHERE id = ?
-          `, [
-            schoolCode, schoolName, schoolNameEn || '', governorate, directorate, 
-            address || '', phone || '', email || '', website || '', logoUrl || '',
-            educationType || '', directorName || '', directorQualification || '',
-            directorNationalId || '', directorPhone || '', 
-            sectionsCount ? parseInt(sectionsCount) : null,
-            stagesCount ? parseInt(stagesCount) : null,
-            hasMultipleSections ? 1 : 0,
-            exists.id
-          ]);
-        } else {
-          sqliteDb.run(`
-            INSERT INTO institution_config (
-              school_code, school_name, school_name_en, governorate, directorate, address, phone, email, website, logo_url,
-              education_type, director_name, director_qualification, director_national_id, director_phone,
-              sections_count, stages_count, has_multiple_sections, is_initialized
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-          `, [
-            schoolCode, schoolName, schoolNameEn || '', governorate, directorate, 
-            address || '', phone || '', email || '', website || '', logoUrl || '',
-            educationType || '', directorName || '', directorQualification || '',
-            directorNationalId || '', directorPhone || '',
-            sectionsCount ? parseInt(sectionsCount) : null,
-            stagesCount ? parseInt(stagesCount) : null,
-            hasMultipleSections ? 1 : 0
-          ]);
-        }
+    const sqliteDb = db.getSQLiteDb();
+    const exists = _get(sqliteDb, 'SELECT id FROM institution_config LIMIT 1');
 
+    db.runTransaction(() => {
+      if (exists) {
         sqliteDb.run(`
-          INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
-          VALUES ('institution', 'update_config', ?, ?, 'admin')
-        `, ['institution_config', `code:${schoolCode},name:${schoolName}`]);
+          UPDATE institution_config
+          SET school_code = ?, school_name = ?, school_name_en = ?, governorate = ?, directorate = ?,
+              governorate_id = ?, administration_id = ?, address = ?, phone = ?, email = ?, website = ?, logo_url = ?,
+              education_type = ?, director_name = ?, director_id = ?,
+              sections_count = ?, stages_count = ?, has_multiple_sections = ?
+          WHERE id = ?
+        `, [
+          schoolCode, schoolName, schoolNameEn || '', governorate, directorate,
+          governorateId ? parseInt(governorateId) : null, administrationId ? parseInt(administrationId) : null,
+          address || '', phone || '', email || '', website || '', logoUrl || '',
+          educationType || 'رسمي', directorName || '', directorId ? parseInt(directorId) : null,
+          sectionsCount ? parseInt(sectionsCount) : null,
+          stagesCount ? parseInt(stagesCount) : null,
+          hasMultipleSections ? 1 : 0,
+          exists.id
+        ]);
+      } else {
+        sqliteDb.run(`
+          INSERT INTO institution_config (
+            school_code, school_name, school_name_en, governorate, directorate,
+            governorate_id, administration_id, address, phone, email, website, logo_url,
+            education_type, director_name, director_id,
+            sections_count, stages_count, has_multiple_sections, is_initialized
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `, [
+          schoolCode, schoolName, schoolNameEn || '', governorate, directorate,
+          governorateId ? parseInt(governorateId) : null, administrationId ? parseInt(administrationId) : null,
+          address || '', phone || '', email || '', website || '', logoUrl || '',
+          educationType || 'رسمي', directorName || '', directorId ? parseInt(directorId) : null,
+          sectionsCount ? parseInt(sectionsCount) : null,
+          stagesCount ? parseInt(stagesCount) : null,
+          hasMultipleSections ? 1 : 0
+        ]);
+      }
 
-        // Sync sections
-        if (sections && Array.isArray(sections)) {
-          const keptIds = [];
-          for (const s of sections) {
-            const isRealId = s.id && !String(s.id).startsWith('temp');
-            if (isRealId) {
+      sqliteDb.run(`
+        INSERT INTO settings_audit_log (setting_area, setting_key, old_value, new_value, changed_by)
+        VALUES ('institution', 'update_config', ?, ?, 'admin')
+      `, ['institution_config', `code:${schoolCode},name:${schoolName}`]);
+
+      // Sync sections
+      if (sections && Array.isArray(sections)) {
+        const keptIds = [];
+        for (const s of sections) {
+          const isRealId = s.id && !String(s.id).startsWith('temp');
+          const secCode = s.code ? parseInt(s.code, 10) : (s.type === 'languages' ? 2 : (s.type === 'international' ? 3 : 1));
+          if (isRealId) {
+            sqliteDb.run(`
+              UPDATE sections
+              SET name = ?, type = ?, education_type = ?, legal_status = ?, code = ?, is_active = 1
+              WHERE id = ?
+            `, [s.name, s.type, s.educationType || s.education_type || educationType || '', s.legalStatus || s.legal_status || 'حكومي', secCode, parseInt(s.id, 10)]);
+            keptIds.push(parseInt(s.id, 10));
+          } else {
+            const existingByNumericCode = _get(sqliteDb, 'SELECT id FROM sections WHERE code = ? OR id = ?', [secCode, parseInt(s.id, 10) || 0]);
+            if (existingByNumericCode) {
               sqliteDb.run(`
                 UPDATE sections
-                SET name = ?, type = ?, education_type = ?, legal_status = ?
+                SET name = ?, type = ?, education_type = ?, legal_status = ?, code = ?, is_active = 1
                 WHERE id = ?
-              `, [s.name, s.type, s.educationType || s.education_type || '', s.legalStatus || s.legal_status || 'حكومي', s.id]);
-              keptIds.push(parseInt(s.id));
+              `, [s.name, s.type, s.educationType || s.education_type || educationType || '', s.legalStatus || s.legal_status || 'حكومي', secCode, existingByNumericCode.id]);
+              keptIds.push(existingByNumericCode.id);
             } else {
               sqliteDb.run(`
-                INSERT INTO sections (name, type, education_type, legal_status)
-                VALUES (?, ?, ?, ?)
-              `, [s.name, s.type, s.educationType || s.education_type || '', s.legalStatus || s.legal_status || 'حكومي']);
+                INSERT INTO sections (name, type, education_type, legal_status, code, is_active)
+                VALUES (?, ?, ?, ?, ?, 1)
+              `, [s.name, s.type, s.educationType || s.education_type || educationType || '', s.legalStatus || s.legal_status || 'حكومي', secCode]);
               const newId = _lastId(sqliteDb);
               keptIds.push(newId);
             }
           }
-          if (keptIds.length > 0) {
-            const placeholders = keptIds.map(() => '?').join(',');
-            sqliteDb.run(`DELETE FROM sections WHERE id NOT IN (${placeholders})`, keptIds);
-          } else {
-            sqliteDb.run(`DELETE FROM sections`);
-          }
         }
-      });
-    } else {
-      // PostgreSQL mode
-      const pool = db.getPool();
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const existsRes = await client.query('SELECT id FROM institution_config LIMIT 1');
-        const exists = existsRes.rows[0];
-        
-        if (exists) {
-          await client.query(`
-            UPDATE institution_config
-            SET school_code = $1, school_name = $2, school_name_en = $3, governorate = $4, directorate = $5,
-                address = $6, phone = $7, email = $8, website = $9, logo_url = $10,
-                education_type = $11, director_name = $12, director_qualification = $13,
-                director_national_id = $14, director_phone = $15, sections_count = $16, stages_count = $17, has_multiple_sections = $18
-            WHERE id = $19
-          `, [
-            schoolCode, schoolName, schoolNameEn || '', governorate, directorate, 
-            address || '', phone || '', email || '', website || '', logoUrl || '',
-            educationType || '', directorName || '', directorQualification || '',
-            directorNationalId || '', directorPhone || '', 
-            sectionsCount ? parseInt(sectionsCount) : null,
-            stagesCount ? parseInt(stagesCount) : null,
-            hasMultipleSections ? 1 : 0,
-            exists.id
-          ]);
-        } else {
-          await client.query(`
-            INSERT INTO institution_config (
-              school_code, school_name, school_name_en, governorate, directorate, address, phone, email, website, logo_url,
-              education_type, director_name, director_qualification, director_national_id, director_phone,
-              sections_count, stages_count, has_multiple_sections, is_initialized
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, true)
-          `, [
-            schoolCode, schoolName, schoolNameEn || '', governorate, directorate, 
-            address || '', phone || '', email || '', website || '', logoUrl || '',
-            educationType || '', directorName || '', directorQualification || '',
-            directorNationalId || '', directorPhone || '',
-            sectionsCount ? parseInt(sectionsCount) : null,
-            stagesCount ? parseInt(stagesCount) : null,
-            hasMultipleSections ? 1 : 0
-          ]);
+        if (keptIds.length > 0) {
+          const placeholders = keptIds.map(() => '?').join(',');
+          sqliteDb.run(`DELETE FROM sections WHERE id NOT IN (${placeholders})`, keptIds);
         }
-
-        // Sync sections
-        if (sections && Array.isArray(sections)) {
-          const keptIds = [];
-          for (const s of sections) {
-            const isRealId = s.id && !String(s.id).startsWith('temp');
-            if (isRealId) {
-              await client.query(`
-                UPDATE sections
-                SET name = $1, type = $2, education_type = $3, legal_status = $4
-                WHERE id = $5
-              `, [s.name, s.type, s.educationType || s.education_type || '', s.legalStatus || s.legal_status || 'حكومي', s.id]);
-              keptIds.push(parseInt(s.id));
-            } else {
-              const insertRes = await client.query(`
-                INSERT INTO sections (name, type, education_type, legal_status)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id
-              `, [s.name, s.type, s.educationType || s.education_type || '', s.legalStatus || s.legal_status || 'حكومي']);
-              keptIds.push(insertRes.rows[0].id);
-            }
-          }
-          if (keptIds.length > 0) {
-            const placeholders = keptIds.map((_, i) => `$${i + 1}`).join(',');
-            await client.query(`DELETE FROM sections WHERE id NOT IN (${placeholders})`, keptIds);
-          } else {
-            await client.query(`DELETE FROM sections`);
-          }
-        }
-        await client.query('COMMIT');
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
       }
-    }
-    return res.json({ success: true, message: 'تم تحديث بيانات المؤسسة التعليمية بنجاح.' });
+    });
+
+    const updatedInst = getSchoolMasterInfo(sqliteDb);
+    return res.json({ success: true, message: 'تم حفظ وتحديث بيانات المدرسة بنجاح.', institution: updatedInst });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1070,7 +1238,13 @@ const getSections = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const sections = _all(sqliteDb, "SELECT * FROM sections WHERE name NOT LIKE 'مرحلة %' ORDER BY id ASC");
+    try {
+      sqliteDb.run(`
+        DELETE FROM sections 
+        WHERE id NOT IN (SELECT MIN(id) FROM sections GROUP BY type);
+      `);
+    } catch (_) {}
+    const sections = _all(sqliteDb, "SELECT * FROM sections WHERE is_active = 1 AND name NOT LIKE 'مرحلة %' GROUP BY type ORDER BY id ASC");
     return res.json({ success: true, sections });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1200,7 +1374,7 @@ const getStages = async (req, res) => {
       SELECT sl.*, s.name as section_name, s.type as section_type 
       FROM stages_lookup sl
       JOIN sections s ON s.id = sl.section_id
-      WHERE s.name NOT LIKE 'مرحلة %'
+      WHERE sl.is_active = 1 AND s.is_active = 1 AND s.name NOT LIKE 'مرحلة %'
       ORDER BY sl.display_order ASC, sl.id ASC
     `);
     return res.json({ success: true, stages });
@@ -1244,33 +1418,60 @@ const createStage = async (req, res) => {
     if (!section) return res.status(400).json({ success: false, error: 'القسم المختار غير موجود.' });
 
     db.runTransaction(() => {
-      sqliteDb.run(
-        'INSERT INTO stages_lookup (section_id, stage_name, stage_code, years_count, display_order) VALUES (?,?,?,?,?)',
-        [sectionId, stageName, stageCode || null, yearsCount, displayOrder || 0]
+      // Upsert pattern: check if stage already exists for this section (by stage_name or stage_code)
+      let existingStage = _get(
+        sqliteDb,
+        'SELECT id FROM stages_lookup WHERE section_id = ? AND (stage_name = ? OR stage_code = ? OR code = ?)',
+        [sectionId, stageName, stageCode || null, stageCode || null]
       );
-      const stageId = _lastId(sqliteDb);
 
-      // 1. Create serial counter
+      let stageId;
+      if (existingStage) {
+        stageId = existingStage.id;
+        sqliteDb.run(
+          'UPDATE stages_lookup SET stage_name = ?, stage_code = ?, years_count = ?, display_order = ?, is_active = 1 WHERE id = ?',
+          [stageName, stageCode || null, yearsCount, displayOrder || 0, stageId]
+        );
+      } else {
+        sqliteDb.run(
+          'INSERT INTO stages_lookup (section_id, stage_name, stage_code, years_count, display_order, is_active) VALUES (?,?,?,?,?,1)',
+          [sectionId, stageName, stageCode || null, yearsCount, displayOrder || 0]
+        );
+        stageId = _lastId(sqliteDb);
+      }
+
+      // 1. Create/Update serial counter
       const type = section.type;
       const prefix = (type === 'arabic' ? 'AR' : type === 'languages' ? 'LN' : 'KG') +
                      (stageName === 'ابتدائي' ? '-PR' : stageName === 'إعدادي' ? '-PP' : stageName === 'ثانوي' ? '-SC' : '-KG');
-      sqliteDb.run(
-        'INSERT INTO stage_serial_counters (section_id, stage_id, prefix) VALUES (?,?,?)',
-        [sectionId, stageId, prefix]
-      );
-
-      // 2. Create grades
-      const arabicNumerals = ['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر'];
-      for (let year = 1; year <= yearsCount; year++) {
-        const gradeNameAr = `الصف ${arabicNumerals[year-1] || year} ال${stageName}`;
+      const counter = _get(sqliteDb, 'SELECT id FROM stage_serial_counters WHERE section_id = ? AND stage_id = ?', [sectionId, stageId]);
+      if (!counter) {
         sqliteDb.run(
-          'INSERT INTO grades_lookup (stage_id, grade_number, grade_name_ar) VALUES (?,?,?)',
-          [stageId, year, gradeNameAr]
+          'INSERT INTO stage_serial_counters (section_id, stage_id, prefix) VALUES (?,?,?)',
+          [sectionId, stageId, prefix]
         );
       }
+
+      // 2. Create grades if not existing
+      const arabicNumerals = ['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر'];
+      for (let year = 1; year <= yearsCount; year++) {
+        const gradeNameAr = `الصف ${arabicNumerals[year-1] || year}`;
+        const existingGrade = _get(sqliteDb, 'SELECT id FROM grades_lookup WHERE stage_id = ? AND grade_number = ?', [stageId, year]);
+        if (existingGrade) {
+          sqliteDb.run('UPDATE grades_lookup SET is_active = 1, grade_name_ar = ? WHERE id = ?', [gradeNameAr, existingGrade.id]);
+        } else {
+          sqliteDb.run(
+            'INSERT INTO grades_lookup (stage_id, grade_number, grade_name_ar, is_active) VALUES (?,?,?,1)',
+            [stageId, year, gradeNameAr]
+          );
+        }
+      }
+
+      // 3. Auto-activate the parent section when a stage is added to it
+      sqliteDb.run('UPDATE sections SET is_active = 1 WHERE id = ?', [sectionId]);
     });
 
-    return res.json({ success: true, message: 'تم إضافة المرحلة التعليمية والصفوف الدراسية التابعة لها بنجاح.' });
+    return res.json({ success: true, message: 'تم إضافة وتفعيل المرحلة التعليمية والصفوف الدراسية التابعة لها بنجاح.' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1344,9 +1545,9 @@ const deleteStage = async (req, res) => {
 
 module.exports = {
   getUsers, createUser, updateUser, deleteUser,
-  getRoles, getPermissions,
+  getRoles, getPermissions, updateRolePermissions, createRole, deleteRole,
   getClassrooms, createClassroom, updateClassroom, deleteClassroom, deleteGradeClassrooms, enrollStudent, bulkEnrollStudents,
-  getAcademicYears, createAcademicYear, updateAcademicYear, deleteAcademicYear, setCurrentAcademicYear,
+  getAcademicYears, createAcademicYear, updateAcademicYear, deleteAcademicYear, setCurrentAcademicYear, setSingleAcademicYear,
   getInstitution, updateInstitution,
   listBackups, createBackup, downloadBackup, importBackup, restoreBackup, deleteBackup,
   getSections, createSection, updateSection, deleteSection, toggleSectionActive,

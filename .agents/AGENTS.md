@@ -1,60 +1,51 @@
-# الدليل القياسي والقواعد العامة لبناء وتصميم برنامج Egypt Smart School ERP (NeprasPro)
+# NeprasPro Workspace Agent Rules & Customization Constraints
 
-## 0. الأولوية والتوافق مع قواعد النظام
-هذه القواعد تحكم المعمارية، تصميم الواجهات، أمان البيانات، وأسلوب إدارة السياق أثناء العمل على مشروع NeprasPro. لا تتعارض مع تعليمات النظام أو الأمان.
+## 1. Skill Isolation & Exclusion Rules
+This workspace (`NeprasPro`) strictly limits active skills and system rules to Egyptian School ERP development. 
 
----
+### EXCLUDED / UNLOADED SKILLS:
+- ALL Science, Biological, Genomic & Medical skills (alphagenome-*, protein-sequence-*, gnomad, pubmed, uniprot, chembl, clinvar, dbsnp, foldseek, openfda, opentargets, pdb, pubchem, string, etc.)
+- ALL Google Cloud Platform (GCP) & Big Data skills (gcp-*, bigquery-*, dataflow, dataform, dbt-bigquery, composer, spark, gcs, etc.)
+- ALL non-relevant frameworks (android-cli, etc.)
 
-## 1. ملف السياق الدائم (CONTEXT.md)
-يتم الاحتفاظ بملف CONTEXT.md في جذر المشروع كمرجع لحالة المشروع والقرارات وتفادي المحادثات الطويلة.
-- اقرأ CONTEXT.md كاملاً أولاً في بداية كل جلسة جديدة.
-- حدّث CONTEXT.md فور اتخاذ قرار أو إنجاز مهمة، وأبقِهِ مختصراً (1-2 صفحة).
-- انقل الأقسام المكتملة إلى CHANGELOG.md لتجنب تضخم الملف.
-
----
-
-## 2. تقليل استهلاك التوكن في الردود
-- لا تعد طباعة كود كامل لم يتغير؛ اعرض فقط الأجزاء المعدلة (diff) أو التغييرات النصية.
-- اقرأ نطاقات محددة من الملفات الكبيرة.
-- لخّص مخرجات الأوامر الطويلة في سطرين.
-- لا تكرر شرح قرارات مسجلة كـ "قرارات ثابتة" في CONTEXT.md.
-- اجمع الأسئلة في رسالة واحدة.
+### APPROVED & ACTIVE SKILLS FOR NEPRASPRO:
+1. `nepraspro-guidelines` (Core standards & rules for NeprasPro)
+2. `egyptian-id-validator` (Validation of 14-digit Egyptian IDs & birth dates)
+3. `excel-macro-handler` (Handling Ministry of Education .xltm templates & .xlsm exports)
+4. `qa-code-auditor` (Senior Code Reviewer & QA Auditor)
+5. `qa-automated-test-generator` (Unit testing & WASM/SQLite assertions)
+6. `qa-performance-security-auditor` (sql.js WASM performance, memory leak & Electron security)
+7. `building-data-apps` (Dashboard & Data UI best practices)
+8. `accidental-data-loss-prevention` (Data safety guardrails)
 
 ---
 
-## 3. معمارية البيانات والأمان والترقيات التراكمية
-- **مسار قاعدة البيانات ثابت وقاطع**: يمنع تماماً تغيير مسار قاعدة البيانات ليكون داخل مجلد تثبيت البرنامج. يجب أن يظل دائماً في مجلد المستخدم الخاص (`%USERPROFILE%/.nepraspro/`) للحفاظ على البيانات عند التحديث أو إلغاء التثبيت.
-- **التحديثات التراكمية (Setup فوق Setup)**: تدعم البنية تثبيت الإصدارات الجديدة مباشرة فوق القديمة دون تصفير أو حذف بيانات المستخدم الحالية.
-- **الترقيات التلقائية (Migrations)**: أي تعديل على الجداول يجب كتابته بأمر فحص أولاً (مثل `PRAGMA table_info` أو `IF NOT EXISTS`) ليعمل تلقائياً عند إقلاع النسخة الجديدة.
-- **الاستعلام بالأكواد الموحدة**: الاعتماد الحصري على الأكواد (`codes`) في الاستعلامات بدلاً من النصوص العربية منعاً للأخطاء الإملائية.
+## 2. Token Budget & Context Efficiency Protocol
+- Do NOT re-print full files when generating diffs or snippets.
+- Use exact targeted ranges for reading files.
+- Keep tool output summaries concise (1-2 lines).
+- Enforce strict 5-question clarification rule before major control module alterations.
+- Maintain permanent context in `CONTEXT.md`.
 
 ---
 
-## 4. قاعدة الاستيضاح الصارمة (طرح 5 أسئلة قبل أي تعديل)
-- **قانون عمل صارم ودائم**: قبل إجراء أي تعديل أو تنفيذ أي خطوة برمجة في وحدة الكنترول أو أي موديول في البرنامج، يلتزم المبرمج دائماً وبشكل مطلق بطرح **5 أسئلة استيضاحية دقيقة ومحددة** على المستخدم أولاً للوقوف على كافة التفاصيل والمتطلبات الفنية والضوابط قبل كتابة أو تعديل الكود.
+## 3. Strict Code Isolation & Change Guardrails (مبدأ عزل وحماية الكود)
+1. **نطاق التعديل المحدد (Targeted Scope Only)**:
+   - يحظر تماماً لمس أو تعديل أي ملف، دالة، استعلام SQL، أو مكون خارج النطاق الفعلي والمباشر للطلب الحالي.
+2. **منع التأثيرات الجانبية (Zero Side-Effects)**:
+   - قبل إجراء أي تعديل على الدوال أو الاستعلامات المشتركة (Shared Controllers/Services)، يجب التأكد من عدم كسر أي تبويب آخر يعتمد عليها.
+3. **ثبات قاعدة البيانات وهيكل الجداول (Schema Stability)**:
+   - عدم تعديل أسماء الحقول أو الاستعلامات الأساسية لجدول الطلاب وباقي الجداول دون ضرورة قصوى وتأكيد مسبق.
+4. **الفحص والتحقق الصارم (Pre & Post Verification)**:
+   - فحص صحة الاستعلامات وعمليات البناء والتكامل داخلياً قبل اعتماد أي تغيير.
 
 ---
 
-## 5. قواعد تصميم الواجهات والهوية الرسمية (UI/UX Standards)
-- **هوية بوابة الوزارة الرسمية (EMIS Style)**:
-  - الهيدر الأزرق الحكومي المعتمد (`#1a3c6e`).
-  - الخلفية العامة ذات اللون الرمادي الفاتح والمريح للعين (`#f0f2f5`).
-  - البطاقات الحاوية للبيانات باللون الأبيض الصافي (`#ffffff`) بظلال خفيفة ناعمة.
-  - الخط العربي الموحد: Cairo لجميع العناوين والنصوص.
-- **التفاعلية والتجربة الممتازة**: إضفاء حيوية على الواجهة باستخدام المؤثرات الحركية الخفيفة عند التحويم (Hover micro-animations)، الترتيب المرئي الواضح، والحد الأدنى من التعقيد في التنقل.
+## 4. Standard 3-Column Ministerial Header & Print Protocol (معيار الترويسة والتذييل الرسمي)
+- **الترويسة الثلاثية القياسية**:
+  - **اليمين**: جمهورية مصر العربية / وزارة التربية والتعليم / مديرية التربية والتعليم بمحافظة ... / إدارة ... التعليمية / مدرسة ...
+  - **الوسط**: شعار المدرسة / عنوان الوثيقة الرسمي مسطر / الصف والفصل أو كود الموضوع
+  - **اليسار**: العام الدراسي / الفصل الدراسي / تاريخ الطباعة / كود الاستمارة الوزارية
+- **التذييل الرباعي الرسمي**: (المسؤول المختص / المراجع والأخصائي / وكيل شؤون الطلاب والتعليم / مدير المدرسة وخاتم المدرسة).
+- **مصدر البيانات**: جلب بيانات الترويسة حصراً من `getSchoolMasterInfo(sqliteDb)` أو `GET /api/setup/status` لضمان مطابقة ما تم حفظه في `institution_config`.
 
----
-
-## 6. قواعد تدقيق البيانات والأمان
-- **التحقق من الرقم القومي وتاريخ الميلاد**: فحص الـ 14 رقم بالتقويم الميلادي الفعلي، منع التواريخ المستقبلية أو الوهمية، والتحقق المزدوج من عدم التكرار على مستوى الباك إند والفرونت إند.
-- **صيغ التسمية المعتمدة**: الكشف التلقائي عن صيغة التسمية المسجلة مسبقاً (مثل الفصول أو المراحل) وتعميمها لمنع خلط أنماط التسمية.
-
----
-
-## 7. ضوابط التقييمات وتصدير التقارير والماكرو القياسي (Native Direct Template Export)
-- **مرجعية الضوابط التقييمية**: يتم إدراج وتحديد كافة ضوابط التقييم وقواعد حساب الدرجات والنسب الخاصة بكل صف دراسي بناءً على مدخلات المصمم/المستخدم عند الطلب.
-- **التصدير المباشر الموحد للقوالب (Native Direct Template Export)**:
-  - **منع التعديل على الملفات الثنائية للماكرو**: يمنع تماماً أي فتح أو إعادة بناء لجزء `xl/vbaProject.bin` لمنع تلف الأكواد والماكرو.
-  - **الحقن المباشر للبيانات (`t="inlineStr"`)**: يتم كتابة بيانات الطلاب والهيدر بنمط النص المباشر السليم `t="inlineStr"` مع الحفاظ الكامل على سمات وتنسيقات الألوان والحدود الرسمية للخلية (`s="..."`)، وتطهير أي سمة `t="..."` سابقة منعاً لرسائل استبدال المكونات أو أخطاء المزدوجية في OpenXML.
-  - **تحويل صيغة التمبلت آلياً**: استبدال نوع المحتوى بداخل `[Content_Types].xml` تلقائياً من `template.macroEnabled.main+xml` ليكون `sheet.macroEnabled.main+xml` لفتح الملف فوراً بصيغة `.xlsm` ممتلئاً بالبيانات وفعالاً بالماكرو.
-  - **التصدير الفردي والمجمّع (`Batch Processing`)**: دعم التصدير الفردي لكل فصل وتوفير زر التصدير المجمّع لكل فصول الصف/المرحلة بضغطة زر واحدة والتغليف في أرشيف مضغوط ZIP يحتوي على ملفات `.xlsm` المكتملة الماكرو وملفات الـ PDF المعززة.

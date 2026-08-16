@@ -220,11 +220,12 @@
 }
 
 .staff-table th {
-  background: #f8fafc;
-  color: #334155;
-  font-weight: 800;
+  background: #00838f !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
   padding: 14px 16px;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid #006978;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
   white-space: nowrap;
 }
 
@@ -420,15 +421,17 @@
 }
 
 .staff-form-section-title {
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 800;
-  color: #185fa5;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 14px;
+  border-radius: 6px 6px 0 0;
   margin: 0;
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.15);
 }
 
 .staff-form-grid {

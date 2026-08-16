@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 
 function AbsenceSheetPreview({ students, meta, schoolInfo }) {
-  const { selectedGrade, selectedYear, selectedClassroom } = meta;
+  const { selectedGrade, selectedYear, selectedClassroom, classroomLabel } = meta;
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
 
   const MONTHS = [
@@ -54,7 +54,7 @@ function AbsenceSheetPreview({ students, meta, schoolInfo }) {
             كشف رصد الغياب الشهري — شهر {monthLabel}
           </h2>
           <div className="report-subtitle-meta">
-            {selectedGrade?.grade_name_ar} | فصل: {selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
+            {selectedGrade?.grade_name_ar} | فصل: {classroomLabel || selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
           </div>
         </div>
 

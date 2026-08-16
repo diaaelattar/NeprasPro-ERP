@@ -9,7 +9,7 @@
     "install:backend": "npm install --prefix backend",
     "electron:dev": "electron .",
     "react:dev": "npm run dev --prefix frontend",
-    "backend:dev": "node backend/server.js",
+    "backend:dev": "node --watch --watch-path=backend backend/server.js",
     "dev": "concurrently \"npm run react:dev\" \"npm run backend:dev\" \"wait-on http://localhost:5173 && npm run electron:dev\"",
     "build:frontend": "npm run build --prefix frontend",
     "dist": "npm run build:frontend && electron-builder",
@@ -39,6 +39,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "electron/icon.ico",
       "target": [
         "nsis"
       ],

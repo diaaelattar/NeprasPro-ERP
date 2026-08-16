@@ -23,13 +23,19 @@
     "storage"
   ],
   "host_permissions": [
-    "*://student.emis.gov.eg/*",
+    "*://*.emis.gov.eg/*",
+    "*://emis.gov.eg/*",
+    "*://*.moe.gov.eg/*",
+    "*://moe.gov.eg/*",
     "http://localhost:3001/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://student.emis.gov.eg/*"
+        "*://*.emis.gov.eg/*",
+        "*://emis.gov.eg/*",
+        "*://*.moe.gov.eg/*",
+        "*://moe.gov.eg/*"
       ],
       "js": [
         "xlsx.full.min.js",

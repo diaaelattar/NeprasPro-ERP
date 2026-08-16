@@ -5,6 +5,17 @@ import {
   Sparkles, Heart, Award, Plane, RefreshCw, Users
 } from 'lucide-react';
 import API_BASE_URL from '../../config/api';
+import {
+  ENROLLMENT_STATUS_OPTIONS,
+  RELIGIONS,
+  GENDERS,
+  FOREIGN_LANGUAGES,
+  DISABILITY_TYPES,
+  SECONDARY_SPECIALIZATIONS,
+  GUARDIAN_RELATIONS,
+  GOVERNORATES_MAP,
+  parseEgyptianNationalId
+} from '../../constants/lookupOptions';
 
 const API = API_BASE_URL;
 
@@ -15,7 +26,7 @@ const TABS = [
   { id: 'cases',    label: '⭐ الحالات الخاصة والتوجلات', icon: '⭐' },
 ];
 
-const RELATION_OPTIONS = ['أب', 'أم', 'جد', 'جدة', 'عم', 'خال', 'أخ', 'أخت', 'وصي قانوني', 'آخر'];
+const RELATION_OPTIONS = GUARDIAN_RELATIONS.map(r => r.name);
 
 export default function StudentForm({ studentId, onSaved, onCancel, activeSectionId }) {
   const isEdit = Boolean(studentId);
@@ -42,22 +53,31 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
     stageId: '', gradeId: '', academicYearId: '', classroomId: '',
     educationType: 'رسمي عربي',
     
-    // Basic Info
-    fullNameAr: '', fullNameEn: '', birthDate: '', birthPlace: '',
-    nationalityId: '', nationalId: '', emisStudentCode: '', gender: 'ذكر', religion: 'مسلم',
+    // Basic Info & 4-part student name
+    fullNameAr: '', fullNameEn: '', birthDate: '', birthPlace: '', birthGovernorateId: '1',
+    firstName: '', fatherName: '', gFatherName: '', familyName: '',
+    nationalityId: '1', nationalId: '', emisStudentCode: '', gender: 'ذكر', religion: 'مسلم',
     address: '', studentPhone: '',
 
-    // Academic Details (Order: Status -> Classroom -> Track -> Specialization -> 1st Lang -> 2nd Lang -> Merge)
+    // Academic Details & EMIS fields
     status: 'promoted',
+    studyTypeId: '1',
+    registrationStatusId: '1',
+    divisionId: '',
+    specializationId: '',
+    languageId1: '1',
+    languageId2: '7',
+    disabilityId: '0',
     schoolTrack: 'عام',
     schoolSpecialization: 'عام',
     firstLanguage: 'عربي',
     secondLanguage: 'لا يوجد',
     
-    // Guardian Info
+    // Guardian & Mother Info (including 4-part mother name)
     guardianName: '', guardianRelation: 'أب', guardianNationalId: '',
     guardianPhone: '', guardianPhone2: '', guardianJob: '',
-    motherName: '', motherNationalityId: '', motherNationalId: '',
+    motherName: '', motherFirstName: '', motherSecondName: '', motherThirdName: '', motherForthName: '',
+    motherNationalityId: '1', motherNationalId: '', fatherNationalityId: '1',
     enrollmentDate: new Date().toISOString().split('T')[0],
 
     // Special Cases (Toggles)
@@ -105,20 +125,17 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
   };
 
   const extractFromNationalId = (id) => {
-    if (!validateEgyptianNationalId(id)) { setNationalIdStatus('invalid'); return; }
-    const centuryCode = parseInt(id[0]);
-    const yearPart    = id.substr(1, 2);
-    const monthPart   = id.substr(3, 2);
-    const dayPart     = id.substr(5, 2);
-    const birthYear   = centuryCode === 2 ? '19' + yearPart : '20' + yearPart;
-    const genderDigit = parseInt(id.substr(12, 1));
-    const govCode     = id.substr(7, 2);
+    const parsed = parseEgyptianNationalId(id);
+    if (!parsed || !parsed.isValid) {
+      setNationalIdStatus('invalid');
+      return;
+    }
     setNationalIdStatus('valid');
     setForm(f => ({
       ...f,
-      birthDate:  `${birthYear}-${monthPart}-${dayPart}`,
-      gender:     genderDigit % 2 === 0 ? 'أنثى' : 'ذكر',
-      birthPlace: GOVERNORATES_MAP[govCode] || ''
+      birthDate:  parsed.birthDate,
+      gender:     parsed.gender,
+      birthPlace: parsed.birthPlace || f.birthPlace
     }));
   };
 
@@ -139,15 +156,19 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
       .then(d => {
         if (d.success) {
           setFormOpts(d);
-          const cur = d.academicYears?.find(y => y.is_current === 1 || y.is_current === true);
-          if (cur && !isEdit) setForm(f => ({ ...f, academicYearId: String(cur.id) }));
-          if (activeSectionId && activeSectionId !== 'all' && !isEdit) {
-            setForm(f => ({ ...f, sectionId: String(activeSectionId) }));
-          }
-          // Default nationality to Egyptian (EGY)
-          const egypt = d.nationalities?.find(n => n.code === 'EGY' || n.name_ar?.includes('مصري'));
-          if (egypt && !isEdit) {
-            setForm(f => ({ ...f, nationalityId: String(egypt.id) }));
+          const cur = d.academicYears?.find(y => y.is_current === 1 || y.is_current === true) || d.academicYears?.[0];
+          if (!isEdit) {
+            const autoSec = (activeSectionId && activeSectionId !== 'all') ? String(activeSectionId) : (d.sections?.length === 1 ? String(d.sections[0].id) : '');
+            const matchingStages = d.stages?.filter(s => !autoSec || String(s.section_id) === autoSec) || [];
+            const autoStage = matchingStages.length === 1 ? String(matchingStages[0].id) : '';
+            const egypt = d.nationalities?.find(n => n.code === 'EGY' || n.name_ar?.includes('مصري'));
+            setForm(f => ({
+              ...f,
+              academicYearId: f.academicYearId || (cur ? String(cur.id) : ''),
+              sectionId: f.sectionId || autoSec,
+              stageId: f.stageId || autoStage,
+              nationalityId: f.nationalityId || (egypt ? String(egypt.id) : '1')
+            }));
           }
         }
       });
@@ -174,18 +195,36 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
         .then(d => {
           if (d.success) {
             const s = d.student;
+            const sParts = (s.full_name_ar || '').trim().split(/\s+/);
+            const fn  = s.first_name   || sParts[0] || '';
+            const fa  = s.father_name  || sParts[1] || '';
+            const gf  = s.gfather_name || sParts[2] || '';
+            const fam = s.family_name  || sParts.slice(3).join(' ') || '';
+
+            const mParts = (s.mother_name || '').trim().split(/\s+/);
+            const mFn  = s.mother_first_name  || mParts[0] || '';
+            const mSn  = s.mother_second_name || mParts[1] || '';
+            const mTn  = s.mother_third_name  || mParts[2] || '';
+            const mFn4 = s.mother_forth_name  || mParts.slice(3).join(' ') || '';
+
             setForm({
               sectionId: String(s.section_id || ''), stageId: String(s.stage_id || ''),
               gradeId: String(s.grade_id || ''), academicYearId: String(s.academic_year_id || ''),
               classroomId: String(s.classroom_id || ''),
               educationType: s.education_type || 'رسمي عربي',
               fullNameAr: s.full_name_ar || '', fullNameEn: s.full_name_en || '',
+              firstName: fn, fatherName: fa, gFatherName: gf, familyName: fam,
               birthDate: s.birth_date || '', birthPlace: s.birth_place || '',
-              nationalityId: String(s.nationality_id || ''), nationalId: s.national_id || '',
+              nationalityId: String(s.nationality_id || '1'), nationalId: s.national_id || '',
               emisStudentCode: s.emis_student_code || '',
               gender: s.gender || 'ذكر', religion: s.religion || 'مسلم',
               address: s.address || '', studentPhone: s.student_phone || '',
-              status: s.status || 'promoted',
+              status: s.status === 'new' || s.registration_status_id === 1 ? 'new' :
+                      s.status === 'retained' || s.registration_status_id === 3 ? 'retained' :
+                      s.status === 'suspended' || s.registration_status_id === 4 ? 'suspended' :
+                      s.status === 'disconnected' || s.registration_status_id === 5 ? 'disconnected' :
+                      s.status === 'excluded' || s.registration_status_id === 6 ? 'excluded' : 'promoted',
+              registrationStatusId: s.registration_status_id || (s.status === 'new' ? '1' : s.status === 'retained' ? '3' : s.status === 'suspended' ? '4' : s.status === 'disconnected' ? '5' : s.status === 'excluded' ? '6' : '2'),
               schoolTrack: s.secondary_track || 'عام',
               schoolSpecialization: s.secondary_elective || 'عام',
               firstLanguage: s.first_language || 'عربي',
@@ -194,7 +233,9 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               guardianNationalId: s.guardian_national_id || '',
               guardianPhone: s.guardian_phone || '', guardianPhone2: s.guardian_phone_2 || '',
               guardianJob: s.guardian_job || '',
-              motherName: s.mother_name || '', motherNationalityId: String(s.mother_nationality_id || ''),
+              motherName: s.mother_name || '',
+              motherFirstName: mFn, motherSecondName: mSn, motherThirdName: mTn, motherForthName: mFn4,
+              motherNationalityId: String(s.mother_nationality_id || '1'),
               motherNationalId: s.mother_national_id || '',
               enrollmentDate: s.enrollment_date || new Date().toISOString().split('T')[0],
               
@@ -221,15 +262,19 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
 
   const selectedGradeObj = formOpts.grades?.find(g => String(g.id) === String(form.gradeId));
   const gradeName = selectedGradeObj ? (selectedGradeObj.grade_name_ar || selectedGradeObj.name_ar || '') : '';
-  const isSec2Or3 = gradeName.includes('الثاني الثانوي') || gradeName.includes('الثالث الثانوي') || gradeName.includes('ثاني ثانوي') || gradeName.includes('ثالث ثانوي');
+
+  const selectedStageObj = formOpts.stages?.find(s => String(s.id) === String(form.stageId));
+  const stageName = selectedStageObj ? (selectedStageObj.stage_name || selectedStageObj.name_ar || '') : '';
+  const isSecondaryStage = stageName.includes('ثانوي') || stageName.includes('الثانوية') || selectedStageObj?.code === '05' || String(selectedStageObj?.id) === '5';
+  const isSec2Or3 = isSecondaryStage && (gradeName.includes('الثاني') || gradeName.includes('الثالث') || gradeName.includes('ثاني') || gradeName.includes('ثالث'));
 
   useEffect(() => {
-    if (form.gradeId) {
-      if (!isSec2Or3) {
-        setForm(f => ({ ...f, schoolTrack: 'عام', schoolSpecialization: 'عام' }));
+    if (form.stageId) {
+      if (!isSecondaryStage) {
+        setForm(f => ({ ...f, schoolTrack: 'عام', schoolSpecialization: 'عام', divisionId: '', specializationId: '' }));
       }
     }
-  }, [form.gradeId, isSec2Or3]);
+  }, [form.stageId, isSecondaryStage]);
 
   const filteredStages = formOpts.stages?.filter(s => !form.sectionId || String(s.section_id) === form.sectionId) || [];
   const filteredGrades = formOpts.grades?.filter(g => !form.stageId  || String(g.stage_id)   === form.stageId)   || [];
@@ -441,10 +486,87 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               <div className="section-title">👤 البيانات الشخصية والهوية الرسمية</div>
               
               <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                {/* 4-Part Name inputs (EMIS Ministry Standard) */}
+                <div className="field-group col-span-1">
+                  <label className="field-label">الاسم الأول <span className="required-star">*</span></label>
+                  <input type="text" className="field-input" placeholder="الاسم الأول"
+                    value={form.firstName}
+                    onChange={e => {
+                      const fn = e.target.value;
+                      const comp = [fn, form.fatherName, form.gFatherName, form.familyName].filter(Boolean).join(' ');
+                      const gComp = [form.fatherName, form.gFatherName, form.familyName].filter(Boolean).join(' ');
+                      setForm(f => ({
+                        ...f,
+                        firstName: fn,
+                        fullNameAr: comp,
+                        guardianName: (!f.guardianName || f.guardianName === [f.fatherName, f.gFatherName, f.familyName].filter(Boolean).join(' ')) ? gComp : f.guardianName
+                      }));
+                    }} required />
+                </div>
+                <div className="field-group col-span-1">
+                  <label className="field-label">اسم الوالد <span className="required-star">*</span></label>
+                  <input type="text" className="field-input" placeholder="اسم الوالد"
+                    value={form.fatherName}
+                    onChange={e => {
+                      const fa = e.target.value;
+                      const comp = [form.firstName, fa, form.gFatherName, form.familyName].filter(Boolean).join(' ');
+                      const gComp = [fa, form.gFatherName, form.familyName].filter(Boolean).join(' ');
+                      setForm(f => ({
+                        ...f,
+                        fatherName: fa,
+                        fullNameAr: comp,
+                        guardianName: (!f.guardianName || f.guardianName === [f.fatherName, f.gFatherName, f.familyName].filter(Boolean).join(' ')) ? gComp : f.guardianName
+                      }));
+                    }} required />
+                </div>
+                <div className="field-group col-span-1">
+                  <label className="field-label">اسم الجد <span className="required-star">*</span></label>
+                  <input type="text" className="field-input" placeholder="اسم الجد"
+                    value={form.gFatherName}
+                    onChange={e => {
+                      const gf = e.target.value;
+                      const comp = [form.firstName, form.fatherName, gf, form.familyName].filter(Boolean).join(' ');
+                      const gComp = [form.fatherName, gf, form.familyName].filter(Boolean).join(' ');
+                      setForm(f => ({
+                        ...f,
+                        gFatherName: gf,
+                        fullNameAr: comp,
+                        guardianName: (!f.guardianName || f.guardianName === [f.fatherName, f.gFatherName, f.familyName].filter(Boolean).join(' ')) ? gComp : f.guardianName
+                      }));
+                    }} required />
+                </div>
+                <div className="field-group col-span-1">
+                  <label className="field-label">اللقب / العائلة <span className="required-star">*</span></label>
+                  <input type="text" className="field-input" placeholder="اللقب / العائلة"
+                    value={form.familyName}
+                    onChange={e => {
+                      const fam = e.target.value;
+                      const comp = [form.firstName, form.fatherName, form.gFatherName, fam].filter(Boolean).join(' ');
+                      const gComp = [form.fatherName, form.gFatherName, fam].filter(Boolean).join(' ');
+                      setForm(f => ({
+                        ...f,
+                        familyName: fam,
+                        fullNameAr: comp,
+                        guardianName: (!f.guardianName || f.guardianName === [f.fatherName, f.gFatherName, f.familyName].filter(Boolean).join(' ')) ? gComp : f.guardianName
+                      }));
+                    }} required />
+                </div>
+
                 <div className="field-group col-span-2">
-                  <label className="field-label">الاسم الرباعي بالعربية <span className="required-star">*</span></label>
-                  <input type="text" className="field-input" placeholder="أحمد محمد علي السيد"
-                    value={form.fullNameAr} onChange={e => setF('fullNameAr', e.target.value)} required />
+                  <label className="field-label">الاسم الكامل بالعربية (مجمع تلقائياً)</label>
+                  <input type="text" className="field-input" placeholder="الاسم الرباعي الكامل"
+                    value={form.fullNameAr} onChange={e => {
+                      const val = e.target.value;
+                      const parts = val.trim().split(/\s+/);
+                      setForm(f => ({
+                        ...f,
+                        fullNameAr: val,
+                        firstName: parts[0] || f.firstName,
+                        fatherName: parts[1] || f.fatherName,
+                        gFatherName: parts[2] || f.gFatherName,
+                        familyName: parts.slice(3).join(' ') || f.familyName
+                      }));
+                    }} required />
                 </div>
 
                 <div className="field-group col-span-2">
@@ -456,7 +578,7 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
                 <div className="field-group col-span-1">
                   <label className="field-label">الجنسية <span className="required-star">*</span></label>
                   <select className="field-input" value={form.nationalityId}
-                    onChange={e => { setF('nationalityId', e.target.value); setNationalIdStatus(null); setF('nationalId', ''); }} required>
+                    onChange={e => { setF('nationalityId', e.target.value); setNationalIdStatus(null); }} required>
                     <option value="">-- اختر الجنسية --</option>
                     {formOpts.nationalities && formOpts.nationalities.length > 0 ? (
                       formOpts.nationalities.map(n => (
@@ -507,33 +629,18 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
                 <div className="field-group col-span-1">
                   <label className="field-label">الجنس <span className="required-star">*</span></label>
                   <select className="field-input" value={form.gender} onChange={e => setF('gender', e.target.value)} disabled={isAutofilled} required>
-                    {formOpts.genders && formOpts.genders.length > 0 ? (
-                      formOpts.genders.map(g => (
-                        <option key={g.id} value={g.name_ar}>{g.name_ar}</option>
-                      ))
-                    ) : (
-                      <>
-                        <option value="ذكر">ذكر 👦</option>
-                        <option value="أنثى">أنثى 👧</option>
-                      </>
-                    )}
+                    {GENDERS.map(g => (
+                      <option key={g.id} value={g.name}>{g.name} {g.icon}</option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="field-group col-span-1">
-                  <label className="field-label">الديانة</label>
+                  <label className="field-label">الديانة <span className="required-star">*</span></label>
                   <select className="field-input" value={form.religion} onChange={e => setF('religion', e.target.value)}>
-                    {formOpts.religions && formOpts.religions.length > 0 ? (
-                      formOpts.religions.map(r => (
-                        <option key={r.id} value={r.name_ar}>{r.name_ar}</option>
-                      ))
-                    ) : (
-                      <>
-                        <option value="مسلم">مسلم</option>
-                        <option value="مسيحي">مسيحي</option>
-                        <option value="أخرى">أخرى</option>
-                      </>
-                    )}
+                    {RELIGIONS.map(r => (
+                      <option key={r.id} value={r.name}>{r.name} {r.icon}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -571,132 +678,123 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               {/* 1. حالة القيد */}
               <div className="field-group col-span-1">
                 <label className="field-label">1️⃣ حالة القيد <span className="required-star">*</span></label>
-                <select className="field-input" value={form.status} onChange={e => setF('status', e.target.value)} required>
-                  {formOpts.enrollmentStatuses && formOpts.enrollmentStatuses.length > 0 ? (
-                    formOpts.enrollmentStatuses.map(s => (
-                      <option key={s.id} value={s.code.toLowerCase()}>{s.name_ar}</option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="new">مستجد</option>
-                      <option value="promoted">منقول</option>
-                      <option value="retained">باقٍ للإعادة</option>
-                      <option value="suspended">موقوف قيده</option>
-                      <option value="disconnected">منقطع</option>
-                      <option value="excluded">مستبعد</option>
-                    </>
-                  )}
+                <select
+                  className="field-input"
+                  value={form.status}
+                  onChange={e => {
+                    const val = e.target.value;
+                    const regMap = { new: '1', promoted: '2', retained: '3', disconnected: '4', suspended: '5', excluded: '6' };
+                    setForm(f => ({ ...f, status: val, registrationStatusId: regMap[val] || '2' }));
+                  }}
+                  required
+                >
+                  <option value="new">مستجد</option>
+                  <option value="promoted">منقول</option>
+                  <option value="retained">باق</option>
+                  <option value="disconnected">منقطع</option>
+                  <option value="suspended">موقوف قيده</option>
+                  <option value="excluded">مستبعد</option>
                 </select>
               </div>
 
               {/* 2. الفصل */}
               <div className="field-group col-span-1">
-                <label className="field-label">2️⃣ الفصل الدراسي (Classroom)</label>
+                <label className="field-label">2️⃣ الفصل الدراسي</label>
                 <select className="field-input" value={form.classroomId} onChange={e => setF('classroomId', e.target.value)}>
                   <option value="">-- بدون فصل (موزع لاحقاً) --</option>
-                  {classrooms.map(c => (
-                    <option key={c.id} value={String(c.id)}>{c.class_name} {c.capacity ? `(سعة ${c.capacity})` : ''}</option>
-                  ))}
+                  {classrooms.map(c => {
+                    const str = String(c.class_name || c.formatted_name || '').trim();
+                    const slashMatch = str.match(/\/\s*(\d+)/);
+                    const numMatch = str.match(/\d+/);
+                    const label = c.class_number || (slashMatch ? slashMatch[1] : (numMatch ? numMatch[0] : str));
+                    return (
+                      <option key={c.id} value={String(c.id)}>فصل {label}</option>
+                    );
+                  })}
                 </select>
               </div>
 
-              {/* 3. الشعبة */}
-              <div className="field-group col-span-1">
-                <label className="field-label">3️⃣ الشعبة (Track)</label>
-                <select
-                  className="field-input"
-                  value={isSec2Or3 ? (form.schoolTrack || 'عام') : 'عام'}
-                  disabled={!isSec2Or3}
-                  onChange={e => setF('schoolTrack', e.target.value)}
-                >
-                  <option value="عام">عام</option>
-                  {formOpts.schoolTracks && formOpts.schoolTracks.length > 0 ? (
-                    formOpts.schoolTracks.filter(t => t.name_ar !== 'عام').map(t => (
-                      <option key={t.id} value={t.name_ar}>{t.name_ar}</option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="علمي">علمي</option>
-                      <option value="أدبي">أدبي</option>
-                    </>
-                  )}
-                </select>
-                {!isSec2Or3 && (
-                  <span style={{ fontSize: 11, color: '#0284c7', marginTop: 4, display: 'block', fontWeight: 600 }}>
-                    🔒 (عام) تلقائياً لجميع الصفوف عدا الثاني والثالث الثانوي
-                  </span>
-                )}
-              </div>
-
-              {/* 4. التخصص */}
-              <div className="field-group col-span-1">
-                <label className="field-label">4️⃣ التخصص / المسار</label>
-                <select
-                  className="field-input"
-                  value={isSec2Or3 ? (form.schoolSpecialization || 'عام') : 'عام'}
-                  disabled={!isSec2Or3}
-                  onChange={e => setF('schoolSpecialization', e.target.value)}
-                >
-                  <option value="عام">عام</option>
-                  {formOpts.schoolSpecializations && formOpts.schoolSpecializations.length > 0 ? (
-                    formOpts.schoolSpecializations.filter(sp => sp.name_ar !== 'عام').map(sp => (
-                      <option key={sp.id} value={sp.name_ar}>{sp.name_ar}</option>
-                    ))
-                  ) : (
-                    <>
+              {/* 3. الشعبة والتخصص والمسار - للمرحلة الثانوية والبكالوريا */}
+              {isSecondaryStage && (
+                <div className="field-group col-span-2">
+                  <label className="field-label">3️⃣ المسار والتخصص (الثانوي العام / البكالوريا)</label>
+                  <select
+                    className="field-input"
+                    value={form.schoolSpecialization || 'عام'}
+                    onChange={e => {
+                      const val = e.target.value;
+                      const spec = SECONDARY_SPECIALIZATIONS.find(s => s.name_ar === val);
+                      setForm(f => ({ ...f, schoolSpecialization: val, schoolTrack: spec?.track_code || 'GEN' }));
+                    }}
+                  >
+                    <optgroup label="عام (الصف الأول الثانوي)">
+                      <option value="عام">عام</option>
+                    </optgroup>
+                    <optgroup label="شعب الثانوي العام المصري">
                       <option value="علمي علوم">علمي علوم</option>
                       <option value="علمي رياضيات">علمي رياضيات</option>
                       <option value="أدبي">أدبي</option>
-                    </>
-                  )}
+                    </optgroup>
+                    <optgroup label="مسارات البكالوريا المصرية والدولية">
+                      <option value="مسار الطب وعلوم الحياة (بكالوريا)">مسار الطب وعلوم الحياة (بكالوريا)</option>
+                      <option value="مسار الهندسة وعلوم الحاسب (بكالوريا)">مسار الهندسة وعلوم الحاسب (بكالوريا)</option>
+                      <option value="مسار الأعمال (بكالوريا)">مسار الأعمال (بكالوريا)</option>
+                      <option value="مسار الآداب والفنون (بكالوريا)">مسار الآداب والفنون (بكالوريا)</option>
+                    </optgroup>
+                  </select>
+                </div>
+              )}
+
+              {/* 4. اللغة الأولى */}
+              <div className="field-group col-span-1">
+                <label className="field-label">4️⃣ اللغة الأجنبية الأولى</label>
+                <select className="field-input" value={form.firstLanguage} onChange={e => {
+                  const val = e.target.value;
+                  setForm(f => ({
+                    ...f,
+                    firstLanguage: val,
+                    secondLanguage: f.secondLanguage === val ? 'لا يوجد' : f.secondLanguage
+                  }));
+                }}>
+                  {FOREIGN_LANGUAGES.filter(fl => fl.code !== 'none').map(fl => (
+                    <option key={fl.id} value={fl.name}>{fl.label}</option>
+                  ))}
                 </select>
-                {!isSec2Or3 && (
-                  <span style={{ fontSize: 11, color: '#0284c7', marginTop: 4, display: 'block', fontWeight: 600 }}>
-                    🔒 (عام) تلقائياً لجميع الصفوف عدا الثاني والثالث الثانوي
-                  </span>
-                )}
               </div>
 
-              {/* 5. اللغة الأولى */}
+              {/* 5. اللغة الثانية (تستثني خيار اللغة الأولى تلقائياً) */}
               <div className="field-group col-span-1">
-                <label className="field-label">5️⃣ اللغة الأجنبية الأولى</label>
-                <select className="field-input" value={form.firstLanguage} onChange={e => setF('firstLanguage', e.target.value)}>
-                  {formOpts.foreignLanguages && formOpts.foreignLanguages.length > 0 ? (
-                    formOpts.foreignLanguages.map(fl => (
-                      <option key={fl.id} value={fl.name_ar}>{fl.name_ar}</option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="عربي">عربي</option>
-                      <option value="إنجليزي">إنجليزي</option>
-                      <option value="فرنسي">فرنسي</option>
-                    </>
-                  )}
-                </select>
-              </div>
-
-              {/* 6. اللغة الثانية (تستثني خيار اللغة الأولى تلقائياً) */}
-              <div className="field-group col-span-1">
-                <label className="field-label">6️⃣ اللغة الأجنبية الثانية</label>
+                <label className="field-label">5️⃣ اللغة الأجنبية الثانية</label>
                 <select className="field-input" value={form.secondLanguage} onChange={e => setF('secondLanguage', e.target.value)}>
                   <option value="لا يوجد">لا يوجد / معفى</option>
-                  {(formOpts.foreignLanguages || []).filter(fl => fl.name_ar !== form.firstLanguage).map(fl => (
-                    <option key={fl.id} value={fl.name_ar}>{fl.name_ar}</option>
+                  {FOREIGN_LANGUAGES.filter(fl => fl.name !== form.firstLanguage && fl.code !== 'none').map(fl => (
+                    <option key={fl.id} value={fl.name}>{fl.label}</option>
                   ))}
-                  {!formOpts.foreignLanguages?.length && (
-                    <>
-                      <option value="فرنسي">فرنسي</option>
-                      <option value="ألماني">ألماني</option>
-                      <option value="إيطالي">إيطالي</option>
-                      <option value="إسباني">إسباني</option>
-                    </>
-                  )}
                 </select>
               </div>
 
-              {/* 7. تاريخ الالتحاق */}
+              {/* 6. الموقف من الدمج والإعاقات الرقمية (وزاري) */}
               <div className="field-group col-span-1">
-                <label className="field-label">7️⃣ تاريخ الالتحاق</label>
+                <label className="field-label">6️⃣ الموقف من الدمج والإعاقة (EMIS)</label>
+                <select className="field-input" value={form.disabilityId !== undefined && form.disabilityId !== null ? String(form.disabilityId) : (form.isMerged ? '8' : '0')} onChange={e => {
+                  const val = parseInt(e.target.value, 10);
+                  const disObj = DISABILITY_TYPES.find(d => d.id === val);
+                  setForm(f => ({
+                    ...f,
+                    disabilityId: val,
+                    isMerged: disObj?.isMerged || false,
+                    mergeType: disObj?.typeName || f.mergeType
+                  }));
+                }}>
+                  {DISABILITY_TYPES.map(dt => (
+                    <option key={dt.id} value={String(dt.id)}>{dt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 8. تاريخ الالتحاق */}
+              <div className="field-group col-span-1">
+                <label className="field-label">8️⃣ تاريخ الالتحاق</label>
                 <input type="date" className="field-input" value={form.enrollmentDate} onChange={e => setF('enrollmentDate', e.target.value)} />
               </div>
             </div>
@@ -716,13 +814,13 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
 
               <div className="field-group col-span-1">
                 <label className="field-label">صفة ولي الأمر</label>
-                <select className="field-input" value={form.guardianRelation} onChange={e => setF('guardianRelation', e.target.value)}>
+                <select className="field-input" value={form.guardianRelation || 'أب'} onChange={e => setF('guardianRelation', e.target.value)}>
                   {formOpts.guardianRelations && formOpts.guardianRelations.length > 0 ? (
                     formOpts.guardianRelations.map(gr => (
-                      <option key={gr.id} value={gr.name_ar}>{gr.name_ar}</option>
+                      <option key={gr.id} value={gr.name_ar || gr.name}>{gr.name_ar || gr.name}</option>
                     ))
                   ) : (
-                    RELATION_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)
+                    GUARDIAN_RELATIONS.map(r => <option key={r.id || r.name} value={r.name || r}>{r.label || r.name || r}</option>)
                   )}
                 </select>
               </div>
@@ -752,18 +850,71 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               </div>
             </div>
 
-            <div className="section-title" style={{ marginTop: 20 }}>👩 بيانات الأم الرسمية</div>
+            <div className="section-title" style={{ marginTop: 20 }}>👩 بيانات الأم الرسمية (وزارة التربية والتعليم)</div>
             <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              {/* 4-Part Mother Name inputs */}
+              <div className="field-group col-span-1">
+                <label className="field-label">اسم الأم الأول</label>
+                <input type="text" className="field-input" placeholder="اسم الأم الأول"
+                  value={form.motherFirstName}
+                  onChange={e => {
+                    const m1 = e.target.value;
+                    const comp = [m1, form.motherSecondName, form.motherThirdName, form.motherForthName].filter(Boolean).join(' ');
+                    setForm(f => ({ ...f, motherFirstName: m1, motherName: comp }));
+                  }} />
+              </div>
+              <div className="field-group col-span-1">
+                <label className="field-label">اسم والد الأم</label>
+                <input type="text" className="field-input" placeholder="اسم والد الأم"
+                  value={form.motherSecondName}
+                  onChange={e => {
+                    const m2 = e.target.value;
+                    const comp = [form.motherFirstName, m2, form.motherThirdName, form.motherForthName].filter(Boolean).join(' ');
+                    setForm(f => ({ ...f, motherSecondName: m2, motherName: comp }));
+                  }} />
+              </div>
+              <div className="field-group col-span-1">
+                <label className="field-label">اسم جد الأم</label>
+                <input type="text" className="field-input" placeholder="اسم جد الأم"
+                  value={form.motherThirdName}
+                  onChange={e => {
+                    const m3 = e.target.value;
+                    const comp = [form.motherFirstName, form.motherSecondName, m3, form.motherForthName].filter(Boolean).join(' ');
+                    setForm(f => ({ ...f, motherThirdName: m3, motherName: comp }));
+                  }} />
+              </div>
+              <div className="field-group col-span-1">
+                <label className="field-label">اللقب / عائلة الأم</label>
+                <input type="text" className="field-input" placeholder="اللقب / عائلة الأم"
+                  value={form.motherForthName}
+                  onChange={e => {
+                    const m4 = e.target.value;
+                    const comp = [form.motherFirstName, form.motherSecondName, form.motherThirdName, m4].filter(Boolean).join(' ');
+                    setForm(f => ({ ...f, motherForthName: m4, motherName: comp }));
+                  }} />
+              </div>
+
               <div className="field-group col-span-2">
-                <label className="field-label">اسم الأم بالكامل</label>
+                <label className="field-label">اسم الأم بالكامل (مجمع تلقائياً)</label>
                 <input type="text" className="field-input" placeholder="اسم الأم الثلاثي أو الرباعي"
-                  value={form.motherName} onChange={e => setF('motherName', e.target.value)} />
+                  value={form.motherName} onChange={e => {
+                    const val = e.target.value;
+                    const parts = val.trim().split(/\s+/);
+                    setForm(f => ({
+                      ...f,
+                      motherName: val,
+                      motherFirstName: parts[0] || f.motherFirstName,
+                      motherSecondName: parts[1] || f.motherSecondName,
+                      motherThirdName: parts[2] || f.motherThirdName,
+                      motherForthName: parts.slice(3).join(' ') || f.motherForthName
+                    }));
+                  }} />
               </div>
 
               <div className="field-group col-span-1">
                 <label className="field-label">جنسية الأم</label>
                 <select className="field-input" value={form.motherNationalityId} onChange={e => setF('motherNationalityId', e.target.value)}>
-                  <option value="">-- اختر --</option>
+                  <option value="1">مصرى 🇪🇬</option>
                   {formOpts.nationalities?.map(n => (
                     <option key={n.id} value={String(n.id)}>{n.name_ar || n.name}</option>
                   ))}
@@ -771,7 +922,7 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               </div>
 
               <div className="field-group col-span-1">
-                <label className="field-label">الرقم القومي للأم</label>
+                <label className="field-label">الرقم القومي للأم (14 رقم)</label>
                 <input type="text" className="field-input" dir="ltr" maxLength={14} placeholder="14 رقم"
                   value={form.motherNationalId} onChange={e => setF('motherNationalId', e.target.value)} />
               </div>
@@ -872,21 +1023,19 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
                     <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: 12, paddingTop: 12, borderTop: '1px solid #fde68a' }}>
                       <div className="field-group col-span-1">
                         <label className="field-label">نوع الإعاقة / الدمج</label>
-                        <select className="field-input" value={form.mergeType} onChange={e => setF('mergeType', e.target.value)}>
-                          {formOpts.specialNeeds && formOpts.specialNeeds.length > 0 ? (
-                            formOpts.specialNeeds.map(sn => (
-                              <option key={sn.id} value={sn.name_ar}>{sn.name_ar}</option>
-                            ))
-                          ) : (
-                            <>
-                              <option value="صعوبات تعلم">صعوبات تعلم</option>
-                              <option value="إعاقة سمعية">إعاقة سمعية</option>
-                              <option value="إعاقة بصرية">إعاقة بصرية</option>
-                              <option value="إعاقة حركية">إعاقة حركية</option>
-                              <option value="توحد">توحد</option>
-                              <option value="اضطراب نطق">اضطراب نطق</option>
-                            </>
-                          )}
+                        <select className="field-input" value={form.disabilityId !== undefined && form.disabilityId !== null ? String(form.disabilityId) : (form.isMerged ? '8' : '0')} onChange={e => {
+                          const val = parseInt(e.target.value, 10);
+                          const disObj = DISABILITY_TYPES.find(d => d.id === val);
+                          setForm(f => ({
+                            ...f,
+                            disabilityId: val,
+                            isMerged: disObj?.isMerged || false,
+                            mergeType: disObj?.typeName || f.mergeType
+                          }));
+                        }}>
+                          {DISABILITY_TYPES.filter(dt => dt.id !== 0).map(dt => (
+                            <option key={dt.id} value={String(dt.id)}>{dt.label}</option>
+                          ))}
                         </select>
                       </div>
 

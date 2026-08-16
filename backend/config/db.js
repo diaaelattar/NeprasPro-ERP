@@ -174,6 +174,15 @@ const _migrateSQLiteSchema = (dbInstance) => {
           transferred_from_school       TEXT,
           transferred_from_directorate  TEXT,
           transferred_from_governorate  TEXT,
+          emis_student_code             TEXT,
+          enrollment_status             TEXT DEFAULT 'منقول',
+          is_excluded                   INTEGER DEFAULT 0,
+          class_id                      INTEGER REFERENCES classes(id),
+          student_serial_in_class       INTEGER DEFAULT 0,
+          student_serial_in_grade       INTEGER DEFAULT 0,
+          is_deleted                    INTEGER DEFAULT 0,
+          deleted_at                    TEXT,
+          deletion_reason               TEXT,
           enrollment_date       TEXT DEFAULT (date('now')),
           status                TEXT DEFAULT 'promoted',
           created_at            TEXT DEFAULT (datetime('now'))
@@ -191,8 +200,19 @@ const _migrateSQLiteSchema = (dbInstance) => {
       }
       stmtCols.free();
 
-      const colList = existingCols.join(', ');
-      dbInstance.run(`INSERT INTO students (${colList}) SELECT ${colList} FROM students_migration_backup;`);
+      // Get columns in the new (clean) students table
+      const stmtNewCols = dbInstance.prepare("PRAGMA table_info(students)");
+      const newCols = [];
+      while (stmtNewCols.step()) {
+        newCols.push(stmtNewCols.getAsObject().name);
+      }
+      stmtNewCols.free();
+
+      // Only copy columns that exist in BOTH tables to avoid "no column named X" errors
+      const newColSet = new Set(newCols);
+      const safeColList = existingCols.filter(c => newColSet.has(c)).join(', ');
+
+      dbInstance.run(`INSERT INTO students (${safeColList}) SELECT ${safeColList} FROM students_migration_backup;`);
       dbInstance.run("DROP TABLE students_migration_backup;");
       dbInstance.run("PRAGMA foreign_keys=ON;");
       console.log("[DB Migration] Clean students table migration complete.");
@@ -209,12 +229,15 @@ const _migrateSQLiteSchema = (dbInstance) => {
           grade_id         INTEGER NOT NULL REFERENCES grades_lookup(id),
           academic_year_id INTEGER NOT NULL REFERENCES academic_years(id),
           class_name       TEXT NOT NULL,
+          class_number     INTEGER NOT NULL DEFAULT 1,
+          display_order    INTEGER DEFAULT 1,
           class_code       TEXT,
           capacity         INTEGER DEFAULT 40,
           UNIQUE (grade_id, academic_year_id, class_name)
         );
+        CREATE INDEX IF NOT EXISTS idx_classes_sort ON classes (grade_id, academic_year_id, class_number ASC);
       `);
-      console.log('[DB Migration] Created classes table.');
+      console.log('[DB Migration] Created classes table with class_number.');
     } else {
       try {
         const clsCols = [];
@@ -225,6 +248,43 @@ const _migrateSQLiteSchema = (dbInstance) => {
           dbInstance.run("ALTER TABLE classes ADD COLUMN class_code TEXT;");
           console.log('[DB Migration] Added class_code column to classes table.');
         }
+        if (!clsCols.includes('class_number')) {
+          dbInstance.run("ALTER TABLE classes ADD COLUMN class_number INTEGER DEFAULT 1;");
+          console.log('[DB Migration] Added class_number column to classes table.');
+        }
+        if (!clsCols.includes('display_order')) {
+          dbInstance.run("ALTER TABLE classes ADD COLUMN display_order INTEGER DEFAULT 1;");
+          console.log('[DB Migration] Added display_order column to classes table.');
+        }
+        dbInstance.run("CREATE INDEX IF NOT EXISTS idx_classes_sort ON classes (grade_id, academic_year_id, class_number ASC);");
+
+        // Backfill class_number from class_name for existing records
+        try {
+          const allExistingClasses = [];
+          const sCls = dbInstance.prepare("SELECT id, class_name, grade_id, academic_year_id FROM classes WHERE class_number IS NULL OR class_number = 1");
+          while (sCls.step()) allExistingClasses.push(sCls.getAsObject());
+          sCls.free();
+
+          const gradeCounters = {};
+          for (const cl of allExistingClasses) {
+            const key = `${cl.grade_id}_${cl.academic_year_id}`;
+            gradeCounters[key] = (gradeCounters[key] || 0) + 1;
+            
+            let extractedNum = null;
+            const cName = cl.class_name ? String(cl.class_name).trim() : '';
+            // Pattern like "1 / 3" or "1 / 3 ع" or "3/1"
+            const slashMatch = cName.match(/\/\s*(\d+)/);
+            if (slashMatch) {
+              extractedNum = parseInt(slashMatch[1], 10);
+            } else {
+              const numMatch = cName.match(/(\d+)/);
+              if (numMatch) extractedNum = parseInt(numMatch[1], 10);
+            }
+
+            const finalNum = (extractedNum && extractedNum > 0) ? extractedNum : gradeCounters[key];
+            dbInstance.run("UPDATE classes SET class_number = ?, display_order = ? WHERE id = ?", [finalNum, finalNum, cl.id]);
+          }
+        } catch (_) {}
       } catch (_) {}
     }
 
@@ -245,6 +305,20 @@ const _migrateSQLiteSchema = (dbInstance) => {
       `);
       console.log('[DB Migration] Created class_enrollments table.');
     }
+
+    // 4b. Ensure 'stage_serial_counters' table exists
+    try {
+      dbInstance.run(`
+        CREATE TABLE IF NOT EXISTS stage_serial_counters (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          section_id       INTEGER REFERENCES sections(id) ON DELETE CASCADE,
+          stage_id         INTEGER REFERENCES stages_lookup(id) ON DELETE CASCADE,
+          prefix           TEXT NOT NULL,
+          last_serial      INTEGER DEFAULT 0,
+          academic_year_id INTEGER REFERENCES academic_years(id)
+        );
+      `);
+    } catch (_) {}
 
     // 5. Ensure soft-delete columns exist on students
     const stmtInfo2 = dbInstance.prepare("PRAGMA table_info(students)");
@@ -350,6 +424,217 @@ const _migrateSQLiteSchema = (dbInstance) => {
       console.log("[DB Migration] Added transferred_from_governorate to students.");
     }
 
+    // 6b. New dedicated columns for class, codes & Ministry fields
+    const newStudentCols = [
+      ['class_id', 'INTEGER REFERENCES classes(id)'],
+      ['section_code', 'TEXT'],
+      ['stage_code', 'TEXT'],
+      ['grade_code', 'TEXT'],
+      ['class_code', 'TEXT'],
+      ['student_serial_in_class', 'INTEGER DEFAULT 0'],
+      ['student_serial_in_grade', 'INTEGER DEFAULT 0'],
+      ['first_name', 'TEXT'],
+      ['father_name', 'TEXT'],
+      ['grandfather_name', 'TEXT'],
+      ['family_name', 'TEXT'],
+      ['mother_first_name', 'TEXT'],
+      ['mother_second_name', 'TEXT'],
+      ['mother_third_name', 'TEXT'],
+      ['mother_fourth_name', 'TEXT'],
+      ['birth_governorate_id', 'INTEGER'],
+      ['father_nationality_id', 'INTEGER REFERENCES nationalities(id)'],
+      ['study_type_id', 'INTEGER'],
+      ['registration_status_id', 'INTEGER'],
+      ['division_id', 'INTEGER'],
+      ['specialization_id', 'INTEGER'],
+      ['language_id_1', 'INTEGER'],
+      ['language_id_2', 'INTEGER'],
+      ['disability_id', 'INTEGER']
+    ];
+
+    newStudentCols.forEach(([col, type]) => {
+      if (!cols2.includes(col)) {
+        try {
+          dbInstance.run(`ALTER TABLE students ADD COLUMN ${col} ${type};`);
+          console.log(`[DB Migration] Added ${col} to students table.`);
+        } catch (_) {}
+      }
+    });
+
+    // Ensure fast lookup indexes on students
+    try {
+      dbInstance.run("CREATE INDEX IF NOT EXISTS idx_students_dedicated_lookup ON students(section_id, stage_id, grade_id, class_id);");
+      dbInstance.run("CREATE INDEX IF NOT EXISTS idx_students_code_lookup ON students(section_code, stage_code, grade_code, class_code);");
+    } catch (_) {}
+
+    // Backfill direct codes for existing students
+    try {
+      dbInstance.run(`
+        UPDATE students SET
+          section_code = (SELECT code FROM sections WHERE sections.id = students.section_id),
+          stage_code   = (SELECT code FROM stages_lookup WHERE stages_lookup.id = students.stage_id),
+          grade_code   = (SELECT code FROM grades_lookup WHERE grades_lookup.id = students.grade_id),
+          class_code   = (SELECT class_code FROM classes WHERE classes.id = students.class_id)
+        WHERE section_code IS NULL OR stage_code IS NULL OR grade_code IS NULL;
+      `);
+      console.log("[DB Migration] Backfilled direct codes for existing students.");
+    } catch (_) {}
+
+    // Standardize grades_lookup names to 'الصف الأول', 'الصف الثاني', etc.
+    try {
+      const arabicNumerals = ['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع','العاشر','الحادي عشر','الثاني عشر'];
+      arabicNumerals.forEach((numeral, idx) => {
+        dbInstance.run(
+          "UPDATE grades_lookup SET grade_name_ar = ? WHERE grade_number = ?;",
+          [`الصف ${numeral}`, idx + 1]
+        );
+      });
+      // Ensure inactive stages are set to is_active = 0
+      dbInstance.run("UPDATE stages_lookup SET is_active = 0 WHERE section_id NOT IN (SELECT id FROM sections WHERE is_active = 1);");
+      console.log("[DB Migration] Standardized grade names to 'الصف الأول', 'الصف الثاني'...");
+    } catch (_) {}
+
+    // Enterprise RBAC Permissions Matrix Migration
+    try {
+      try {
+        dbInstance.run("ALTER TABLE permissions ADD COLUMN category TEXT;");
+      } catch (_) {}
+
+      const fullPerms = [
+        // 1. Students
+        ['students.view', 'استعراض بيانات وقوائم الطلاب', 'students'],
+        ['students.create', 'قيد وتسجيل طالب جديد', 'students'],
+        ['students.edit', 'تعديل وتحديث بيانات الطلاب', 'students'],
+        ['students.delete', 'حذف وأرشفة قيد الطلاب', 'students'],
+        ['students.distribute', 'توزيع الفصول والقوائم المدرسية', 'students'],
+        ['students.transfers', 'إدارة التحويلات المدرسية', 'students'],
+        ['students.emis_sync', 'مزامنة واستيراد بيانات EMIS', 'students'],
+        ['students.reports', 'استخراج سجلات القيد وكشوف 41 والمطبوعات', 'students'],
+        
+        // 2. Staff HR
+        ['staff.view', 'استعراض ملفات وسجلات الموظفين', 'staff'],
+        ['staff.create', 'إضافة كادر وظيفي جديد', 'staff'],
+        ['staff.edit', 'تعديل بيانات الموظف والأنصبة والترقيات', 'staff'],
+        ['staff.delete', 'أرشفة وإنهاء خدمة موظف', 'staff'],
+        ['staff.reports', 'استخراج كشوف النصاب والتكليفات الرسمية', 'staff'],
+        
+        // 3. Control & Exams
+        ['control.view', 'استعراض شاشات وسجلات الكنترول', 'control'],
+        ['control.setup', 'إعداد اللجان وأرقام الجلوس والتوزيع السري', 'control'],
+        ['control.input_marks', 'رصد درجات الامتحانات وأعمال السنة', 'control'],
+        ['control.modify_marks', 'تعديل درجات مرصودة سابقاً', 'control'],
+        ['control.review_raffa', 'لجنة الرفع والحالات الخاصة وقواعد الجبر', 'control'],
+        ['control.lock', 'اعتماد وإغلاق الفترات الامتحانية نهائياً', 'control'],
+        ['control.print_certificates', 'طباعة الشهادات وكشوف النتائج والشيت الكنترولي', 'control'],
+        
+        // 4. Finance & Treasury
+        ['finance.view', 'استعراض الرسوم والمتحصلات والخزينة', 'finance'],
+        ['finance.collect', 'تحصيل الرسوم والأقساط وإصدار سندات قبض', 'finance'],
+        ['finance.discounts', 'تطبيق الإعفاءات ومنح الحالات الخاصة', 'finance'],
+        ['finance.reports', 'استخراج كشوف الحساب والميزانيات المالية', 'finance'],
+        
+        // 5. System Administration
+        ['admin.users_manage', 'إدارة حسابات المستخدمين وكلمات المرور', 'admin'],
+        ['admin.roles_perms', 'تخصيص وتعديل مصفوفة الصلاحيات والأدوار', 'admin'],
+        ['admin.institution_settings', 'إعدادات المؤسسة والهياكل والأعوام الدراسية', 'admin'],
+        ['admin.backups', 'إنشاء واستعادة النسخ الاحتياطية للأمان', 'admin'],
+        ['admin.audit_logs', 'استعراض سجل العمليات والتدقيق الأمني', 'admin'],
+        ['admin.system_reset', 'إعادة ضبط المصنع وتصفير النظام', 'admin']
+      ];
+
+      for (const [key, nameAr, cat] of fullPerms) {
+        dbInstance.run(
+          "INSERT INTO permissions (perm_key, perm_name_ar, category) VALUES (?, ?, ?) ON CONFLICT(perm_key) DO UPDATE SET perm_name_ar=excluded.perm_name_ar, category=excluded.category;",
+          [key, nameAr, cat]
+        );
+      }
+
+      // Ensure super_admin has all permissions
+      dbInstance.run(`
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r, permissions p WHERE r.role_name = 'super_admin'
+      `);
+
+      // Ensure data_entry has student permissions
+      dbInstance.run(`
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r, permissions p WHERE r.role_name = 'data_entry' AND p.category = 'students'
+      `);
+
+      // Ensure hr_officer has staff permissions
+      dbInstance.run(`
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r, permissions p WHERE r.role_name = 'hr_officer' AND p.category = 'staff'
+      `);
+
+      // Ensure head_control has control permissions
+      dbInstance.run(`
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r, permissions p WHERE r.role_name = 'head_control' AND p.category = 'control'
+      `);
+
+      // Ensure accountant has finance permissions
+      dbInstance.run(`
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r, permissions p WHERE r.role_name = 'accountant' AND p.category = 'finance'
+      `);
+
+      // Ensure viewer has view permissions
+      dbInstance.run(`
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id FROM roles r, permissions p WHERE r.role_name = 'viewer' AND p.perm_key LIKE '%.view'
+      `);
+
+      console.log("[DB Migration] Enterprise RBAC permissions & role mappings verified.");
+    } catch (err) {
+      console.error("[DB Migration RBAC Error]", err.message);
+    }
+
+    // 6c. Create student_academic_history table for lifecycle tracking
+    const sahStmt = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='student_academic_history'");
+    const sahExists = sahStmt.step();
+    sahStmt.free();
+    if (!sahExists) {
+      dbInstance.run(`
+        CREATE TABLE IF NOT EXISTS student_academic_history (
+          id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+          student_id              INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+          academic_year_id        INTEGER NOT NULL REFERENCES academic_years(id),
+          section_id              INTEGER NOT NULL REFERENCES sections(id),
+          stage_id                INTEGER NOT NULL REFERENCES stages_lookup(id),
+          grade_id                INTEGER NOT NULL REFERENCES grades_lookup(id),
+          class_id                INTEGER REFERENCES classes(id),
+          section_code            TEXT,
+          stage_code              TEXT,
+          grade_code              TEXT,
+          class_code              TEXT,
+          student_serial_in_class INTEGER DEFAULT 0,
+          student_serial_in_grade INTEGER DEFAULT 0,
+          enrollment_status       TEXT DEFAULT 'promoted',
+          created_at              TEXT DEFAULT (datetime('now')),
+          UNIQUE (student_id, academic_year_id)
+        );
+      `);
+      dbInstance.run("CREATE INDEX IF NOT EXISTS idx_student_academic_history ON student_academic_history(student_id, academic_year_id);");
+      console.log("[DB Migration] Created student_academic_history table.");
+    } else {
+      // Ensure history table also has code columns
+      try {
+        const sahCols = [];
+        const sahInfo = dbInstance.prepare("PRAGMA table_info(student_academic_history)");
+        while (sahInfo.step()) sahCols.push(sahInfo.getAsObject().name);
+        sahInfo.free();
+
+        ['section_code', 'stage_code', 'grade_code', 'class_code'].forEach(c => {
+          if (!sahCols.includes(c)) {
+            dbInstance.run(`ALTER TABLE student_academic_history ADD COLUMN ${c} TEXT;`);
+          }
+        });
+      } catch (_) {}
+    }
+
+
+
     // Ensure special_needs_lookup table exists
     const snStmt = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='special_needs_lookup'");
     const snExists = snStmt.step();
@@ -404,31 +689,47 @@ const _migrateSQLiteSchema = (dbInstance) => {
       console.log('[DB Migration] Created emis_sync_log table.');
     }
 
-    // 8. Ensure special case tables exist
-    const sctStmt = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='special_case_types'");
-    const sctExists = sctStmt.step();
-    sctStmt.free();
-    if (!sctExists) {
-      dbInstance.run(`
-        CREATE TABLE IF NOT EXISTS special_case_types (
-          id          INTEGER PRIMARY KEY AUTOINCREMENT,
-          name_ar     TEXT UNIQUE NOT NULL,
-          type_code   TEXT UNIQUE NOT NULL
+    // 7b. Ensure institution_config table exists with config_key column
+    try {
+      sqliteDb ? sqliteDb.run(`
+        CREATE TABLE IF NOT EXISTS institution_config (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          config_key   TEXT UNIQUE NOT NULL,
+          config_value TEXT,
+          updated_at   TEXT DEFAULT (datetime('now'))
+        );
+      `) : dbInstance.run(`
+        CREATE TABLE IF NOT EXISTS institution_config (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          config_key   TEXT UNIQUE NOT NULL,
+          config_value TEXT,
+          updated_at   TEXT DEFAULT (datetime('now'))
         );
       `);
-      console.log('[DB Migration] Created special_case_types table.');
+    } catch (_) {}
 
-      // Seed default types
-      const types = [
-        ['دمج', 'merged'],
-        ['يتيم', 'orphan'],
-        ['توأم / إخوة', 'twin'],
-        ['منقطع', 'discontinued'],
-        ['وافد', 'foreigner']
-      ];
-      for (const t of types) {
-        dbInstance.run('INSERT OR IGNORE INTO special_case_types (name_ar, type_code) VALUES (?, ?)', t);
+    // 8. Ensure special case tables exist
+    try {
+      const sctStmt = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='special_case_types'");
+      const sctExists = sctStmt.step();
+      sctStmt.free();
+      if (!sctExists) {
+        dbInstance.run(`
+          CREATE TABLE IF NOT EXISTS special_case_types (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            code               TEXT UNIQUE NOT NULL,
+            name_ar            TEXT NOT NULL,
+            description        TEXT,
+            requires_document  INTEGER DEFAULT 0,
+            is_active          INTEGER DEFAULT 1
+          );
+        `);
+        console.log('[DB Migration] Created special_case_types table.');
       }
+      dbInstance.run("INSERT OR IGNORE INTO special_case_types (name_ar, code) VALUES ('محول (تحويل وارد)', 'transferred_in')");
+      dbInstance.run("INSERT OR IGNORE INTO special_case_types (name_ar, code) VALUES ('محول (تحويل صادر)', 'transferred_out')");
+    } catch (e) {
+      console.warn('[DB Migration] special_case_types error:', e.message);
     }
 
     const sscStmt = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='student_special_cases'");
@@ -471,12 +772,46 @@ const _migrateSQLiteSchema = (dbInstance) => {
       console.log('[DB Migration] Created student_transfers table.');
     }
 
+    // 9b. Ensure fees_status and books_status columns in student_transfers
+    try {
+      const trColsStmt = dbInstance.prepare("PRAGMA table_info(student_transfers)");
+      const trCols = [];
+      while (trColsStmt.step()) trCols.push(trColsStmt.getAsObject().name);
+      trColsStmt.free();
+      if (!trCols.includes('fees_status')) {
+        dbInstance.run("ALTER TABLE student_transfers ADD COLUMN fees_status TEXT DEFAULT 'سدد';");
+        console.log("[DB Migration] Added fees_status to student_transfers.");
+      }
+      if (!trCols.includes('books_status')) {
+        dbInstance.run("ALTER TABLE student_transfers ADD COLUMN books_status TEXT DEFAULT 'استلم';");
+        console.log("[DB Migration] Added books_status to student_transfers.");
+      }
+      if (!trCols.includes('duration_in_grade')) {
+        dbInstance.run("ALTER TABLE student_transfers ADD COLUMN duration_in_grade TEXT DEFAULT 'سنة أولى (مستجد)';");
+        console.log("[DB Migration] Added duration_in_grade to student_transfers.");
+      }
+    } catch (e) {
+      console.warn('[DB Migration] student_transfers column check error:', e.message);
+    }
+
     // 10. Ensure institution_config has the new school settings columns
     const instStmt = dbInstance.prepare("PRAGMA table_info(institution_config)");
     const instCols = [];
     while (instStmt.step()) instCols.push(instStmt.getAsObject().name);
     instStmt.free();
 
+    if (!instCols.includes('governorate_id')) {
+      dbInstance.run("ALTER TABLE institution_config ADD COLUMN governorate_id INTEGER;");
+      console.log("[DB Migration] Added governorate_id to institution_config.");
+    }
+    if (!instCols.includes('administration_id')) {
+      dbInstance.run("ALTER TABLE institution_config ADD COLUMN administration_id INTEGER;");
+      console.log("[DB Migration] Added administration_id to institution_config.");
+    }
+    if (!instCols.includes('classification_id')) {
+      dbInstance.run("ALTER TABLE institution_config ADD COLUMN classification_id INTEGER;");
+      console.log("[DB Migration] Added classification_id to institution_config.");
+    }
     if (!instCols.includes('education_type')) {
       dbInstance.run("ALTER TABLE institution_config ADD COLUMN education_type TEXT;");
       console.log("[DB Migration] Added education_type to institution_config.");
@@ -544,6 +879,63 @@ const _migrateSQLiteSchema = (dbInstance) => {
       }
     });
 
+    // Check if sections table has legacy restrictive CHECK constraint lacking 'international'
+    const secSqlStmt = dbInstance.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='sections'");
+    let secTableSql = "";
+    if (secSqlStmt.step()) secTableSql = secSqlStmt.getAsObject().sql || "";
+    secSqlStmt.free();
+
+    if (secTableSql && (secTableSql.includes("CHECK (type IN") || secTableSql.includes("CHECK(type IN")) && !secTableSql.includes("'international'")) {
+      console.log("[DB Migration] Upgrading sections table DDL to support 'international' section...");
+      try {
+        dbInstance.run("PRAGMA foreign_keys=OFF;");
+        dbInstance.run("ALTER TABLE sections RENAME TO sections_old;");
+        dbInstance.run(`
+          CREATE TABLE sections (
+            id                              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                            TEXT UNIQUE NOT NULL,
+            type                            TEXT NOT NULL,
+            education_type                  TEXT,
+            legal_status                    TEXT,
+            code                            INTEGER,
+            is_active                       INTEGER DEFAULT 1,
+            section_director_name           TEXT,
+            section_director_qualification  TEXT,
+            section_director_national_id    TEXT,
+            section_director_phone          TEXT,
+            section_deputy_name             TEXT,
+            section_deputy_phone            TEXT,
+            students_vice_name              TEXT,
+            students_vice_phone             TEXT,
+            staff_vice_name                 TEXT,
+            staff_vice_phone                TEXT
+          );
+        `);
+        const stmtOld = dbInstance.prepare("PRAGMA table_info(sections_old)");
+        const oldCols = [];
+        while (stmtOld.step()) oldCols.push(stmtOld.getAsObject().name);
+        stmtOld.free();
+
+        const commonCols = oldCols.filter(c => [
+          'id', 'name', 'type', 'education_type', 'legal_status', 'code', 'is_active',
+          'section_director_name', 'section_director_qualification', 'section_director_national_id',
+          'section_director_phone', 'section_deputy_name', 'section_deputy_phone',
+          'students_vice_name', 'students_vice_phone', 'staff_vice_name', 'staff_vice_phone'
+        ].includes(c));
+
+        if (commonCols.length > 0) {
+          const colList = commonCols.join(',');
+          dbInstance.run(`INSERT INTO sections (${colList}) SELECT ${colList} FROM sections_old;`);
+        }
+        dbInstance.run("DROP TABLE sections_old;");
+        dbInstance.run("PRAGMA foreign_keys=ON;");
+        console.log("[DB Migration] sections table upgraded cleanly.");
+      } catch (migErr) {
+        console.warn("[DB Migration Warning] sections upgrade skipped:", migErr.message);
+        try { dbInstance.run("PRAGMA foreign_keys=ON;"); } catch (_) {}
+      }
+    }
+
     const stageStmt = dbInstance.prepare("PRAGMA table_info(stages_lookup)");
     const stageCols = [];
     while (stageStmt.step()) stageCols.push(stageStmt.getAsObject().name);
@@ -569,6 +961,23 @@ const _migrateSQLiteSchema = (dbInstance) => {
         console.log(`[DB Migration] Added ${col} to stages_lookup.`);
       }
     });
+
+    // Ensure main section is active by default
+    try {
+      dbInstance.run("UPDATE sections SET is_active = 1 WHERE id = 1 OR code = 100 OR name = 'القسم العربي' OR name = 'القسم الرئيسي';");
+      // Do not auto-activate all stages on startup — stages are active only when selected by user in wizard or added in settings.
+    } catch (_) {}
+
+    // Ensure classes table has section_id, stage_id, class_code
+    try {
+      const clsCols = [];
+      const clsStmt = dbInstance.prepare("PRAGMA table_info(classes)");
+      while (clsStmt.step()) clsCols.push(clsStmt.getAsObject().name);
+      clsStmt.free();
+      if (!clsCols.includes('section_id')) dbInstance.run("ALTER TABLE classes ADD COLUMN section_id INTEGER REFERENCES sections(id);");
+      if (!clsCols.includes('stage_id')) dbInstance.run("ALTER TABLE classes ADD COLUMN stage_id INTEGER REFERENCES stages_lookup(id);");
+      if (!clsCols.includes('class_code')) dbInstance.run("ALTER TABLE classes ADD COLUMN class_code INTEGER;");
+    } catch (_) {}
 
     // Ensure staff table exists in SQLite
     const staffStmt = dbInstance.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='staff'");
@@ -912,6 +1321,24 @@ const _migrateSQLiteSchema = (dbInstance) => {
       }
     });
 
+    // Ensure settings_audit_log table exists (migration for older databases)
+    try {
+      dbInstance.run(`
+        CREATE TABLE IF NOT EXISTS settings_audit_log (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          setting_area TEXT NOT NULL,
+          setting_key  TEXT,
+          old_value    TEXT,
+          new_value    TEXT,
+          changed_by   TEXT DEFAULT 'admin',
+          created_at   TEXT DEFAULT (datetime('now'))
+        );
+      `);
+      console.log('[DB Migration] settings_audit_log table ensured.');
+    } catch (e) {
+      console.warn('[DB Migration] settings_audit_log already exists or error:', e.message);
+    }
+
     // Create Master Subjects Lookup Table
     dbInstance.run(`
       CREATE TABLE IF NOT EXISTS master_subjects (
@@ -1159,49 +1586,80 @@ const _migrateSQLiteSchema = (dbInstance) => {
       countStmt.free();
 
       if (totalYears === 0) {
-        // No years at all → create the correct one
+        // No years at all → create default initial year
         dbInstance.run(
           'INSERT INTO academic_years (year_label, start_date, end_date, is_current) VALUES (?, ?, ?, 1)',
           [label, startDate, endDate]
         );
-        console.log(`[DB Migration] Created academic year: ${label} (is_current=1)`);
+        console.log(`[DB Migration] Created initial academic year: ${label} (is_current=1)`);
       } else {
-        // Check if the correct year exists
-        const existsStmt = dbInstance.prepare('SELECT id FROM academic_years WHERE year_label = ?');
-        existsStmt.bind([label]);
-        let correctYearId = null;
-        if (existsStmt.step()) correctYearId = existsStmt.getAsObject().id;
-        existsStmt.free();
-
-        if (!correctYearId) {
-          // Correct year doesn't exist → create it and mark as current
-          dbInstance.run('UPDATE academic_years SET is_current = 0');
-          dbInstance.run(
-            'INSERT INTO academic_years (year_label, start_date, end_date, is_current) VALUES (?, ?, ?, 1)',
-            [label, startDate, endDate]
-          );
-          console.log(`[DB Migration] Auto-created missing academic year: ${label} and set as current.`);
-        } else {
-          // Correct year exists — ensure it's marked as current
-          const curStmt = dbInstance.prepare('SELECT id FROM academic_years WHERE is_current = 1 AND year_label = ?');
-          curStmt.bind([label]);
-          const alreadyCurrent = curStmt.step();
-          curStmt.free();
-
-          if (!alreadyCurrent) {
-            // Fix: set the correct year as current
-            dbInstance.run('UPDATE academic_years SET is_current = 0');
-            dbInstance.run('UPDATE academic_years SET is_current = 1 WHERE id = ?', [correctYearId]);
-            console.log(`[DB Migration] Fixed is_current → academic year ${label} (id=${correctYearId}) is now current.`);
-          }
+        // Ensure at least one year is marked as current without creating extra years
+        const hasCurrentStmt = dbInstance.prepare('SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1');
+        const hasCurrent = hasCurrentStmt.step();
+        hasCurrentStmt.free();
+        if (!hasCurrent) {
+          dbInstance.run('UPDATE academic_years SET is_current = 1 WHERE id = (SELECT MAX(id) FROM academic_years)');
         }
+
+        // Cleanup unreferenced non-current academic years (e.g., legacy auto-created 2025/2026)
+        try {
+          dbInstance.run(`
+            DELETE FROM academic_years 
+            WHERE is_current = 0 
+              AND id NOT IN (SELECT DISTINCT academic_year_id FROM students WHERE academic_year_id IS NOT NULL)
+              AND id NOT IN (SELECT DISTINCT academic_year_id FROM classrooms WHERE academic_year_id IS NOT NULL);
+          `);
+        } catch (_) {}
       }
     } catch (yearErr) {
       console.warn('[DB Migration] Academic year auto-correction skipped:', yearErr.message);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // 18. Lookup Tables — Seed Master Reference Data (CODE-based architecture)
+    // 18. Ensure institution structure tables exist (migration guard for old DBs)
+    //     These tables are also created in _seedLookupData, but if _seedLookupData
+    //     throws early, setup.controller.js would fail with "no such table".
+    // ──────────────────────────────────────────────────────────────────────────
+    try {
+      dbInstance.run(`CREATE TABLE IF NOT EXISTS sections_master_lookup (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        code     TEXT UNIQUE NOT NULL,
+        name_ar  TEXT UNIQUE NOT NULL
+      );`);
+      dbInstance.run(`CREATE TABLE IF NOT EXISTS education_types_lookup (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        code     TEXT UNIQUE NOT NULL,
+        name_ar  TEXT UNIQUE NOT NULL
+      );`);
+      dbInstance.run(`CREATE TABLE IF NOT EXISTS institution_sections (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        section_master_id INTEGER NOT NULL REFERENCES sections_master_lookup(id),
+        education_type_id INTEGER NOT NULL REFERENCES education_types_lookup(id),
+        is_active         INTEGER DEFAULT 1,
+        UNIQUE(section_master_id)
+      );`);
+      dbInstance.run(`CREATE TABLE IF NOT EXISTS institution_stages (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        institution_section_id INTEGER NOT NULL REFERENCES institution_sections(id) ON DELETE CASCADE,
+        stage_master_id        INTEGER NOT NULL REFERENCES stages_master_lookup(id),
+        is_active              INTEGER DEFAULT 1,
+        UNIQUE(institution_section_id, stage_master_id)
+      );`);
+      dbInstance.run(`CREATE TABLE IF NOT EXISTS institution_grades (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        institution_stage_id INTEGER NOT NULL REFERENCES institution_stages(id) ON DELETE CASCADE,
+        grade_master_id      INTEGER NOT NULL REFERENCES grades_master_lookup(id),
+        display_name_ar      TEXT NOT NULL,
+        is_active            INTEGER DEFAULT 1,
+        UNIQUE(institution_stage_id, grade_master_id)
+      );`);
+      console.log('[DB Migration] Institution structure tables verified.');
+    } catch (instErr) {
+      console.error('[DB Migration] Institution tables guard error:', instErr.message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 19. Lookup Tables — Seed Master Reference Data (CODE-based architecture)
     //     All queries/filters/statistics use CODE not Arabic text → no typo errors.
     //     INSERT OR IGNORE ensures existing data is NEVER overwritten on update.
     // ──────────────────────────────────────────────────────────────────────────
@@ -1509,18 +1967,26 @@ const _migrateMasterPresetStructure = (dbInstance = sqliteDb) => {
     const { MASTER_STRUCTURE } = require('./master_structure');
 
     const _all = (sql, params = []) => {
+      const cleanParams = (params || []).map(p => p === undefined ? null : p);
       const stmt = targetDb.prepare(sql);
-      if (params.length) stmt.bind(params);
+      if (cleanParams.length) stmt.bind(cleanParams);
       const rows = [];
       while (stmt.step()) rows.push(stmt.getAsObject());
       stmt.free();
       return rows;
     };
     const _get = (sql, params = []) => _all(sql, params)[0] || null;
+    const _run = (sql, params = []) => {
+      const cleanParams = (params || []).map(p => p === undefined ? null : p);
+      return targetDb.run(sql, cleanParams);
+    };
 
     const secCols = _all("PRAGMA table_info(sections)").map(c => c.name);
     if (!secCols.includes('code')) targetDb.run("ALTER TABLE sections ADD COLUMN code INTEGER;");
     if (!secCols.includes('is_active')) targetDb.run("ALTER TABLE sections ADD COLUMN is_active INTEGER DEFAULT 1;");
+    if (!secCols.includes('type')) targetDb.run("ALTER TABLE sections ADD COLUMN type TEXT;");
+    if (!secCols.includes('education_type')) targetDb.run("ALTER TABLE sections ADD COLUMN education_type TEXT;");
+    if (!secCols.includes('legal_status')) targetDb.run("ALTER TABLE sections ADD COLUMN legal_status TEXT;");
 
     // Ensure control_marks_audit table exists for auditing changes
     targetDb.run(`
@@ -1548,53 +2014,63 @@ const _migrateMasterPresetStructure = (dbInstance = sqliteDb) => {
     if (!grdCols.includes('code')) targetDb.run("ALTER TABLE grades_lookup ADD COLUMN code INTEGER;");
     if (!grdCols.includes('is_active')) targetDb.run("ALTER TABLE grades_lookup ADD COLUMN is_active INTEGER DEFAULT 1;");
 
+    const stuCols = _all("PRAGMA table_info(students)").map(c => c.name);
+    if (!stuCols.includes('first_name')) targetDb.run("ALTER TABLE students ADD COLUMN first_name TEXT;");
+    if (!stuCols.includes('father_name')) targetDb.run("ALTER TABLE students ADD COLUMN father_name TEXT;");
+    if (!stuCols.includes('gfather_name')) targetDb.run("ALTER TABLE students ADD COLUMN gfather_name TEXT;");
+    if (!stuCols.includes('family_name')) targetDb.run("ALTER TABLE students ADD COLUMN family_name TEXT;");
+    if (!stuCols.includes('mother_first_name')) targetDb.run("ALTER TABLE students ADD COLUMN mother_first_name TEXT;");
+    if (!stuCols.includes('mother_second_name')) targetDb.run("ALTER TABLE students ADD COLUMN mother_second_name TEXT;");
+    if (!stuCols.includes('mother_third_name')) targetDb.run("ALTER TABLE students ADD COLUMN mother_third_name TEXT;");
+    if (!stuCols.includes('mother_forth_name')) targetDb.run("ALTER TABLE students ADD COLUMN mother_forth_name TEXT;");
+
     // Cleanup invalid fake sections created by legacy setup wizard
     try {
       targetDb.run("DELETE FROM sections WHERE name LIKE 'مرحلة %'");
     } catch (_) {}
 
-    MASTER_STRUCTURE.forEach(sec => {
-      let existingSec = _get("SELECT * FROM sections WHERE code = ? OR name = ?", [sec.section_code, sec.name]);
+    MASTER_STRUCTURE.forEach((sec, idx) => {
+      let existingSec = _get("SELECT * FROM sections WHERE code = ? OR name = ?", [sec.section_code || null, sec.name || null]);
       let secId;
       if (existingSec) {
         secId = existingSec.id;
-        // Only update the code — do NOT override is_active set by user
-        targetDb.run("UPDATE sections SET code = ? WHERE id = ?", [sec.section_code, secId]);
+        // Only update code
+        _run("UPDATE sections SET code = ? WHERE id = ?", [sec.section_code || null, secId]);
       } else {
-        // Insert as INACTIVE (is_active=0) so it doesn't show in sidebar
-        // The user must explicitly activate sections from Settings
-        targetDb.run(
+        // Main section (first section / code 100) is ACTIVE (is_active=1) by default
+        const isActiveDefault = (idx === 0 || sec.section_code === 100) ? 1 : 0;
+        _run(
           "INSERT INTO sections (name, type, education_type, legal_status, code, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-          [sec.name, sec.type, sec.education_type, 'حكومي', sec.section_code, 0]
+          [sec.name || null, sec.type || null, sec.education_type || null, 'حكومي', sec.section_code || null, isActiveDefault]
         );
-        secId = _get("SELECT last_insert_rowid() AS id").id;
+        secId = _get("SELECT last_insert_rowid() AS id")?.id;
       }
 
-      sec.stages.forEach(stg => {
-        let existingStg = _get("SELECT * FROM stages_lookup WHERE section_id = ? AND (stage_name = ? OR code = ?)", [secId, stg.stage_name, stg.stage_code]);
+      (sec.stages || []).forEach(stg => {
+        let existingStg = _get("SELECT * FROM stages_lookup WHERE section_id = ? AND (stage_name = ? OR (code = ? AND code IS NOT NULL))", [secId, stg.stage_name || null, stg.stage_code || null]);
         let stgId;
         if (existingStg) {
           stgId = existingStg.id;
-          targetDb.run("UPDATE stages_lookup SET code = ?, is_active = COALESCE(is_active, 0) WHERE id = ?", [stg.stage_code, stgId]);
+          _run("UPDATE stages_lookup SET code = ?, is_active = COALESCE(is_active, 0) WHERE id = ?", [stg.stage_code || null, stgId]);
         } else {
-          targetDb.run(
+          _run(
             "INSERT INTO stages_lookup (section_id, stage_name, years_count, display_order, code, is_active) VALUES (?, ?, ?, ?, ?, ?)",
-            [secId, stg.stage_name, stg.years_count, stg.display_order, stg.stage_code, 0]
+            [secId, stg.stage_name || null, stg.years_count || null, stg.display_order || null, stg.stage_code || null, 0]
           );
-          stgId = _get("SELECT last_insert_rowid() AS id").id;
+          stgId = _get("SELECT last_insert_rowid() AS id")?.id;
         }
 
-        stg.grades.forEach(grd => {
+        (stg.grades || []).forEach(grd => {
           let existingGrd = _get(
-            "SELECT * FROM grades_lookup WHERE stage_id = ? AND (grade_number = ? OR grade_name_ar = ? OR code = ?)",
-            [stgId, grd.grade_number, grd.grade_name_ar, grd.grade_code]
+            "SELECT * FROM grades_lookup WHERE stage_id = ? AND (grade_number = ? OR grade_name_ar = ? OR (code = ? AND code IS NOT NULL))",
+            [stgId, grd.grade_number || null, grd.grade_name_ar || null, grd.grade_code || null]
           );
           if (existingGrd) {
-            targetDb.run("UPDATE grades_lookup SET code = ?, grade_name_ar = ?, is_active = COALESCE(is_active, 1) WHERE id = ?", [grd.grade_code, grd.grade_name_ar, existingGrd.id]);
+            _run("UPDATE grades_lookup SET code = ?, grade_name_ar = ?, is_active = COALESCE(is_active, 1) WHERE id = ?", [grd.grade_code || null, grd.grade_name_ar || null, existingGrd.id]);
           } else {
-            targetDb.run(
+            _run(
               "INSERT INTO grades_lookup (stage_id, grade_number, grade_name_ar, code, is_active) VALUES (?, ?, ?, ?, ?)",
-              [stgId, grd.grade_number, grd.grade_name_ar, grd.grade_code, 1]
+              [stgId, grd.grade_number || null, grd.grade_name_ar || null, grd.grade_code || null, 1]
             );
           }
         });
@@ -1603,7 +2079,7 @@ const _migrateMasterPresetStructure = (dbInstance = sqliteDb) => {
 
     console.log('[DB Migration] Master Standard Structure (Arabic, Languages, International with 3-digit Codes) verified.');
   } catch (err) {
-    console.error('[DB Migration Error] Master structure migration:', err.message);
+    console.error('[DB Migration Error] Master structure migration:', err?.message || err);
   }
 };
 
@@ -1854,10 +2330,13 @@ const _seedLookupData = (dbInstance) => {
 
       // Seed Master School Classifications
       const masterClassifications = [
-        ['public_general', 'حكومي عام'],
-        ['private_tuition', 'خاص بمصروفات'],
-        ['community', 'مجتمعي'],
-        ['cultural', 'ثقافي']
+        ['official', 'رسمي'],
+        ['official_languages', 'رسمي لغات'],
+        ['official_languages_distinguished', 'رسمي لغات متميز'],
+        ['private', 'خاص'],
+        ['international', 'دولي'],
+        ['cultural', 'ثقافي'],
+        ['community', 'مجتمعي']
       ];
       masterClassifications.forEach(([c, n]) => {
         dbInstance.run('INSERT OR IGNORE INTO school_classifications_lookup (code, name_ar) VALUES (?,?)', [c, n]);

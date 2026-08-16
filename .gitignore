@@ -5,3 +5,7 @@ build/
 dist/
 .env
 .DS_Store
+*.pdf
+test_out.txt
+scratch/
+frontend/vite.config.js.timestamp-*.mjs

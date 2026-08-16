@@ -1,0 +1,24 @@
+{
+  "skills": {
+    "exclude": [
+      "alphafold*", "alphagenome*", "chembl*", "clinical*", "clinvar*", "dbsnp*",
+      "embl*", "encode*", "ensembl*", "foldseek*", "gnomad*", "gtex*", "human-protein*",
+      "interpro*", "jaspar*", "literature*", "ncbi*", "openfda*", "opentargets*",
+      "pdb*", "predicting*", "protein*", "pubchem*", "pubmed*", "pymol*", "quickgo*",
+      "reactome*", "science*", "string*", "ucsc*", "unibind*", "uniprot*", "uv*", "workflow*",
+      "android*", "bigquery*", "data-*", "dataform*", "dbt*", "discovering-gcp*",
+      "enforcing-resource*", "federate*", "gcloud*", "gcp*", "gcs*", "managing-python*",
+      "ml-*", "notebook*", "skill-repair*"
+    ],
+    "include": [
+      "nepraspro-guidelines",
+      "egyptian-id-validator",
+      "excel-macro-handler",
+      "qa-code-auditor",
+      "qa-automated-test-generator",
+      "qa-performance-security-auditor",
+      "building-data-apps",
+      "accidental-data-loss-prevention"
+    ]
+  }
+}

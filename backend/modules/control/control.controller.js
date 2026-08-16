@@ -184,6 +184,7 @@ const getControlStudents = async (req, res) => {
              s.id AS student_id, s.full_name_ar, s.gender, s.birth_date, s.religion,
              g.grade_name_ar, c.class_name AS classroom_name,
              COALESCE(
+               c.class_number,
                CAST(
                  CASE 
                    WHEN c.class_name LIKE '%/%' THEN TRIM(REPLACE(REPLACE(SUBSTR(c.class_name, INSTR(c.class_name, '/') + 1), 'ع', ''), ' ', ''))
@@ -824,6 +825,7 @@ const getControlMarks = async (req, res) => {
         s.id AS student_id,
         s.full_name_ar,
         COALESCE(
+          cl.class_number,
           CAST(
             CASE 
               WHEN cl.class_name LIKE '%/%' THEN TRIM(REPLACE(REPLACE(SUBSTR(cl.class_name, INSTR(cl.class_name, '/') + 1), 'ع', ''), ' ', ''))

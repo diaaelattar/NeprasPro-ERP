@@ -12,9 +12,24 @@ module.paths.unshift(path.join(backendDir, 'node_modules'));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: false,
+}));
+app.options('*', cors());
 app.use(helmet({
   contentSecurityPolicy: false, // Allow local embedded assets
+  crossOriginResourcePolicy: false,
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -113,6 +128,13 @@ app.use((err, req, res, next) => {
     success: false,
     error: err.message || 'Internal Server Error'
   });
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Server Uncaught Exception]', err ? err.message : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Server Unhandled Rejection]', reason);
 });
 
 module.exports = app;

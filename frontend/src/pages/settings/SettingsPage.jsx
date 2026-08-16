@@ -5,20 +5,53 @@ import {
   Calendar, Building, Printer, RotateCcw
 } from 'lucide-react';
 import API_BASE_URL from '../../config/api';
+import { useToast } from '../../context/ToastContext';
+import { formatClassroomLabel } from '../../utils/classroomFormatter';
 
 const API = `${API_BASE_URL}/settings`;
 
 export default function SettingsPage({ 
   initialTab = 'institution', 
-  allowedTabs = ['institution', 'sections_stages', 'classrooms', 'academic_years', 'users', 'roles', 'perms'] 
+  allowedTabs = ['institution', 'sections_stages', 'classrooms', 'academic_years', 'users', 'roles', 'perms', 'system_reset'] 
 }) {
+  const toast = useToast();
   const [activeTab,    setActiveTab]    = useState(initialTab);
   const [users,        setUsers]        = useState([]);
   const [roles,        setRoles]        = useState([]);
-  const [perms,        setPerms]        = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState('');
-  const [success,      setSuccess]      = useState('');
+  const [perms,               setPerms]               = useState([]);
+  const [staffList,           setStaffList]           = useState([]);
+  const [governoratesList,    setGovernoratesList]    = useState([
+    { id: 1, name_ar: 'القاهرة' },
+    { id: 2, name_ar: 'الجيزة' },
+    { id: 3, name_ar: 'الإسكندرية' },
+    { id: 4, name_ar: 'الأقصر' },
+    { id: 5, name_ar: 'أسوان' },
+    { id: 6, name_ar: 'الدقهلية' },
+    { id: 7, name_ar: 'البحيرة' },
+    { id: 8, name_ar: 'الفيوم' },
+    { id: 9, name_ar: 'الغربية' },
+    { id: 10, name_ar: 'الإسماعيلية' },
+    { id: 11, name_ar: 'المنوفية' },
+    { id: 12, name_ar: 'المنيا' },
+    { id: 13, name_ar: 'القليوبية' },
+    { id: 14, name_ar: 'السويس' },
+    { id: 15, name_ar: 'الشرقية' },
+    { id: 16, name_ar: 'أسيوط' },
+    { id: 17, name_ar: 'بني سويف' },
+    { id: 18, name_ar: 'بورسعيد' },
+    { id: 19, name_ar: 'دمياط' },
+    { id: 20, name_ar: 'الوادي الجديد' },
+    { id: 21, name_ar: 'شمال سيناء' },
+    { id: 22, name_ar: 'جنوب سيناء' },
+    { id: 23, name_ar: 'كفر الشيخ' },
+    { id: 24, name_ar: 'مطروح' },
+    { id: 25, name_ar: 'قنا' },
+    { id: 26, name_ar: 'سوهاج' },
+    { id: 27, name_ar: 'البحر الأحمر' }
+  ]);
+  const [administrationsList, setAdministrationsList] = useState([]);
+  const [isCustomAdmin,       setIsCustomAdmin]       = useState(false);
+  const [loading,             setLoading]             = useState(true);
 
   // Form options for stages/grades
   const [formOpts, setFormOpts] = useState({ sections: [], stages: [], grades: [], academicYears: [] });
@@ -47,6 +80,7 @@ export default function SettingsPage({
 
   // Academic years state
   const [academicYears, setAcademicYears] = useState([]);
+  const [selectedStartYear, setSelectedStartYear] = useState('2026');
   const [showYearForm, setShowYearForm] = useState(false);
   const [editingYear, setEditingYear] = useState(null);
   const [yearForm, setYearForm] = useState({
@@ -84,6 +118,11 @@ export default function SettingsPage({
   const [userForm, setUserForm] = useState({
     username: '', nationalId: '', fullName: '', password: '', roleIds: []
   });
+
+  // Role Matrix & Custom Roles State
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [roleModalForm, setRoleModalForm] = useState({ roleName: '', roleNameAr: '', description: '' });
+  const [matrixCategoryFilter, setMatrixCategoryFilter] = useState('all');
 
   // Sections & Stages State
   const [sections, setSections] = useState([]);
@@ -124,21 +163,85 @@ export default function SettingsPage({
     { sectionMasterId: 1, educationTypeId: 1, stages: [] }
   ]);
 
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetAdminPassword, setResetAdminPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
+
+  const handleExecuteReset = async (e) => {
+    e.preventDefault();
+    if (resetConfirmText !== 'إعادة تهيئة النظام بالكامل') {
+      setResetError('يرجى كتابة نص التأكيد بدقة: "إعادة تهيئة النظام بالكامل"');
+      return;
+    }
+    if (!resetAdminPassword) {
+      setResetError('يرجى إدخال كلمة مرور مسؤول النظام للتأكيد.');
+      return;
+    }
+
+    setResetLoading(true);
+    setResetError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/setup/reset-institution`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmText: resetConfirmText, password: resetAdminPassword })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل تصفير النظام');
+
+      alert(data.message || 'تم إعادة تهيئة وتصفير النظام بنجاح!');
+      window.location.reload();
+    } catch (err) {
+      setResetError(err.message);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   const loadData = () => {
     setLoading(true);
-    setError('');
+
+    const safeJson = (promise, label) =>
+      promise
+        .then(r => {
+          if (!r.ok) return { success: false, _error: `${label}: HTTP ${r.status}` };
+          return r.json().catch(() => ({ success: false, _error: `${label}: invalid JSON` }));
+        })
+        .catch(e => ({ success: false, _error: `${label}: ${e.message}` }));
+
     Promise.all([
-      fetch(`${API}/users`).then(r => r.json()),
-      fetch(`${API}/roles`).then(r => r.json()),
-      fetch(`${API}/permissions`).then(r => r.json()),
-      fetch(`${API_BASE_URL}/students/form-options`).then(r => r.json()),
-      fetch(`${API}/academic-years`).then(r => r.json()),
-      fetch(`${API}/institution`).then(r => r.json()),
-      fetch(`${API}/sections`).then(r => r.json()),
-      fetch(`${API}/stages`).then(r => r.json()),
-      fetch(`${API_BASE_URL}/setup/master-structure-lookups`).then(r => r.json())
+      safeJson(fetch(`${API}/users`),                                       'users'),
+      safeJson(fetch(`${API}/roles`),                                       'roles'),
+      safeJson(fetch(`${API}/permissions`),                                 'permissions'),
+      safeJson(fetch(`${API_BASE_URL}/students/form-options`),              'form-options'),
+      safeJson(fetch(`${API}/academic-years`),                              'academic-years'),
+      safeJson(fetch(`${API}/institution`),                                 'institution'),
+      safeJson(fetch(`${API}/sections`),                                    'sections'),
+      safeJson(fetch(`${API}/stages`),                                      'stages'),
+      safeJson(fetch(`${API_BASE_URL}/setup/master-structure-lookups`),     'master-lookups'),
     ])
       .then(([userData, roleData, permData, optData, yearsData, instData, secData, stageData, masterData]) => {
+        // Collect errors for feedback
+        const failures = [
+          { name: 'المستخدمين', d: userData },
+          { name: 'الأدوار', d: roleData },
+          { name: 'الصلاحيات', d: permData },
+          { name: 'خيارات النماذج', d: optData },
+          { name: 'السنوات الدراسية', d: yearsData },
+          { name: 'بيانات المؤسسة', d: instData },
+          { name: 'الأقسام', d: secData },
+          { name: 'المراحل', d: stageData },
+          { name: 'الهيكل الرئيسي', d: masterData },
+        ].filter(item => item.d._error || (item.d.success === false));
+
+        if (failures.length > 0) {
+          console.warn('[Settings loadData failures]:', failures);
+          const errList = failures.map(f => f.d.error || f.d._error || f.name).join(', ');
+          toast.error(`تعذر تحميل بعض الإعدادات: (${errList})`);
+        }
+
         if (masterData.success && masterData.masterLookups) {
           setMasterLookups(masterData.masterLookups);
         }
@@ -147,14 +250,20 @@ export default function SettingsPage({
         if (permData.success)  setPerms(permData.permissions);
         if (optData.success) {
           setFormOpts(optData);
-          // Set default filters if not set
           const cur = optData.academicYears?.find(y => y.is_current === 1 || y.is_current === true);
           setClassroomFilters(f => ({
             ...f,
             academicYearId: f.academicYearId || (cur ? String(cur.id) : ''),
           }));
         }
-        if (yearsData.success) setAcademicYears(yearsData.academicYears);
+        if (yearsData.success) {
+          setAcademicYears(yearsData.academicYears);
+          const cur = yearsData.academicYears?.find(y => y.is_current === 1 || y.is_current === true) || yearsData.academicYears[0];
+          if (cur && cur.year_label) {
+            const m = cur.year_label.match(/(\d{4})/);
+            if (m) setSelectedStartYear(m[1]);
+          }
+        }
         if (secData.success) {
           setSections(secData.sections);
           if (secData.sections.length > 0) {
@@ -178,6 +287,9 @@ export default function SettingsPage({
           }
         }
         if (stageData.success) setStages(stageData.stages);
+        if (instData.staffList) setStaffList(instData.staffList);
+        if (instData.governorates) setGovernoratesList(instData.governorates);
+        if (instData.administrations) setAdministrationsList(instData.administrations);
         if (instData.success && instData.institution) {
           const inst = instData.institution;
           setInstitutionForm({
@@ -203,9 +315,13 @@ export default function SettingsPage({
           });
         }
       })
-      .catch(() => setError('فشل الاتصال بالخادم لتحميل الإعدادات.'))
+      .catch(err => {
+        console.error('[Settings loadData] Unexpected error:', err);
+        toast.error('فشل تحميل الإعدادات: ' + (err.message || 'خطأ غير متوقع'));
+      })
       .finally(() => setLoading(false));
   };
+
 
   useEffect(() => {
     loadData();
@@ -275,10 +391,10 @@ export default function SettingsPage({
             }
           }
         } else {
-          setError(data.error || 'فشل تحميل الفصول.');
+          toast.error(data.error || 'فشل تحميل الفصول.');
         }
       })
-      .catch(() => setError('تعذر الاتصال بالخادم لتحميل الفصول.'));
+      .catch(() => toast.error('تعذر الاتصال بالخادم لتحميل الفصول.'));
   };
 
   useEffect(() => {
@@ -331,10 +447,9 @@ export default function SettingsPage({
 
   const handleSaveUser = async (e) => {
     e.preventDefault();
-    setError(''); setSuccess('');
 
     if (userForm.nationalId.length !== 14 || isNaN(userForm.nationalId)) {
-      return setError('الرقم القومي يجب أن يكون 14 رقماً.');
+      toast.error('الرقم القومي يجب أن يكون 14 رقماً.'); return;
     }
 
     const structuredRoles = userForm.roleIds.map(roleId => ({
@@ -361,27 +476,98 @@ export default function SettingsPage({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حفظ بيانات المستخدم.');
 
-      setSuccess(data.message || 'تم حفظ المستخدم بنجاح.');
+      toast.success(data.message || 'تم حفظ المستخدم بنجاح.');
       setShowForm(false);
       loadData();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
   const handleDeleteUser = async (user) => {
     if (user.username === 'admin') return alert('لا يمكن حذف الحساب الرئيسي.');
     if (!window.confirm(`هل أنت متأكد من حذف المستخدم "${user.full_name}"؟`)) return;
-
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/users/${user.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حذف المستخدم.');
-      setSuccess(data.message || 'تم حذف المستخدم بنجاح.');
+      toast.success(data.message || 'تم حذف المستخدم بنجاح.');
       loadData();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
+    }
+  };
+
+  const handleToggleRolePermission = async (role, permissionId) => {
+    if (role.role_name === 'super_admin') return;
+    const currentPermIds = role.permissions?.map(p => p.id) || [];
+    const isGranted = currentPermIds.includes(permissionId);
+    const newPermIds = isGranted 
+      ? currentPermIds.filter(id => id !== permissionId)
+      : [...currentPermIds, permissionId];
+
+    // Optimistic UI update
+    setRoles(prevRoles => prevRoles.map(r => {
+      if (r.id === role.id) {
+        const matchingPerm = perms.find(p => p.id === permissionId);
+        const updatedPerms = isGranted 
+          ? (r.permissions || []).filter(p => p.id !== permissionId)
+          : [...(r.permissions || []), matchingPerm].filter(Boolean);
+        return { ...r, permissions: updatedPerms };
+      }
+      return r;
+    }));
+
+    try {
+      const res = await fetch(`${API}/roles/${role.id}/permissions`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permissionIds: newPermIds })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'فشل حفظ الصلاحية');
+    } catch (err) {
+      toast.error(err.message);
+      loadData();
+    }
+  };
+
+  const handleCreateCustomRole = async (e) => {
+    e.preventDefault();
+    if (!roleModalForm.roleNameAr.trim()) return toast.error('يرجى كتابة مسمى الدور الوظيفي.');
+    try {
+      const autoKey = roleModalForm.roleName?.trim() || `role_${Date.now()}`;
+      const res = await fetch(`${API}/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roleName: autoKey,
+          roleNameAr: roleModalForm.roleNameAr,
+          description: roleModalForm.description,
+          permissionIds: []
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'فشل إنشاء الدور');
+      toast.success(data.message || 'تم إنشاء الدور الوظيفي بنجاح.');
+      setShowRoleModal(false);
+      setRoleModalForm({ roleName: '', roleNameAr: '', description: '' });
+      loadData();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const handleDeleteCustomRole = async (role) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الدور الوظيفي "${role.role_name_ar}"؟`)) return;
+    try {
+      const res = await fetch(`${API}/roles/${role.id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'فشل حذف الدور');
+      toast.success(data.message || 'تم حذف الدور بنجاح.');
+      loadData();
+    } catch (err) {
+      toast.error(err.message);
     }
   };
 
@@ -392,24 +578,19 @@ export default function SettingsPage({
   const getGeneratedClassItems = (gradeId) => {
     const grade = formOpts.grades?.find(g => String(g.id) === String(gradeId));
     const gradeNum = grade?.grade_number || 1;
-    const ARABIC_LETTERS = ['أ','ب','ج','د','ه','و','ز','ح','ط','ي','ك','ل','م','ن','س','ع','ف','ص','ق','ر','ش','ت','ث','خ','ذ','ض','ظ','غ'];
-    const ENGLISH_LETTERS = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
-    
-    // Find Stage Code (1 digit)
     const stage = formOpts.stages?.find(s => String(s.id) === String(grade?.stage_id));
+    const section = formOpts.sections?.find(s => String(s.id) === String(classroomFilters.sectionId || grade?.section_id));
+
     let stageCode = 3;
-    let suffix = 'ع';
     if (stage) {
       const sn = stage.stage_name || '';
-      if (sn.includes('تمهيدي'))        { stageCode = 1; suffix = 'ت'; }
-      else if (sn.includes('رياض'))     { stageCode = 2; suffix = 'ح'; }
-      else if (sn.includes('ابتدائي')) { stageCode = 3; suffix = 'ب'; }
-      else if (sn.includes('إعدادي') || sn.includes('اعدادي')) { stageCode = 4; suffix = 'ع'; }
-      else if (sn.includes('ثانوي'))   { stageCode = 5; suffix = 'ث'; }
+      if (sn.includes('تمهيدي'))        stageCode = 1;
+      else if (sn.includes('رياض') || sn.includes('حضانة')) stageCode = 2;
+      else if (sn.includes('ابتدائي')) stageCode = 3;
+      else if (sn.includes('إعدادي') || sn.includes('اعدادي')) stageCode = 4;
+      else if (sn.includes('ثانوي'))   stageCode = 5;
     }
 
-    // Find Section Code (1 digit)
-    const section = formOpts.sections?.find(s => String(s.id) === String(classroomFilters.sectionId || grade?.section_id));
     let secCode = 1;
     if (section) {
       const secName = section.name || section.section_name || '';
@@ -417,37 +598,34 @@ export default function SettingsPage({
       else if (secName.includes('دولي') || section.code === 'international') secCode = 3;
     }
 
-    const existingNames = new Set(classrooms.map(c => c.class_name.trim()));
+    const existingNums = new Set(classrooms.map(c => Number(c.class_number || extractClassNumber(c.class_name))));
     const items = [];
     let i = 1;
     const targetTotal = Math.max(1, parseInt(bulkForm.count) || 1);
     const existingCount = classrooms.length;
-    
-    // Calculate how many NEW classes are needed to reach targetTotal
     const neededCount = Math.max(0, targetTotal - existingCount);
 
     if (neededCount === 0) return [];
 
     while (items.length < neededCount && i <= 150) {
-      let candidateName = '';
-      if (bulkForm.namingStyle === 'arabic') {
-        candidateName = `${gradeNum} / ${ARABIC_LETTERS[i - 1] || i}`;
-      } else if (bulkForm.namingStyle === 'numeric') {
-        candidateName = `${gradeNum} / ${i}`;
-      } else if (bulkForm.namingStyle === 'arabic_suffix') {
-        candidateName = `${gradeNum} / ${i} ${suffix}`;
-      } else if (bulkForm.namingStyle === 'english_letter_grade') {
-        candidateName = `${ENGLISH_LETTERS[i - 1] || 'Class'}${gradeNum}`;
-      } else {
-        candidateName = `${bulkForm.prefix || gradeNum} / ${i}`;
-      }
-
-      if (!existingNames.has(candidateName.trim())) {
+      if (!existingNums.has(i)) {
         const classNumStr = String(i).padStart(2, '0');
         const classCode = `${secCode}${stageCode}${gradeNum}${classNumStr}`;
-        items.push({ name: candidateName, classCode, classNum: i });
-      }
+        const formatted = formatClassroomLabel({
+          classNumber: i,
+          gradeNumber: gradeNum,
+          stageCode: String(stageCode),
+          stageName: stage?.stage_name,
+          sectionType: section?.type || section?.code
+        });
 
+        items.push({
+          name: `فصل ${i}`,
+          formattedName: formatted,
+          classCode,
+          classNum: i
+        });
+      }
       i++;
     }
 
@@ -461,27 +639,26 @@ export default function SettingsPage({
       return [`(الصف يحتوي بالفعل على ${existingCount} فصل - مستوفى بالكامل)`];
     }
     const items = getGeneratedClassItems(gradeId);
-    return items.map(item => `${item.name} (${item.classCode})`);
+    return items.map(item => `فصل ${item.classNum} ➔ ${item.formattedName} (${item.classCode})`);
   };
 
   const handleBulkCreate = async () => {
     if (!classroomFilters.gradeId || !classroomFilters.academicYearId) {
-      return setError('يرجى اختيار الصف الدراسي والعام الدراسي أولاً.');
+      toast.error('يرجى اختيار الصف الدراسي والعام الدراسي أولاً.'); return;
     }
     const targetTotal = Math.max(1, parseInt(bulkForm.count) || 1);
     const existingCount = classrooms.length;
 
     if (targetTotal <= existingCount) {
-      return setError(`الصف يحتوي بالفعل على ${existingCount} فصل. لا داعي للإضافة لأن العدد المستهدف المطلوب (${targetTotal}) مستوفى بالفعل.`);
+      toast.error(`الصف يحتوي بالفعل على ${existingCount} فصل. لا داعي للإضافة لأن العدد المستهدف المطلوب (${targetTotal}) مستوفى بالفعل.`); return;
     }
 
     const items = getGeneratedClassItems(classroomFilters.gradeId);
     if (items.length === 0) {
-      return setError('لم يتم التمكن من توليد فصول جديدة فريدة.');
+      toast.error('لم يتم التمكن من توليد فصول جديدة فريدة.'); return;
     }
 
     setBulkCreating(true);
-    setError(''); setSuccess('');
     let created = 0; const skipped = [];
     const safeCap = Math.min(49, Math.max(1, parseInt(bulkForm.capacity) || 40));
 
@@ -493,6 +670,7 @@ export default function SettingsPage({
           body: JSON.stringify({
             gradeId: classroomFilters.gradeId,
             academicYearId: classroomFilters.academicYearId,
+            classNumber: item.classNum,
             className: item.name,
             classCode: item.classCode,
             capacity: safeCap,
@@ -500,46 +678,49 @@ export default function SettingsPage({
         });
         const data = await res.json();
         if (data.success) created++;
-        else skipped.push(item.name);
-      } catch { skipped.push(item.name); }
+        else skipped.push(`فصل ${item.classNum}`);
+      } catch { skipped.push(`فصل ${item.classNum}`); }
     }
     setBulkCreating(false);
     if (created > 0) {
-      setSuccess(`تم إضافة ${created} فصل جديد لتكملة الفصول المسجلة سابقاً (${existingCount}) ليكون إجمالي الفصول (${existingCount + created}) فصلاً بنجاح${skipped.length ? ` (تم تخطي المكرر: ${skipped.join(', ')})` : ''}.`);
+      toast.success(`تم إضافة ${created} فصل جديد لتكملة الفصول المسجلة سابقاً (${existingCount}) ليكون إجمالي الفصول (${existingCount + created}) فصلاً بنجاح${skipped.length ? ` (تم تخطي المكرر: ${skipped.join(', ')})` : ''}.`);
     } else {
-      setError('لم يتم إضافة أي فصل. ربما تكون جميع الأسماء المقترحة مسجلة بالفعل.');
+      toast.error('لم يتم إضافة أي فصل. ربما تكون جميع الأسماء المقترحة مسجلة بالفعل.');
     }
     loadClassrooms();
   };
 
   const handleSaveEditClassroom = async () => {
-    if (!editForm.className.trim()) return setError('اسم الفصل مطلوب.');
-    setError(''); setSuccess('');
+    const num = parseInt(editForm.classNumber, 10);
+    if (!num || isNaN(num) || num < 1) { toast.error('رقم الفصل يجب أن يكون عدداً موجباً.'); return; }
     const safeCap = editForm.capacity ? Math.min(49, Math.max(1, parseInt(editForm.capacity) || 40)) : 40;
     try {
       const res = await fetch(`${API}/classrooms/${editingClassroom}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ className: editForm.className, capacity: safeCap }),
+        body: JSON.stringify({
+          classNumber: num,
+          className: editForm.className?.trim() || `فصل ${num}`,
+          capacity: safeCap
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل تحديث الفصل.');
-      setSuccess('تم تحديث بيانات الفصل بنجاح.');
+      toast.success('تم تحديث بيانات الفصل بنجاح.');
       setEditingClassroom(null);
       loadClassrooms();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleDeleteClassroom = async (cls) => {
     if (!window.confirm(`هل أنت متأكد من حذف الفصل "${cls.class_name}"؟`)) return;
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/classrooms/${cls.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حذف الفصل.');
-      setSuccess(data.message || 'تم حذف الفصل بنجاح.');
+      toast.success(data.message || 'تم حذف الفصل بنجاح.');
       loadClassrooms();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleDeleteAllGradeClassrooms = async (confirmUnenroll = false) => {
@@ -550,8 +731,6 @@ export default function SettingsPage({
     if (!confirmUnenroll) {
       if (!window.confirm(`هل أنت متأكد من حذف كافة فصول (${gradeName})؟`)) return;
     }
-
-    setError(''); setSuccess('');
     try {
       const url = `${API}/classrooms/grade/${classroomFilters.gradeId}?academicYearId=${classroomFilters.academicYearId}${confirmUnenroll ? '&confirmUnenroll=true' : ''}`;
       const res = await fetch(url, { method: 'DELETE' });
@@ -574,10 +753,10 @@ export default function SettingsPage({
         throw new Error(data.error || 'فشل حذف فصول الصف.');
       }
 
-      setSuccess(data.message || 'تم حذف كافة فصول الصف بنجاح.');
+      toast.success(data.message || 'تم حذف كافة فصول الصف بنجاح.');
       loadClassrooms();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -601,7 +780,6 @@ export default function SettingsPage({
 
   const handleSaveSection = async (e) => {
     e.preventDefault();
-    setError(''); setSuccess('');
     try {
       const url = editingSection ? `${API}/sections/${editingSection}` : `${API}/sections`;
       const method = editingSection ? 'PUT' : 'POST';
@@ -612,36 +790,34 @@ export default function SettingsPage({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حفظ القسم.');
-      setSuccess(data.message || 'تم حفظ القسم بنجاح.');
+      toast.success(data.message || 'تم حفظ القسم بنجاح.');
       setShowSectionForm(false);
       window.dispatchEvent(new Event('sections-updated'));
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleDeleteSection = async (id, name) => {
     if (!window.confirm(`هل أنت متأكد من حذف القسم "${name}"؟`)) return;
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/sections/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حذف القسم.');
-      setSuccess(data.message || 'تم حذف القسم بنجاح.');
+      toast.success(data.message || 'تم حذف القسم بنجاح.');
       window.dispatchEvent(new Event('sections-updated'));
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleToggleSectionActive = async (sec) => {
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/sections/${sec.id}/toggle-active`, { method: 'PATCH' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل تغيير حالة القسم.');
-      setSuccess(data.message);
+      toast.success(data.message);
       window.dispatchEvent(new Event('sections-updated'));
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleOpenStageAdd = () => {
@@ -664,7 +840,6 @@ export default function SettingsPage({
 
   const handleSaveStage = async (e) => {
     e.preventDefault();
-    setError(''); setSuccess('');
     try {
       const url = editingStage ? `${API}/stages/${editingStage}` : `${API}/stages`;
       const method = editingStage ? 'PUT' : 'POST';
@@ -675,50 +850,73 @@ export default function SettingsPage({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حفظ المرحلة.');
-      setSuccess(data.message || 'تم حفظ المرحلة بنجاح.');
+      toast.success(data.message || 'تم حفظ المرحلة بنجاح.');
       setShowStageForm(false);
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleDeleteStage = async (id, name) => {
     if (!window.confirm(`هل أنت متأكد من حذف المرحلة "${name}" وكل الصفوف التابعة لها؟`)) return;
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/stages/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حذف المرحلة.');
-      setSuccess(data.message || 'تم حذف المرحلة بنجاح.');
+      toast.success(data.message || 'تم حذف المرحلة بنجاح.');
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleToggleStageActive = async (stg) => {
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/stages/${stg.id}/toggle-active`, { method: 'PATCH' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل تغيير حالة المرحلة.');
-      setSuccess(data.message);
+      toast.success(data.message);
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { toast.error(err.message); }
   };
 
   const handleAddSectionInline = () => {
+    const availableTypes = [
+      { code: 'arabic', name: 'القسم العربي' },
+      { code: 'languages', name: 'قسم اللغات' },
+      { code: 'international', name: 'القسم الدولي' }
+    ].filter(t => !sections.some(s => s.type === t.code));
+
+    if (availableTypes.length === 0) {
+      alert('جميع الأقسام القياسية الثلاثة (عربي - لغات - دولي) مسجلة بالفعل بالمدرسة.');
+      return;
+    }
+
+    const nextType = availableTypes[0];
     setSections(prev => [
       ...prev,
       {
         id: 'temp_' + Date.now(),
-        name: `قسم جديد ${prev.length + 1}`,
-        type: 'arabic',
-        education_type: '',
+        name: nextType.name,
+        type: nextType.code,
+        education_type: nextType.name,
         legal_status: 'حكومي'
       }
     ]);
   };
 
-  const handleDeleteSectionInline = (id) => {
-    setSections(prev => prev.filter(sec => sec.id !== id));
+  const handleDeleteSectionInline = async (id) => {
+    if (sections.length <= 1) {
+      alert('يجب إبقاء قسم واحد على الأقل للمؤسسة.');
+      return;
+    }
+    if (!window.confirm('هل أنت متأكد من إلغاء/حذف هذا القسم من المؤسسة؟')) return;
+    try {
+      const res = await fetch(`${API}/sections/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'فشل حذف القسم');
+      toast.success('تم حذف القسم بنجاح');
+      loadData();
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
   const handleUpdateSectionField = (id, field, value) => {
@@ -732,36 +930,27 @@ export default function SettingsPage({
 
   const handleSaveInstitution = async (e) => {
     e.preventDefault();
-    setError(''); setSuccess('');
 
-    if (!form.school_name || !form.school_name.trim() || !configuredSections || !configuredSections.length) {
-      setError('اسم المدرسة والأقسام المقررة حقول إيجابية ملزمة.');
+    if (!institutionForm.schoolName || !institutionForm.schoolName.trim()) {
+      toast.error('كود واسم المدرسة حقول ملزمة.');
       return;
     }
     try {
-      const structRes = await fetch(`${API_BASE_URL}/setup/save-institution-structure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          classificationId: selectedClassificationId,
-          configuredSections: configuredSections
-        })
-      });
-      const structData = await structRes.json();
-      if (!structRes.ok) throw new Error(structData.error || 'فشل حفظ الهيكل المخصص للمؤسسة.');
-
       const res = await fetch(`${API}/institution`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(institutionForm)
+        body: JSON.stringify({
+          ...institutionForm,
+          sections: sections
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حفظ بيانات المؤسسة.');
 
-      setSuccess('✅ تم حفظ بيانات وتأثيل المؤسسة بنجاح بتطابق تامي مع المعاجم الخمسة والهيكل المعماري!');
+      toast.success('✅ تم حفظ بيانات المؤسسة والأقسام المعتمدة بنجاح!');
       loadData();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -794,7 +983,6 @@ export default function SettingsPage({
 
   const handleSaveYear = async (e) => {
     e.preventDefault();
-    setError(''); setSuccess('');
     try {
       const url = editingYear ? `${API}/academic-years/${editingYear}` : `${API}/academic-years`;
       const method = editingYear ? 'PUT' : 'POST';
@@ -807,25 +995,24 @@ export default function SettingsPage({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حفظ العام الدراسي.');
 
-      setSuccess(data.message || 'تم حفظ العام الدراسي بنجاح.');
+      toast.success(data.message || 'تم حفظ العام الدراسي بنجاح.');
       setShowYearForm(false);
       loadData();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
   const handleDeleteYear = async (id, label) => {
     if (!window.confirm(`هل أنت متأكد من حذف العام الدراسي "${label}"؟`)) return;
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/academic-years/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل حذف العام الدراسي.');
-      setSuccess(data.message || 'تم حذف العام الدراسي بنجاح.');
+      toast.success(data.message || 'تم حذف العام الدراسي بنجاح.');
       loadData();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
@@ -833,25 +1020,42 @@ export default function SettingsPage({
     const targetYear = academicYears.find(y => y.id === id);
     const label = targetYear?.year_label || '';
     if (!window.confirm(`⚠️ تنبيه هام:\nتغيير السنة الدراسية الحالية إلى "${label}" سينعكس على كافة شاشات وبيانات البرنامج وسيصبح هو العام النشط للنظام.\n\nهل تريد الاستمرار؟`)) return;
-    setError(''); setSuccess('');
     try {
       const res = await fetch(`${API}/academic-years/${id}/set-current`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل تعيين العام الدراسي النشط.');
-      setSuccess(data.message || 'تم تعيين العام الدراسي النشط بنجاح.');
+      toast.success(data.message || 'تم تعيين العام الدراسي النشط بنجاح.');
       loadData();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     }
   };
 
-  const filteredStages = formOpts.stages?.filter(s => !classroomFilters.sectionId || String(s.section_id) === classroomFilters.sectionId) || [];
-  const filteredGrades = formOpts.grades?.filter(g => !classroomFilters.stageId || String(g.stage_id) === classroomFilters.stageId) || [];
+  const activeSections = formOpts.sections || [];
+  const selectedSectionId = classroomFilters.sectionId || (activeSections.length === 1 ? String(activeSections[0].id) : '');
+
+  const filteredStages = formOpts.stages?.filter(s => {
+    if (selectedSectionId) {
+      return String(s.section_id) === String(selectedSectionId);
+    }
+    return activeSections.some(sec => String(sec.id) === String(s.section_id));
+  }) || [];
+
+  const selectedStageId = classroomFilters.stageId || (filteredStages.length === 1 ? String(filteredStages[0].id) : '');
+
+  const filteredGrades = formOpts.grades?.filter(g => {
+    if (selectedStageId) {
+      return String(g.stage_id) === String(selectedStageId);
+    }
+    return filteredStages.some(st => String(st.id) === String(g.stage_id));
+  }) || [];
 
   useEffect(() => {
-    if (formOpts.academicYears?.length && !classroomFilters.academicYearId) {
-      const cur = formOpts.academicYears.find(y => y.is_current === 1 || y.is_current === true);
-      if (cur) setClassroomFilters(f => ({ ...f, academicYearId: String(cur.id) }));
+    if (formOpts.academicYears?.length) {
+      const cur = formOpts.academicYears.find(y => y.is_current === 1 || y.is_current === true) || formOpts.academicYears[0];
+      if (cur && !classroomFilters.academicYearId) {
+        setClassroomFilters(f => ({ ...f, academicYearId: String(cur.id) }));
+      }
     }
     if (formOpts.sections?.length === 1 && !classroomFilters.sectionId) {
       setClassroomFilters(f => ({ ...f, sectionId: String(formOpts.sections[0].id) }));
@@ -859,7 +1063,7 @@ export default function SettingsPage({
   }, [formOpts.academicYears, formOpts.sections]);
 
   useEffect(() => {
-    if (filteredStages.length === 1 && !classroomFilters.stageId) {
+    if (filteredStages.length === 1 && (!classroomFilters.stageId || classroomFilters.stageId !== String(filteredStages[0].id))) {
       setClassroomFilters(f => ({ ...f, stageId: String(filteredStages[0].id) }));
     }
   }, [filteredStages]);
@@ -887,7 +1091,7 @@ export default function SettingsPage({
             case 'institution':
               return {
                 title: 'بيانات المؤسسة التعليمية',
-                sub: 'تعديل المعلومات العامة للمدرسة والشعار والأختام الرسمية للتقارير والشهادات'
+                sub: 'البيانات الرسمية والتبعية الجغرافية والشعار والترويسة المعتمدة للتقارير والشهادات'
               };
             case 'academic_years':
               return {
@@ -948,7 +1152,7 @@ export default function SettingsPage({
         )}
         {allowedTabs.includes('academic_years') && (
           <button className={`form-tab ${activeTab === 'academic_years' ? 'active' : ''}`} onClick={() => { setActiveTab('academic_years'); setShowForm(false); setShowYearForm(false); }}>
-            📅 الأعوام الدراسية ({academicYears.length})
+            📅 الأعوام الدراسية
           </button>
         )}
         {allowedTabs.includes('users') && (
@@ -966,14 +1170,44 @@ export default function SettingsPage({
             🔑 صلاحيات النظام ({perms.length})
           </button>
         )}
+        {allowedTabs.includes('system_reset') && (
+          <button className={`form-tab ${activeTab === 'system_reset' ? 'active' : ''}`} onClick={() => { setActiveTab('system_reset'); setShowForm(false); }} style={{ color: '#ef4444', fontWeight: 800 }}>
+            💣 تصفير وإعادة تهيئة النظام
+          </button>
+        )}
       </div>
 
-      {error && <div className="form-alert error" style={{ marginBottom: 16 }}><AlertCircle size={16} /> {error}</div>}
-      {success && <div className="form-alert success" style={{ marginBottom: 16 }}><CheckCircle2 size={16} /> {success}</div>}
+
 
       {/* ── Tab Content ─────────────────────────────────── */}
       <div className="settings-content-wrapper">
         
+        {/* ── DANGER ZONE RESET TAB ──────────────────────── */}
+        {activeTab === 'system_reset' && (
+          <div className="glass-panel form-body" style={{ border: '2px solid #ef4444', background: 'rgba(254, 242, 242, 0.4)', borderRadius: 12, padding: 24 }}>
+            <h3 className="section-title" style={{ color: '#dc2626', display: 'flex', alignItems: 'center', gap: 8, fontSize: 18, borderBottom: '1px solid #fca5a5', paddingBottom: 12 }}>
+              💣 تصفير وإعادة تهيئة النظام بالكامل (Factory Reset)
+            </h3>
+            <p style={{ color: '#991b1b', fontSize: 13.5, lineHeight: 1.7, marginBottom: 20 }}>
+              ⚠️ <strong>تحذير عالي الخطورة:</strong> هذه العملية تقوم بمسح وتصفير كافة البيانات التشغيلية بالمؤسسة (الطلاب، الكنترول، الدرجات، الفصول، المعلمين، السجلات المالية)، وتلقائياً تحويل البرنامج لـ <strong>معالج التهيئة الأولى (Setup Wizard)</strong> لتجهيز مدرسة جديدة من الصفر.<br/>
+              🔒 <strong>النسخ الاحتياطي التلقائي:</strong> سيقوم النظام تلقائياً بأخذ نسخة احتياطية من قاعدة البيانات وتخزينها في مجلد النسخ الاحتياطية قبل التصفير لحمايتك من فقدان البيانات بالخطأ.
+            </p>
+
+            <div style={{ background: '#ffffff', padding: 20, borderRadius: 10, border: '1px solid #fca5a5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: '#1e293b', marginBottom: 4 }}>إعادة ضبط المصنع وتفريغ السجلات</div>
+                <div style={{ fontSize: 12, color: '#64748b' }}>يتطلب إدخال كلمة مرور مسؤول النظام والتأكيد النصي الصريح.</div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => { setIsResetModalOpen(true); setResetError(''); setResetConfirmText(''); setResetAdminPassword(''); }} 
+                style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: 8, fontSize: 14, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 6px -1px rgba(220, 38, 38, 0.3)' }}
+              >
+                🗑️ تصفير وإعادة تهيئة النظام
+              </button>
+            </div>
+          </div>
+        )}
         {/* ── USER FORM (Add / Edit) ────────────────────── */}
         {showForm && activeTab === 'users' && (
           <form onSubmit={handleSaveUser} className="glass-panel form-body" style={{ maxWidth: '700px', margin: '0 auto' }}>
@@ -1125,66 +1359,258 @@ export default function SettingsPage({
           </div>
         )}
 
-        {/* ── ROLES LIST ────────────────────────────────── */}
-        {activeTab === 'roles' && (
-          <div className="roles-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-            {roles.map(r => (
-              <div key={r.id} className="glass-panel" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: 10 }}>
-                  <div>
-                    <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>🛡️ {r.role_name_ar}</h3>
-                    <code style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.role_name}</code>
-                  </div>
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{r.description || 'لا يوجد وصف.'}</p>
-                
+        {/* ── ENTERPRISE RBAC PERMISSIONS MATRIX TAB ────────────── */}
+        {activeTab === 'roles' && (() => {
+          const PERM_CATEGORIES = [
+            { key: 'students', label: '🎒 قطاع شؤون الطلاب', color: '#6366f1', bg: 'rgba(99,102,241,0.08)' },
+            { key: 'staff',    label: '👥 قطاع شؤون العاملين (HR)', color: '#0ea5e9', bg: 'rgba(14,165,233,0.08)' },
+            { key: 'control',  label: '📝 قطاع الكنترول والامتحانات', color: '#f59e0b', bg: 'rgba(245,158,11,0.08)' },
+            { key: 'finance',  label: '💰 قطاع الحسابات والخزينة', color: '#10b981', bg: 'rgba(16,185,129,0.08)' },
+            { key: 'admin',    label: '⚙️ إدارة النظام والأمان', color: '#ec4899', bg: 'rgba(236,72,153,0.08)' }
+          ];
+
+          const filteredCategories = matrixCategoryFilter === 'all'
+            ? PERM_CATEGORIES
+            : PERM_CATEGORIES.filter(c => c.key === matrixCategoryFilter);
+
+          return (
+            <div className="glass-panel" style={{ padding: '24px 28px' }}>
+              {/* Matrix Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
                 <div>
-                  <h4 style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>🔑 الصلاحيات الممنوحة:</h4>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {r.permissions?.length > 0 ? (
-                      r.permissions.map(p => (
-                        <span key={p.id} className="tag-lang" style={{ fontSize: 11, background: 'rgba(59,130,246,0.1)', color: '#93c5fd', borderColor: '#3b82f633' }}>
-                          ✓ {p.perm_name_ar}
-                        </span>
-                      ))
-                    ) : (
-                      r.role_name === 'super_admin' ? (
-                        <span className="tag-track" style={{ background: 'rgba(16,185,129,0.1)', color: '#6ee7b7' }}>✓ صلاحية كاملة على كل النظام</span>
-                      ) : (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>لا توجد صلاحيات معينة.</span>
-                      )
-                    )}
-                  </div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    🛡️ مصفوفة الصلاحيات والأدوار الوظيفية (Enterprise RBAC Matrix)
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                    التحكم المركزي في صلاحيات الوصول لجميع قطاعات المنظومة بنقرة واحدة مع الحفظ اللحظي.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <button 
+                    type="button"
+                    className="btn-add-student"
+                    style={{ padding: '8px 16px', fontSize: 12.5 }}
+                    onClick={() => { setShowRoleModal(true); setRoleModalForm({ roleName: '', roleNameAr: '', description: '' }); }}
+                  >
+                    <Plus size={15} /> إضافة دور وظيفي مخصص
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
 
-        {/* ── PERMISSIONS LIST ──────────────────────────── */}
+              {/* Sector Filter Bar */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20, borderBottom: '1px solid var(--border-color)', paddingBottom: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => setMatrixCategoryFilter('all')}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: 'none',
+                    background: matrixCategoryFilter === 'all' ? '#6366f1' : 'rgba(255,255,255,0.06)',
+                    color: matrixCategoryFilter === 'all' ? '#fff' : 'var(--text-secondary)'
+                  }}
+                >
+                  🌐 كافة القطاعات ({perms.length})
+                </button>
+                {PERM_CATEGORIES.map(cat => {
+                  const count = perms.filter(p => p.category === cat.key || p.perm_key.startsWith(cat.key)).length;
+                  const isActive = matrixCategoryFilter === cat.key;
+                  return (
+                    <button
+                      key={cat.key}
+                      type="button"
+                      onClick={() => setMatrixCategoryFilter(cat.key)}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        border: 'none',
+                        background: isActive ? cat.color : 'rgba(255,255,255,0.06)',
+                        color: isActive ? '#fff' : 'var(--text-secondary)'
+                      }}
+                    >
+                      {cat.label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Interactive Matrix Table */}
+              <div className="table-scroll" style={{ maxHeight: '680px', overflowY: 'auto' }}>
+                <table className="students-table" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-card)' }}>
+                    <tr>
+                      <th style={{ minWidth: 260, textAlign: 'right', padding: '12px 16px' }}>الصلاحية والإجراء الأمني</th>
+                      {roles.map(r => (
+                        <th key={r.id} style={{ minWidth: 120, textAlign: 'center', padding: '12px 8px' }}>
+                          <div style={{ fontWeight: 800, fontSize: 13 }}>{r.role_name_ar}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{r.role_name}</div>
+                          {!['super_admin', 'data_entry', 'hr_officer', 'head_control', 'accountant', 'viewer'].includes(r.role_name) && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCustomRole(r)}
+                              style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 10, cursor: 'pointer', marginTop: 4, textDecoration: 'underline' }}
+                            >
+                              حذف الدور
+                            </button>
+                          )}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredCategories.map(cat => {
+                      const catPerms = perms.filter(p => p.category === cat.key || p.perm_key.startsWith(cat.key));
+                      if (catPerms.length === 0) return null;
+
+                      return (
+                        <React.Fragment key={cat.key}>
+                          {/* Category Header Row */}
+                          <tr style={{ background: cat.bg }}>
+                            <td colSpan={roles.length + 1} style={{ padding: '10px 16px', fontWeight: 800, color: cat.color, fontSize: 13.5 }}>
+                              {cat.label}
+                            </td>
+                          </tr>
+
+                          {/* Perm Rows */}
+                          {catPerms.map(p => (
+                            <tr key={p.id} className="table-row">
+                              <td style={{ padding: '10px 16px' }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' }}>{p.perm_name_ar}</div>
+                                <code style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{p.perm_key}</code>
+                              </td>
+
+                              {roles.map(r => {
+                                const isSuper = r.role_name === 'super_admin';
+                                const hasPerm = isSuper || (r.permissions || []).some(rp => rp.id === p.id || rp.perm_key === p.perm_key);
+
+                                return (
+                                  <td key={r.id} style={{ textAlign: 'center', padding: '8px' }}>
+                                    {isSuper ? (
+                                      <span title="صلاحية كاملة غير قابلة للإلغاء" style={{ fontSize: 16 }}>👑</span>
+                                    ) : (
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(hasPerm)}
+                                        onChange={() => handleToggleRolePermission(r, p.id)}
+                                        style={{
+                                          width: 18,
+                                          height: 18,
+                                          cursor: 'pointer',
+                                          accentColor: cat.color
+                                        }}
+                                        title={`تفعيل/تعطيل صلاحية (${p.perm_name_ar}) لدور (${r.role_name_ar})`}
+                                      />
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── PERMISSIONS LIST TAB ──────────────────────────── */}
         {activeTab === 'perms' && (
-          <div className="table-container glass-panel">
+          <div className="table-container glass-panel" style={{ padding: 24 }}>
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>🔑 دليل الصلاحيات الأمنية للنظام</h3>
+              <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>قائمة موحدة بكافة الصلاحيات البرمجية المعرفة داخل نبراس برو</p>
+            </div>
             <div className="table-scroll">
               <table className="students-table">
                 <thead>
                   <tr>
                     <th>كود الصلاحية</th>
                     <th>اسم الصلاحية بالعربية</th>
-                    <th>الوصف الوظيفي</th>
+                    <th>القطاع التابع له</th>
                   </tr>
                 </thead>
                 <tbody>
                   {perms.map(p => (
                     <tr key={p.id} className="table-row">
                       <td><code className="student-code" style={{ fontFamily: 'monospace' }}>{p.perm_key}</code></td>
-                      <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.perm_name_ar}</td>
-                      <td style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-                        تمنح حق الوصول لتنفيذ إجراءات {p.perm_name_ar} داخل النظام.
+                      <td style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{p.perm_name_ar}</td>
+                      <td>
+                        <span style={{ background: 'rgba(99,102,241,0.1)', color: '#6366f1', padding: '3px 8px', borderRadius: 4, fontWeight: 700, fontSize: 11.5 }}>
+                          {p.category === 'students' ? 'شؤون الطلاب' : p.category === 'staff' ? 'شؤون العاملين' : p.category === 'control' ? 'الكنترول' : p.category === 'finance' ? 'الحسابات' : 'إدارة النظام'}
+                        </span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── CUSTOM ROLE MODAL ────────────────────────────── */}
+        {showRoleModal && (
+          <div className="modal-overlay" onClick={() => setShowRoleModal(false)}>
+            <div className="modal-card glass-panel text-right" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+              <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>➕ إضافة دور وظيفي مخصص جديد</h3>
+                <button type="button" className="btn-icon" onClick={() => setShowRoleModal(false)}>✕</button>
+              </div>
+
+              <form onSubmit={handleCreateCustomRole} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div className="field-group">
+                  <label className="field-label">مسمى الدور الوظيفي بالعربية ★</label>
+                  <input
+                    type="text"
+                    className="field-input"
+                    required
+                    placeholder="مثال: عضو لجنة الكنترول"
+                    value={roleModalForm.roleNameAr}
+                    onChange={e => setRoleModalForm({ ...roleModalForm, roleNameAr: e.target.value })}
+                  />
+                </div>
+
+                <div className="field-group">
+                  <label className="field-label">كود الدور بالإنجليزية (اختياري)</label>
+                  <input
+                    type="text"
+                    className="field-input"
+                    placeholder="مثال: control_member"
+                    dir="ltr"
+                    value={roleModalForm.roleName}
+                    onChange={e => setRoleModalForm({ ...roleModalForm, roleName: e.target.value })}
+                  />
+                </div>
+
+                <div className="field-group">
+                  <label className="field-label">وصف المهام والمسؤوليات</label>
+                  <textarea
+                    className="field-input"
+                    rows={3}
+                    placeholder="وصف مختصر لطبيعة عمل هذا الدور..."
+                    value={roleModalForm.description}
+                    onChange={e => setRoleModalForm({ ...roleModalForm, description: e.target.value })}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
+                  <button type="submit" className="btn-save" style={{ padding: '8px 20px', fontSize: 13 }}>
+                    <Save size={14} /> إنشاء الدور
+                  </button>
+                  <button type="button" className="btn-cancel" style={{ padding: '8px 18px', fontSize: 13 }} onClick={() => setShowRoleModal(false)}>
+                    <X size={14} /> إلغاء
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
@@ -1210,30 +1636,30 @@ export default function SettingsPage({
                 <div className="field-group" style={{ minWidth: 140 }}>
                   <label className="field-label" style={{ marginBottom: 4 }}>العام الدراسي</label>
                   <select className="filter-select" style={{ width: '100%', padding: '8px 12px' }}
-                    value={classroomFilters.academicYearId}
+                    value={classroomFilters.academicYearId || (formOpts.academicYears?.[0]?.id ? String(formOpts.academicYears[0].id) : '')}
                     onChange={e => setClassroomFilters(f => ({ ...f, academicYearId: e.target.value }))}>
-                    <option value="">اختر العام...</option>
-                    {formOpts.academicYears?.map(y => <option key={y.id} value={y.id}>{y.year_label}</option>)}
+                    {formOpts.academicYears?.length !== 1 && <option value="">اختر العام...</option>}
+                    {formOpts.academicYears?.map(y => <option key={y.id} value={String(y.id)}>{y.year_label}</option>)}
                   </select>
                 </div>
 
                 <div className="field-group" style={{ minWidth: 130 }}>
                   <label className="field-label" style={{ marginBottom: 4 }}>القسم</label>
                   <select className="filter-select" style={{ width: '100%', padding: '8px 12px' }}
-                    value={classroomFilters.sectionId}
+                    value={classroomFilters.sectionId || selectedSectionId}
                     onChange={e => setClassroomFilters(f => ({ ...f, sectionId: e.target.value, stageId: '', gradeId: '' }))}>
-                    <option value="">كل الأقسام</option>
-                    {formOpts.sections?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    {formOpts.sections?.length !== 1 && <option value="">كل الأقسام</option>}
+                    {formOpts.sections?.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
                   </select>
                 </div>
 
                 <div className="field-group" style={{ minWidth: 130 }}>
                   <label className="field-label" style={{ marginBottom: 4 }}>المرحلة</label>
                   <select className="filter-select" style={{ width: '100%', padding: '8px 12px' }}
-                    value={classroomFilters.stageId}
+                    value={classroomFilters.stageId || selectedStageId}
                     onChange={e => setClassroomFilters(f => ({ ...f, stageId: e.target.value, gradeId: '' }))}>
-                    <option value="">اختر المرحلة...</option>
-                    {filteredStages.map(s => <option key={s.id} value={s.id}>{s.stage_name}</option>)}
+                    {filteredStages.length !== 1 && <option value="">اختر المرحلة...</option>}
+                    {filteredStages.map(s => <option key={s.id} value={String(s.id)}>{s.stage_name}</option>)}
                   </select>
                 </div>
 
@@ -1243,7 +1669,7 @@ export default function SettingsPage({
                     value={classroomFilters.gradeId}
                     onChange={e => setClassroomFilters(f => ({ ...f, gradeId: e.target.value }))}>
                     <option value="">اختر الصف...</option>
-                    {filteredGrades.map(g => <option key={g.id} value={g.id}>{g.grade_name_ar}</option>)}
+                    {filteredGrades.map(g => <option key={g.id} value={String(g.id)}>{g.grade_name_ar}</option>)}
                   </select>
                 </div>
               </div>
@@ -1252,16 +1678,22 @@ export default function SettingsPage({
             {/* ── Bulk Creation Panel (shown only when grade+year selected) ── */}
             {classroomFilters.gradeId && classroomFilters.academicYearId && (
               <div className="glass-panel" style={{ padding: 24 }}>
-                <h3 className="section-title" style={{ marginBottom: 20 }}>➕ إنشاء فصول جديدة بالجملة</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <div>
+                    <h3 className="section-title" style={{ margin: 0 }}>➕ تسجيل الفصول بترقيم تصاعدي</h3>
+                    <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      يتم تسجيل الفصول بأرقام تصاعدية (1، 2، 3...) وتظهر تلقائياً في المطبوعات والشهادات بالشكل المعتمد (مثل 1/1ع أو G5.C2)
+                    </p>
+                  </div>
+                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                   {/* Count */}
                   <div className="field-group">
                     <label className="field-label">
                       {classrooms.length > 0
-                        ? `إجمالي الفصول المطلوب (يوجد ${classrooms.length} فصل حالياً)`
-                        : 'عدد الفصول'}
+                        ? `إجمالي عدد الفصول المطلوب (يوجد ${classrooms.length} فصل حالياً)`
+                        : 'إجمالي عدد الفصول المطلوب للصف'}
                     </label>
                     <input type="number" className="field-input"
                       min={classrooms.length > 0 ? classrooms.length + 1 : 1} max={50} value={bulkForm.count}
@@ -1270,41 +1702,10 @@ export default function SettingsPage({
 
                   {/* Capacity */}
                   <div className="field-group">
-                    <label className="field-label">السعة الموحدة (أقصى حد 49 طالب)</label>
+                    <label className="field-label">السعة الاستيعابية لكل فصل (الحد الأقصى 49)</label>
                     <input type="number" className="field-input" min={1} max={49} value={bulkForm.capacity}
                       onChange={e => setBulkForm(f => ({ ...f, capacity: Math.min(49, Math.max(1, parseInt(e.target.value) || 1)) }))} />
                   </div>
-
-                  {/* Naming style */}
-                  <div className="field-group">
-                    <label className="field-label">
-                      طريقة تسمية الفصول
-                      {classrooms.length > 0 && (
-                        <span style={{ fontSize: 11, color: '#6366f1', marginRight: 6, fontWeight: 700 }}>
-                          🔒 (مثبتة تلقائياً لتطابق الفصول الحالية)
-                        </span>
-                      )}
-                    </label>
-                    <select className="field-input" value={bulkForm.namingStyle} disabled={classrooms.length > 0}
-                      onChange={e => setBulkForm(f => ({ ...f, namingStyle: e.target.value, prefix: '' }))}>
-                      <option value="numeric">أرقام قياسية (1/1 ، 1/2 ، 1/3 ...)</option>
-                      <option value="arabic">حروف عربية (1/أ ، 1/ب ، 1/ج ...)</option>
-                      <option value="arabic_suffix">أرقام مع لاحقة المرحلة (1/1 ع ، 1/2 ع ...)</option>
-                      <option value="english_letter_grade">أجنبي (A1 , B1 , C1 ...)</option>
-                      <option value="custom">بادئة مخصصة</option>
-                    </select>
-                  </div>
-
-                  {/* Custom prefix */}
-                  {bulkForm.namingStyle === 'custom' && (
-                    <div className="field-group">
-                      <label className="field-label">البادئة (مثال: أ )</label>
-                      <input type="text" className="field-input" maxLength={5}
-                        disabled={classrooms.length > 0}
-                        value={bulkForm.prefix} placeholder="أ أو A أو ..." dir="rtl"
-                        onChange={e => setBulkForm(f => ({ ...f, prefix: e.target.value }))} />
-                    </div>
-                  )}
                 </div>
 
                 {/* Preview badges */}
@@ -1313,15 +1714,14 @@ export default function SettingsPage({
                     <p className="field-label" style={{ marginBottom: 8 }}>
                       {classrooms.length > 0
                         ? `معاينة الفصول الجديدة المراد إضافتها لتكملة الفصول من (${classrooms.length}) إلى (${bulkForm.count}):`
-                        : 'معاينة أسماء وأكواد الفصول الجديدة التي سيتم إنشاؤها:'}
+                        : 'معاينة أسماء وأكواد الفصول الجديدة وصيغتها في المطبوعات:'}
                     </p>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {getGeneratedNames(classroomFilters.gradeId).map((n, i) => (
                         <span key={i} style={{
-                          background: 'rgba(99,102,241,0.15)', color: '#818cf8',
-                          border: '1px solid rgba(99,102,241,0.3)',
-                          borderRadius: 8, padding: '4px 14px', fontSize: 13, fontWeight: 700,
-                          fontFamily: 'monospace'
+                          background: 'rgba(99,102,241,0.12)', color: '#818cf8',
+                          border: '1px solid rgba(99,102,241,0.25)',
+                          borderRadius: 8, padding: '5px 12px', fontSize: 13, fontWeight: 700
                         }}>{n}</span>
                       ))}
                     </div>
@@ -1332,10 +1732,10 @@ export default function SettingsPage({
                   <button className="btn-save" onClick={handleBulkCreate} disabled={bulkCreating}
                     style={{ gap: 8, minWidth: 180 }}>
                     {bulkCreating
-                      ? <><div className="loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> جاري الإنشاء...</>
+                      ? <><div className="loading-spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> جاري الحفظ...</>
                       : <><Plus size={17} /> {classrooms.length > 0
                           ? `إضافة ${Math.max(0, (parseInt(bulkForm.count) || 1) - classrooms.length)} فصل جديد لتكملة العدد إلى ${bulkForm.count}`
-                          : `إنشاء ${bulkForm.count} فصل`}</>}
+                          : `تسجيل ${bulkForm.count} فصل للصف`}</>}
                   </button>
                 </div>
               </div>
@@ -1347,7 +1747,7 @@ export default function SettingsPage({
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                     <h3 className="section-title" style={{ margin: 0 }}>
-                      🏫 الفصول الحالية ({classrooms.length} فصل)
+                      🏫 الفصول المسجلة ({classrooms.length} فصل مرتبة تصاعدياً)
                     </h3>
                     <button
                       className="btn-delete"
@@ -1368,7 +1768,7 @@ export default function SettingsPage({
                       <Trash2 size={14} /> حذف كافة فصول هذا الصف
                     </button>
                   </div>
-                  <div className="classrooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 14 }}>
+                  <div className="classrooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
                     {classrooms.map(c => {
                       const percent = Math.min(100, Math.round((c.enrolledCount / (c.capacity || 1)) * 100));
                       const progressColor = percent > 90 ? '#ef4444' : percent > 75 ? '#f59e0b' : '#10b981';
@@ -1380,8 +1780,13 @@ export default function SettingsPage({
                             // ── Inline Edit Mode ──
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                               <div className="field-group">
-                                <label className="field-label">اسم الفصل</label>
-                                <input type="text" className="field-input" value={editForm.className}
+                                <label className="field-label">رقم الفصل (ترتيب عددي)</label>
+                                <input type="number" className="field-input" min={1} max={99} value={editForm.classNumber}
+                                  onChange={e => setEditForm(f => ({ ...f, classNumber: e.target.value }))} />
+                              </div>
+                              <div className="field-group">
+                                <label className="field-label">مسمى الفصل المخصص (اختياري)</label>
+                                <input type="text" className="field-input" value={editForm.className} placeholder={`فصل ${editForm.classNumber || 1}`}
                                   onChange={e => setEditForm(f => ({ ...f, className: e.target.value }))} />
                               </div>
                               <div className="field-group">
@@ -1399,20 +1804,25 @@ export default function SettingsPage({
                           ) : (
                             // ── View Mode ──
                             <>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                 <div>
-                                  <h4 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 1, margin: 0 }}>
-                                    🏫 {c.class_name}
+                                  <h4 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 0.5, margin: 0 }}>
+                                    🏫 فصل {c.class_number || c.class_name}
                                   </h4>
-                                  {c.class_code && (
-                                    <span style={{ fontSize: 11, background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontFamily: 'monospace', marginTop: 4, display: 'inline-block' }}>
-                                      🏷️ كود: {c.class_code}
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                    <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                                      🖨️ في المطبوعات: {c.formatted_name || c.class_name}
                                     </span>
-                                  )}
+                                    {c.class_code && (
+                                      <span style={{ fontSize: 11, background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontFamily: 'monospace' }}>
+                                        🏷️ كود: {c.class_code}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="row-actions">
                                   <button className="action-btn view" title="تعديل"
-                                    onClick={() => { setEditingClassroom(c.id); setEditForm({ className: c.class_name, capacity: c.capacity }); }}>
+                                    onClick={() => { setEditingClassroom(c.id); setEditForm({ classNumber: c.class_number || 1, className: c.class_name, capacity: c.capacity }); }}>
                                     <Edit3 size={13} />
                                   </button>
                                   <button className="action-btn view" title="حذف" style={{ borderColor: 'rgba(239,68,68,0.2)', color: '#ef4444' }}
@@ -1465,424 +1875,308 @@ export default function SettingsPage({
         )}
 
         {/* ── INSTITUTION CONFIG TAB ─────────────────────────── */}
-        {activeTab === 'institution' && (
-          <form onSubmit={handleSaveInstitution} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {activeTab === 'institution' && (() => {
+          const currentGovName = (institutionForm.governorate || '').trim();
+          const currentGovObj = (governoratesList || []).find(g => 
+            (g.name_ar && g.name_ar.trim() === currentGovName) || 
+            (institutionForm.governorateId && Number(g.id) === Number(institutionForm.governorateId))
+          );
+          const currentAdmins = currentGovObj 
+            ? (administrationsList || []).filter(a => Number(a.governorate_id) === Number(currentGovObj.id)) 
+            : (administrationsList || []);
 
-            {/* ── Section 1: Basic School Data ── */}
-            <div className="glass-panel form-body">
-              <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                🏫 البيانات الأساسية ومعلومات التواصل بالمدرسة
-              </h3>
-              <p style={{ marginBottom: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
-                المعلومات التعريفية والعنوان ووسائل التواصل المعتمدة رسمياً للمدرسة
-              </p>
-              <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px 20px' }}>
-                <div className="field-group">
-                  <label className="field-label">اسم المدرسة باللغة العربية ★</label>
-                  <input type="text" className="field-input" required value={institutionForm.schoolName}
-                    onChange={e => setInstitutionForm({ ...institutionForm, schoolName: e.target.value })} placeholder="مثال: مدرسة منارة العلم" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">اسم المدرسة باللغة الإنجليزية (للمستندات الرسمية)</label>
-                  <input type="text" className="field-input" value={institutionForm.schoolNameEn}
-                    onChange={e => setInstitutionForm({ ...institutionForm, schoolNameEn: e.target.value })} placeholder="Example: Menar El-Elm School" dir="ltr" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">كود المدرسة ★</label>
-                  <input type="text" className="field-input" required value={institutionForm.schoolCode}
-                    onChange={e => setInstitutionForm({ ...institutionForm, schoolCode: e.target.value })} placeholder="مثال: 12345" dir="ltr" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">المحافظة ★</label>
-                  <select className="field-input" required value={institutionForm.governorate}
-                    onChange={e => setInstitutionForm({ ...institutionForm, governorate: e.target.value })}>
-                    <option value="">اختر المحافظة...</option>
-                    {['القاهرة','الجيزة','الإسكندرية','الدقهلية','البحيرة','الفيوم','الغربية','الإسماعيلية',
-                      'المنوفية','المنيا','القليوبية','السويس','الشرقية','أسوان','أسيوط','بني سويف','بورسعيد',
-                      'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج'
-                    ].map(g => <option key={g} value={g}>{g}</option>)}
-                  </select>
-                </div>
-                <div className="field-group">
-                  <label className="field-label">الإدارة التعليمية ★</label>
-                  <input type="text" className="field-input" required value={institutionForm.directorate}
-                    onChange={e => setInstitutionForm({ ...institutionForm, directorate: e.target.value })} placeholder="مثال: إدارة الدقي التعليمية" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label" style={{ fontWeight: 'bold' }}>تصنيف التعليم (صفة المؤسسة) ★</label>
-                  <select
-                    className="field-input"
-                    value={selectedClassificationId}
-                    onChange={e => setSelectedClassificationId(e.target.value)}
-                  >
-                    <option value="">اختر تصنيف التعليم...</option>
-                    {masterLookups.classifications.map(c => (
-                      <option key={c.id} value={c.id}>{c.name_ar}</option>
-                    ))}
-                  </select>
-                </div>
+          const handleGovernorateChange = (govName) => {
+            const foundGov = governoratesList.find(g => g.name_ar === govName);
+            setInstitutionForm(prev => ({
+              ...prev,
+              governorate: govName,
+              governorateId: foundGov ? foundGov.id : null,
+              directorate: '',
+              administrationId: null
+            }));
+            setIsCustomAdmin(false);
+          };
 
-                <div className="field-group">
-                  <label className="field-label">العنوان التفصيلي للمدرسة</label>
-                  <input type="text" className="field-input" value={institutionForm.address}
-                    onChange={e => setInstitutionForm({ ...institutionForm, address: e.target.value })} placeholder="مثال: 12 شارع التحرير، الدقي" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">رقم الهاتف</label>
-                  <input type="text" className="field-input" value={institutionForm.phone}
-                    onChange={e => setInstitutionForm({ ...institutionForm, phone: e.target.value })} placeholder="مثال: 0233445566" dir="ltr" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">البريد الإلكتروني الرسمي</label>
-                  <input type="email" className="field-input" value={institutionForm.email}
-                    onChange={e => setInstitutionForm({ ...institutionForm, email: e.target.value })} placeholder="school@example.com" dir="ltr" />
-                </div>
-                <div className="field-group">
-                  <label className="field-label">الموقع الإلكتروني الرسمي</label>
-                  <input type="text" className="field-input" value={institutionForm.website}
-                    onChange={e => setInstitutionForm({ ...institutionForm, website: e.target.value })} placeholder="www.school.com" dir="ltr" />
-                </div>
+          const handleAdminSelect = (adminName) => {
+            if (adminName === '__custom__') {
+              setIsCustomAdmin(true);
+              setInstitutionForm(prev => ({ ...prev, directorate: '', administrationId: null }));
+            } else {
+              const foundAdmin = administrationsList.find(a => a.name_ar === adminName);
+              setInstitutionForm(prev => ({
+                ...prev,
+                directorate: adminName,
+                administrationId: foundAdmin ? foundAdmin.id : null
+              }));
+            }
+          };
 
-                {/* ── Multi-Section Cards Builder ── */}
-                {/* ── Multi-Section & Leadership Cards Builder ── */}
-                <div style={{ gridColumn: 'span 2', marginTop: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
-                  <h4 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#1e293b' }}>
-                    🏢 أقسام المؤسسة وقيادات الأقسام المعتمدة
-                  </h4>
-                  {configuredSections.map((sec, secIdx) => {
-                    const secMaster = masterLookups.sections?.find(s => s.id === sec.sectionMasterId);
-                    const secNameLower = (secMaster?.name_ar || secMaster?.code || '').toLowerCase();
-                    
-                    let filteredEduTypes = masterLookups.educationTypes || [];
-                    if (secNameLower.includes('لغات') || secNameLower.includes('languages')) {
-                      filteredEduTypes = filteredEduTypes.filter(et => et.name_ar.includes('لغات') || et.code.includes('languages') || et.code.includes('distinguished'));
-                    } else if (secNameLower.includes('دولي') || secNameLower.includes('international')) {
-                      filteredEduTypes = filteredEduTypes.filter(et => et.name_ar.includes('دولي') || et.code.includes('international'));
-                    } else {
-                      filteredEduTypes = filteredEduTypes.filter(et => !et.name_ar.includes('لغات') && !et.name_ar.includes('دولي'));
-                    }
+          return (
+            <form onSubmit={handleSaveInstitution} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-                    return (
-                      <div key={secIdx} style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 2px 4px rgba(0,0,0,0.03)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: 10 }}>
-                          <div style={{ fontWeight: 800, fontSize: 15, color: '#0f172a' }}>
-                            قسم ({secMaster?.name_ar || `قسم ${secIdx + 1}`})
-                          </div>
-                          {configuredSections.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => setConfiguredSections(prev => prev.filter((_, i) => i !== secIdx))}
-                              style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}
-                            >
-                              🗑️ حذف هذا القسم
-                            </button>
-                          )}
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                          <div className="field-group">
-                            <label className="field-label">اختر القسم ★</label>
-                            <select
-                              className="field-input"
-                              value={sec.sectionMasterId}
-                              onChange={e => {
-                                const val = Number(e.target.value);
-                                setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionMasterId: val } : s));
-                              }}
-                            >
-                              {masterLookups.sections.map(s => (
-                                <option key={s.id} value={s.id}>{s.name_ar}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="field-group">
-                            <label className="field-label">نوعية التعليم المحددة للقسم ★</label>
-                            <select
-                              className="field-input"
-                              value={sec.educationTypeId}
-                              onChange={e => {
-                                const val = Number(e.target.value);
-                                setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, educationTypeId: val } : s));
-                              }}
-                            >
-                              {filteredEduTypes.map(et => (
-                                <option key={et.id} value={et.id}>{et.name_ar}</option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        {/* Section Leadership */}
-                        <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #e2e8f0', marginTop: 4 }}>
-                          <h5 style={{ margin: '0 0 12px 0', fontSize: 13.5, fontWeight: 800, color: '#1e293b' }}>
-                            👤 مدير ووكلاء {secMaster?.name_ar || `القسم ${secIdx + 1}`}
-                          </h5>
-                          
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 14 }}>
-                            <div className="field-group">
-                              <label className="field-label" style={{ fontSize: 12 }}>اسم مدير القسم</label>
-                              <input
-                                type="text"
-                                className="field-input"
-                                style={{ fontSize: 13 }}
-                                value={sec.sectionDirectorName || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorName: val } : s));
-                                }}
-                                placeholder="الاسم رباعياً"
-                              />
-                            </div>
-                            <div className="field-group">
-                              <label className="field-label" style={{ fontSize: 12 }}>المؤهل العلمي</label>
-                              <input
-                                type="text"
-                                className="field-input"
-                                style={{ fontSize: 13 }}
-                                value={sec.sectionDirectorQualification || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorQualification: val } : s));
-                                }}
-                                placeholder="مثال: بكالوريوس تربية"
-                              />
-                            </div>
-                            <div className="field-group">
-                              <label className="field-label" style={{ fontSize: 12 }}>الرقم القومي (14 رقم)</label>
-                              <input
-                                type="text"
-                                className="field-input"
-                                style={{ fontSize: 13 }}
-                                dir="ltr"
-                                maxLength={14}
-                                value={sec.sectionDirectorNationalId || ''}
-                                onChange={e => {
-                                  const val = e.target.value.replace(/\D/g, '');
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorNationalId: val } : s));
-                                }}
-                                placeholder="14 رقماً"
-                              />
-                            </div>
-                            <div className="field-group">
-                              <label className="field-label" style={{ fontSize: 12 }}>رقم هاتف مدير القسم</label>
-                              <input
-                                type="text"
-                                className="field-input"
-                                style={{ fontSize: 13 }}
-                                dir="ltr"
-                                value={sec.sectionDirectorPhone || ''}
-                                onChange={e => {
-                                  const val = e.target.value.replace(/[^\d+]/g, '');
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDirectorPhone: val } : s));
-                                }}
-                                placeholder="01xxxxxxxxx"
-                              />
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                            <div className="field-group" style={{ background: '#ffffff', padding: 10, borderRadius: 6, border: '1px solid #cbd5e1' }}>
-                              <label className="field-label" style={{ fontWeight: 700, fontSize: 12 }}>وكيل القسم</label>
-                              <input
-                                className="field-input"
-                                style={{ marginBottom: 6, fontSize: 12 }}
-                                value={sec.sectionDeputyName || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDeputyName: val } : s));
-                                }}
-                                placeholder="اسم وكيل القسم"
-                              />
-                              <input
-                                className="field-input"
-                                dir="ltr"
-                                style={{ fontSize: 12 }}
-                                value={sec.sectionDeputyPhone || ''}
-                                onChange={e => {
-                                  const val = e.target.value.replace(/[^\d+]/g, '');
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, sectionDeputyPhone: val } : s));
-                                }}
-                                placeholder="تليفون الوكيل"
-                              />
-                            </div>
-
-                            <div className="field-group" style={{ background: '#ffffff', padding: 10, borderRadius: 6, border: '1px solid #cbd5e1' }}>
-                              <label className="field-label" style={{ fontWeight: 700, fontSize: 12 }}>وكيل شئون الطلاب</label>
-                              <input
-                                className="field-input"
-                                style={{ marginBottom: 6, fontSize: 12 }}
-                                value={sec.studentsViceName || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, studentsViceName: val } : s));
-                                }}
-                                placeholder="اسم وكيل شئون الطلاب"
-                              />
-                              <input
-                                className="field-input"
-                                dir="ltr"
-                                style={{ fontSize: 12 }}
-                                value={sec.studentsVicePhone || ''}
-                                onChange={e => {
-                                  const val = e.target.value.replace(/[^\d+]/g, '');
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, studentsVicePhone: val } : s));
-                                }}
-                                placeholder="تليفون وكيل الطلاب"
-                              />
-                            </div>
-
-                            <div className="field-group" style={{ background: '#ffffff', padding: 10, borderRadius: 6, border: '1px solid #cbd5e1' }}>
-                              <label className="field-label" style={{ fontWeight: 700, fontSize: 12 }}>وكيل شئون العاملين</label>
-                              <input
-                                className="field-input"
-                                style={{ marginBottom: 6, fontSize: 12 }}
-                                value={sec.staffViceName || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, staffViceName: val } : s));
-                                }}
-                                placeholder="اسم وكيل شئون العاملين"
-                              />
-                              <input
-                                className="field-input"
-                                dir="ltr"
-                                style={{ fontSize: 12 }}
-                                value={sec.staffVicePhone || ''}
-                                onChange={e => {
-                                  const val = e.target.value.replace(/[^\d+]/g, '');
-                                  setConfiguredSections(prev => prev.map((s, i) => i === secIdx ? { ...s, staffVicePhone: val } : s));
-                                }}
-                                placeholder="تليفون وكيل العاملين"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  <button
-                    type="button"
-                    onClick={() => setConfiguredSections(prev => [...prev, { sectionMasterId: masterLookups.sections[0]?.id || 1, educationTypeId: masterLookups.educationTypes[0]?.id || 1, stages: [] }])}
-                    style={{ background: '#f0fdf4', color: '#166534', border: '1.5px dashed #86efac', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 800, fontSize: 14 }}
-                  >
-                    ➕ إضافة قسم آخر للمؤسسة
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* ── Section 4: School Logo ── */}
-            <div className="glass-panel form-body">
-              <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-                🖼️ شعار المدرسة الرسمي
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'flex-start' }}>
-                <div className="field-group">
-                  <label className="field-label">شعار المدرسة</label>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <input type="file" accept="image/*" id="logo-file-input" style={{ display: 'none' }}
-                      onChange={async (e) => {
-                        const file = e.target.files[0];
-                        if (file) {
-                          const reader = new FileReader();
-                          reader.onloadend = () => setInstitutionForm(prev => ({ ...prev, logoUrl: reader.result }));
-                          reader.readAsDataURL(file);
-                        }
-                      }} />
-                    <label htmlFor="logo-file-input" className="btn-secondary" style={{ cursor: 'pointer', padding: '8px 16px', fontSize: 13 }}>
-                      📁 اختيار الشعار
-                    </label>
-                    {institutionForm.logoUrl && (
-                      <button type="button" className="btn-cancel" style={{ padding: '6px 12px', fontSize: 12 }}
-                        onClick={() => setInstitutionForm(prev => ({ ...prev, logoUrl: '' }))}>
-                        حذف
-                      </button>
-                    )}
+              {/* ── Card 1: الهوية وبيانات المؤسسة ── */}
+              <div className="glass-panel" style={{ padding: '24px 28px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>
+                    🏛️
                   </div>
-                  {institutionForm.logoUrl && (
-                    <img src={institutionForm.logoUrl} alt="شعار" style={{ marginTop: 10, maxHeight: 100, maxWidth: 150, objectFit: 'contain', border: '1px solid var(--border-color)', borderRadius: 6, padding: 4 }} onError={e => e.target.style.display='none'} />
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── Multiple Sections List (Only shown if hasMultipleSections is true) ── */}
-            {institutionForm.hasMultipleSections && (
-              <div className="glass-panel form-body" style={{ borderTop: '4px solid var(--accent-primary)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <div>
-                    <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      🏢 الأقسام والمسارات المحددة للمدرسة
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>
+                      بيانات وهوية المؤسسة
                     </h3>
-                    <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                      حدد الأقسام المعتمدة وصِف نوعية الدراسة لكل قسم (سيتم الاحتفاظ بالأقسام المحددة وحذف أي شيء آخر بعد الحفظ)
+                    <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      كود المدرسة ونوع التعليم والاسم بالعربية والإنجليزية للتقارير والمستندات
                     </p>
                   </div>
-                  <button type="button" className="btn-secondary" style={{ padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }} onClick={handleAddSectionInline}>
-                    <Plus size={14} /> إضافة قسم جديد
-                  </button>
                 </div>
-                <div className="table-scroll">
-                  <table className="students-table">
-                    <thead>
-                      <tr>
-                        <th>اسم القسم</th>
-                        <th>وصف القسم / نوعية الدراسة</th>
-                        <th>نوع المنهج</th>
-                        <th>الترخيص / الوضعية</th>
-                        <th style={{ width: 80, textAlign: 'center' }}>إجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sections.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} style={{ textAlign: 'center', opacity: 0.5, padding: 16 }}>لا توجد أقسام مسجلة بالمدرسة حالياً.</td>
-                        </tr>
-                      ) : (
-                        sections.map(sec => (
-                          <tr key={sec.id} className="table-row">
-                            <td>
-                              <input type="text" className="field-input" style={{ padding: '4px 8px', fontSize: 13 }} required value={sec.name} onChange={e => handleUpdateSectionField(sec.id, 'name', e.target.value)} />
-                            </td>
-                            <td>
-                              <input type="text" className="field-input" style={{ padding: '4px 8px', fontSize: 13 }} value={sec.education_type || sec.educationType || ''} onChange={e => handleUpdateSectionField(sec.id, 'education_type', e.target.value)} placeholder="مثال: لغات رسمي..." />
-                            </td>
-                            <td>
-                              <select className="field-input" style={{ padding: '4px 8px', fontSize: 13 }} value={sec.type} onChange={e => handleUpdateSectionField(sec.id, 'type', e.target.value)}>
-                                <option value="arabic">عربي (تعليم باللغة العربية)</option>
-                                <option value="languages">لغات (تعليم باللغات الأجنبية)</option>
-                                <option value="kindergarten">رياض أطفال (تمهيدي)</option>
-                              </select>
-                            </td>
-                            <td>
-                              <select className="field-input" style={{ padding: '4px 8px', fontSize: 13 }} value={sec.legal_status || sec.legalStatus || 'حكومي'} onChange={e => handleUpdateSectionField(sec.id, 'legal_status', e.target.value)}>
-                                <option value="حكومي">حكومي</option>
-                                <option value="خاص">خاص</option>
-                              </select>
-                            </td>
-                            <td style={{ textAlign: 'center' }}>
-                              <button type="button" className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }} onClick={() => handleDeleteSectionInline(sec.id)} title="حذف">
-                                <Trash2 size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18 }}>
+                  <div className="field-group">
+                    <label className="field-label">اسم المدرسة باللغة العربية ★</label>
+                    <input type="text" className="field-input" required value={institutionForm.schoolName}
+                      onChange={e => setInstitutionForm({ ...institutionForm, schoolName: e.target.value })} placeholder="مثال: مدرسة منارة العلم" />
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">كود المدرسة ★</label>
+                    <input type="text" className="field-input" required value={institutionForm.schoolCode}
+                      onChange={e => setInstitutionForm({ ...institutionForm, schoolCode: e.target.value })} placeholder="مثال: 2102419" dir="ltr" />
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">نوع التعليم ★</label>
+                    <select className="field-input" required value={institutionForm.educationType || 'رسمي'}
+                      onChange={e => setInstitutionForm({ ...institutionForm, educationType: e.target.value })}>
+                      {['رسمي', 'رسمي لغات', 'رسمي لغات متميز', 'خاص عربي', 'خاص لغات', 'دولي', 'ثقافي', 'مجتمعي'].map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label">اسم المدرسة باللغة الإنجليزية (للمستندات الدولية)</label>
+                    <input type="text" className="field-input" value={institutionForm.schoolNameEn}
+                      onChange={e => setInstitutionForm({ ...institutionForm, schoolNameEn: e.target.value })} placeholder="Example: Menar El-Elm School" dir="ltr" />
+                  </div>
                 </div>
               </div>
-            )}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, paddingBottom: 16 }}>
-              <button type="button" className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 165 }} onClick={() => setIsPrintingProfile(true)}>
-                <Printer size={16} /> طباعة ملف المؤسسة
-              </button>
-              <button type="submit" className="btn-save" style={{ minWidth: 180 }}><Save size={16} /> حفظ جميع بيانات المؤسسة</button>
-            </div>
-          </form>
-        )}
+              {/* ── Card 2: التبعية الجغرافية والقيادة الإدارية ── */}
+              <div className="glass-panel" style={{ padding: '24px 28px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>
+                    📍
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>
+                      التبعية الجغرافية والقيادة الإدارية
+                    </h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      المحافظة والإدارة التعليمية واسم مدير المدرسة لتذييل وتوقيع التقارير والشهادات
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18 }}>
+                  {/* المحافظة */}
+                  <div className="field-group">
+                    <label className="field-label">المحافظة ★</label>
+                    <select className="field-input" required value={institutionForm.governorate}
+                      onChange={e => handleGovernorateChange(e.target.value)}>
+                      <option value="">اختر المحافظة...</option>
+                      {governoratesList.length > 0 ? (
+                        governoratesList.map(g => (
+                          <option key={g.id} value={g.name_ar}>{g.name_ar}</option>
+                        ))
+                      ) : (
+                        ['القاهرة','الجيزة','الإسكندرية','الدقهلية','البحيرة','الفيوم','الغربية','الإسماعيلية',
+                          'المنوفية','المنيا','القليوبية','السويس','الشرقية','أسوان','أسيوط','بني سويف','بورسعيد',
+                          'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج'
+                        ].map(g => <option key={g} value={g}>{g}</option>)
+                      )}
+                    </select>
+                  </div>
+
+                  {/* الإدارة التعليمية */}
+                  <div className="field-group">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label className="field-label" style={{ margin: 0 }}>الإدارة التعليمية ★</label>
+                      <button type="button" onClick={() => setIsCustomAdmin(!isCustomAdmin)}
+                        style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}>
+                        {isCustomAdmin ? '🔍 اختيار من القائمة الرسمية' : '✍️ إدخال يدوي'}
+                      </button>
+                    </div>
+                    {isCustomAdmin ? (
+                      <input type="text" className="field-input" required value={institutionForm.directorate}
+                        onChange={e => setInstitutionForm({ ...institutionForm, directorate: e.target.value })}
+                        placeholder="مثال: إدارة الهرم التعليمية" />
+                    ) : (
+                      <select className="field-input" required value={institutionForm.directorate}
+                        onChange={e => handleAdminSelect(e.target.value)}>
+                        <option value="">اختر الإدارة التعليمية...</option>
+                        {currentAdmins.map(a => (
+                          <option key={a.id} value={a.name_ar}>{a.name_ar}</option>
+                        ))}
+                        {institutionForm.directorate && !currentAdmins.some(a => a.name_ar === institutionForm.directorate) && (
+                          <option value={institutionForm.directorate}>{institutionForm.directorate}</option>
+                        )}
+                        <option value="__custom__">➕ كتابة إدارة أخرى مخصصة...</option>
+                      </select>
+                    )}
+                  </div>
+
+                  {/* مدير المدرسة */}
+                  <div className="field-group" style={{ gridColumn: 'span 2' }}>
+                    <label className="field-label">مدير المدرسة ★ (توقيع المطبوعات والشهادات وسجلات الكنترول)</label>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                      <input type="text" className="field-input" required value={institutionForm.directorName}
+                        onChange={e => setInstitutionForm({ ...institutionForm, directorName: e.target.value })}
+                        placeholder="اسم مدير المدرسة" style={{ flex: 1 }} />
+                      {staffList.length > 0 && (
+                        <select className="field-input" style={{ width: 230, fontSize: 12.5 }}
+                          value=""
+                          onChange={e => {
+                            const st = staffList.find(s => String(s.id) === e.target.value);
+                            if (st) setInstitutionForm(prev => ({ ...prev, directorName: st.full_name_ar }));
+                          }}>
+                          <option value="">اختيار من قاعدة العاملين...</option>
+                          {staffList.map(s => (
+                            <option key={s.id} value={s.id}>{s.full_name_ar} {s.position_title ? `(${s.position_title})` : ''}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Card 3: بيانات التواصل والعنوان ── */}
+              <div className="glass-panel" style={{ padding: '24px 28px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>
+                    📞
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>
+                      بيانات العنوان والتواصل الرسمي
+                    </h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      العنوان التفصيلي وأرقام الهواتف والبريد والموقع الإلكتروني للمدرسة
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18 }}>
+                  <div className="field-group">
+                    <label className="field-label">العنوان التفصيلي للمدرسة</label>
+                    <input type="text" className="field-input" value={institutionForm.address}
+                      onChange={e => setInstitutionForm({ ...institutionForm, address: e.target.value })} placeholder="مثال: 12 شارع التحرير، الدقي" />
+                  </div>
+                  <div className="field-group">
+                    <label className="field-label">رقم الهاتف</label>
+                    <input type="text" className="field-input" value={institutionForm.phone}
+                      onChange={e => setInstitutionForm({ ...institutionForm, phone: e.target.value })} placeholder="مثال: 0233445566" dir="ltr" />
+                  </div>
+                  <div className="field-group">
+                    <label className="field-label">البريد الإلكتروني الرسمي</label>
+                    <input type="email" className="field-input" value={institutionForm.email}
+                      onChange={e => setInstitutionForm({ ...institutionForm, email: e.target.value })} placeholder="school@example.com" dir="ltr" />
+                  </div>
+                  <div className="field-group">
+                    <label className="field-label">الموقع الإلكتروني الرسمي</label>
+                    <input type="text" className="field-input" value={institutionForm.website}
+                      onChange={e => setInstitutionForm({ ...institutionForm, website: e.target.value })} placeholder="www.school.com" dir="ltr" />
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Card 4: الشعار الرسمي والمعاينة الحية للترويسة ── */}
+              <div className="glass-panel" style={{ padding: '24px 28px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(168, 85, 247, 0.12)', color: '#a855f7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 }}>
+                    🖼️
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>
+                      الهوية البصرية والمعاينة الحية لترويسة المطبوعات
+                    </h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      شعار المدرسة الرسمي وكيف تظهر ترويسة المدرسة في أعلى كافة التقارير والشهادات وسجلات الكنترول
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 24, alignItems: 'center' }}>
+                  {/* الشعار */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 18, background: 'rgba(255,255,255,0.03)', border: '1px dashed var(--border-color)', borderRadius: 12 }}>
+                    {institutionForm.logoUrl ? (
+                      <img src={institutionForm.logoUrl} alt="شعار المدرسة" style={{ maxHeight: 100, maxWidth: 160, objectFit: 'contain', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }} />
+                    ) : (
+                      <div style={{ width: 90, height: 90, borderRadius: 12, background: 'rgba(99,102,241,0.08)', color: '#818cf8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                        <Building size={30} />
+                        <span style={{ fontSize: 11, fontWeight: 700 }}>بدون شعار</span>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input type="file" accept="image/*" id="logo-file-input" style={{ display: 'none' }}
+                        onChange={async (e) => {
+                          const file = e.target.files[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => setInstitutionForm(prev => ({ ...prev, logoUrl: reader.result }));
+                            reader.readAsDataURL(file);
+                          }
+                        }} />
+                      <label htmlFor="logo-file-input" className="btn-secondary" style={{ cursor: 'pointer', padding: '6px 14px', fontSize: 12.5 }}>
+                        📁 {institutionForm.logoUrl ? 'تغيير الشعار' : 'رفع شعار'}
+                      </label>
+                      {institutionForm.logoUrl && (
+                        <button type="button" className="btn-cancel" style={{ padding: '6px 12px', fontSize: 12 }}
+                          onClick={() => setInstitutionForm(prev => ({ ...prev, logoUrl: '' }))}>
+                          حذف
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* المعاينة الحية للترويسة الرسمية */}
+                  <div style={{ padding: '18px 24px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', borderRadius: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: 8, marginBottom: 12 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: '#6366f1' }}>🖨️ معاينة حية لترويسة المستندات والتقارير:</span>
+                      <span style={{ fontSize: 11, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>معتمدة وزارياً</span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, lineHeight: 1.6 }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>مديرية التربية والتعليم بمحافظة {institutionForm.governorate || '................'}</div>
+                        <div style={{ color: 'var(--text-secondary)' }}>إدارة {institutionForm.directorate || '................'} التعليمية</div>
+                        <div style={{ fontWeight: 800, color: '#6366f1', fontSize: 13.5 }}>مدرسة {institutionForm.schoolName || '................'}</div>
+                      </div>
+
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>كود المدرسة: <strong style={{ color: 'var(--text-primary)' }}>{institutionForm.schoolCode || '—'}</strong></div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>نوع التعليم: <strong style={{ color: '#10b981' }}>{institutionForm.educationType || 'رسمي'}</strong></div>
+                      </div>
+
+                      <div style={{ textAlign: 'left' }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>توقيع مدير المدرسة:</div>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', marginTop: 4 }}>{institutionForm.directorName || '................'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Action Buttons ── */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, paddingBottom: 16 }}>
+                <button type="submit" className="btn-save" style={{ minWidth: 200, padding: '10px 24px', fontSize: 14, fontWeight: 800 }}>
+                  <Save size={17} /> حفظ جميع بيانات المدرسة
+                </button>
+              </div>
+            </form>
+          );
+        })()}
 
         {/* ── SECTIONS & STAGES TAB ────────────────────────── */}
         {activeTab === 'sections_stages' && (
@@ -1905,84 +2199,144 @@ export default function SettingsPage({
             <div className="glass-panel" style={{ padding: '24px 30px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
                 <div>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>🏢 الأقسام والمسارات التعليمية المسجلة</h3>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)' }}>🏢 الأقسام والمسارات التعليمية المعتمدة للمؤسسة</h3>
                   <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    الأقسام والمسارات التعليمية المعتمدة للمؤسسة المحددة من بيانات المؤسسة
+                    إدارة أقسام ومسارات المدرسة (مثل القسم العربي، قسم اللغات، القسم الدولي...) وإمكانية إضافة مسار جديد.
                   </p>
                 </div>
+                {!showSectionForm && (
+                  <button className="btn-add-student" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={handleOpenSectionAdd}>
+                    <Plus size={14} /> إضافة قسم / مسار جديد
+                  </button>
+                )}
               </div>
 
-              {showSectionForm && (
-                <form onSubmit={handleSaveSection} style={{ marginBottom: 24, padding: 16, background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
-                  <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>{editingSection ? '✏️ تعديل القسم' : '➕ إضافة قسم جديد'}</h4>
-                  <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
-                    <div className="field-group">
-                      <label className="field-label">اسم القسم</label>
-                      <input type="text" className="field-input" required value={sectionForm.name}
-                        onChange={e => setSectionForm({ ...sectionForm, name: e.target.value })} placeholder="مثال: القسم العربي" />
+              {/* Form to Add / Edit Section */}
+              {/* Form to Add / Edit Section */}
+              {showSectionForm && (() => {
+                const standardSections = [
+                  { type: 'arabic', name: 'القسم العربي', educationType: 'رسمي', legalStatus: 'حكومي' },
+                  { type: 'languages', name: 'قسم اللغات', educationType: 'رسمي لغات', legalStatus: 'حكومي' },
+                  { type: 'international', name: 'القسم الدولي', educationType: 'دولي', legalStatus: 'خاص' },
+                  { type: 'kindergarten', name: 'قسم رياض أطفال (مستقل)', educationType: 'رسمي', legalStatus: 'حكومي' }
+                ];
+                const availableSectionsToAdd = editingSection 
+                  ? standardSections 
+                  : standardSections.filter(std => !sections.some(s => s.type === std.type));
+
+                return (
+                  <form onSubmit={handleSaveSection} style={{ marginBottom: 24, padding: 18, background: 'rgba(99, 102, 241, 0.04)', borderRadius: 10, border: '1.5px solid rgba(99, 102, 241, 0.3)' }}>
+                    <h4 style={{ fontSize: 14.5, fontWeight: 800, color: '#4f46e5', marginBottom: 14 }}>
+                      {editingSection ? '✏️ تعديل بيانات القسم' : '➕ إضافة مسار / قسم جديد للمؤسسة'}
+                    </h4>
+                    <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                      <div className="field-group">
+                        <label className="field-label">اختر القسم المتاح للتسجيل ★</label>
+                        <select 
+                          className="field-input" 
+                          required 
+                          value={sectionForm.type}
+                          onChange={e => {
+                            const chosen = standardSections.find(s => s.type === e.target.value);
+                            if (chosen) {
+                              setSectionForm({
+                                ...sectionForm,
+                                type: chosen.type,
+                                name: chosen.name,
+                                educationType: chosen.educationType,
+                                legalStatus: chosen.legalStatus
+                              });
+                            }
+                          }}
+                        >
+                          <option value="">اختر القسم المراد إضافته...</option>
+                          {availableSectionsToAdd.map(secOpt => (
+                            <option key={secOpt.type} value={secOpt.type}>{secOpt.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="field-group">
+                        <label className="field-label">اسم القسم المسجل ★</label>
+                        <input type="text" className="field-input" required value={sectionForm.name}
+                          onChange={e => setSectionForm({ ...sectionForm, name: e.target.value })}
+                          placeholder="اسم القسم" />
+                      </div>
+
+                      <div className="field-group">
+                        <label className="field-label">نوعية التعليم المعتمدة للقسم ★</label>
+                        <select className="field-input" required value={sectionForm.educationType}
+                          onChange={e => setSectionForm({ ...sectionForm, educationType: e.target.value })}>
+                          {['رسمي', 'رسمي لغات', 'رسمي لغات متميز', 'خاص عربي', 'خاص لغات', 'دولي', 'ثقافي', 'مجتمعي'].map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="field-group">
+                        <label className="field-label">الوضعية القانونية / الترخيص</label>
+                        <select className="field-input" value={sectionForm.legalStatus}
+                          onChange={e => setSectionForm({ ...sectionForm, legalStatus: e.target.value })}>
+                          <option value="حكومي">حكومي</option>
+                          <option value="خاص">خاص</option>
+                        </select>
+                      </div>
                     </div>
-                    <div className="field-group">
-                      <label className="field-label">نوع القسم</label>
-                      <select className="filter-select" value={sectionForm.type}
-                        onChange={e => setSectionForm({ ...sectionForm, type: e.target.value })}>
-                        <option value="arabic">عربي (تعليم أساسي ومتقدم باللغة العربية)</option>
-                        <option value="languages">لغات / تجريبي (تعليم باللغات الأجنبية)</option>
-                        <option value="kindergarten">رياض أطفال (تمهيدي وتأسيسي)</option>
-                      </select>
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+                      <button type="submit" className="btn-save" style={{ padding: '6px 18px', fontSize: 13 }}><Save size={14} /> حفظ القسم</button>
+                      <button type="button" className="btn-cancel" style={{ padding: '6px 18px', fontSize: 13 }} onClick={() => setShowSectionForm(false)}><X size={14} /> إلغاء</button>
                     </div>
-                    <div className="field-group">
-                      <label className="field-label">وصف القسم / نوعية الدراسة بالقسم</label>
-                      <input type="text" className="field-input" value={sectionForm.educationType}
-                        onChange={e => setSectionForm({ ...sectionForm, educationType: e.target.value })} placeholder="مثال: لغات، عربي، دولي، فني، دمج" />
-                    </div>
-                    <div className="field-group">
-                      <label className="field-label">الوضعية القانونية</label>
-                      <select className="filter-select" value={sectionForm.legalStatus}
-                        onChange={e => setSectionForm({ ...sectionForm, legalStatus: e.target.value })}>
-                        <option value="حكومي">حكومي</option>
-                        <option value="خاص">خاص / استثماري</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
-                    <button type="submit" className="btn-save" style={{ padding: '6px 16px', fontSize: 13 }}><Save size={14} /> حفظ</button>
-                    <button type="button" className="btn-cancel" style={{ padding: '6px 16px', fontSize: 13 }} onClick={() => setShowSectionForm(false)}><X size={14} /> إلغاء</button>
-                  </div>
-                </form>
-              )}
+                  </form>
+                );
+              })()}
 
               <div className="table-scroll">
                 <table className="students-table">
                   <thead>
                     <tr>
                       <th>اسم القسم</th>
-                      <th>حالة القسم في المؤسسة</th>
+                      <th>النوع / المسار</th>
+                      <th>نوعية التعليم</th>
+                      <th>الوضعية القانونية</th>
+                      <th style={{ width: 100, textAlign: 'center' }}>إجراءات</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sections.filter(sec => sec.is_active === 1 || sec.is_active === true || sec.is_active === '1').length === 0 ? (
+                    {sections.length === 0 ? (
                       <tr>
-                        <td colSpan={2} style={{ textAlign: 'center', opacity: 0.5, padding: 16 }}>
-                          لا توجد أقسام مسجلة ومفعلة حالياً بالمؤسسة.
+                        <td colSpan={5} style={{ textAlign: 'center', opacity: 0.5, padding: 16 }}>
+                          لا توجد أقسام مسجلة حالياً بالمؤسسة.
                         </td>
                       </tr>
                     ) : (
-                      sections.filter(sec => sec.is_active === 1 || sec.is_active === true || sec.is_active === '1').map(sec => (
+                      sections.map(sec => (
                         <tr key={sec.id} className="table-row">
-                          <td style={{ fontWeight: 800, fontSize: 14 }}>{sec.name}</td>
-                          <td>
-                            <span style={{
-                              display: 'inline-block',
-                              padding: '4px 12px',
-                              borderRadius: 20,
-                              fontSize: 12,
-                              fontWeight: 700,
-                              background: 'rgba(16,185,129,0.12)',
-                              color: '#10b981',
-                              border: '1px solid #10b98130'
-                            }}>
-                              ✅ قسم معتمد ومسجل بالمؤسسة
-                            </span>
+                          <td style={{ fontWeight: 800, fontSize: 14 }}>🏢 {sec.name}</td>
+                          <td>{sec.type === 'arabic' ? 'عربي' : sec.type === 'languages' ? 'لغات' : sec.type === 'kindergarten' ? 'رياض أطفال' : 'دولي'}</td>
+                          <td><span style={{ background: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', padding: '2px 8px', borderRadius: 4, fontWeight: 700, fontSize: 12 }}>{sec.education_type || sec.educationType || '—'}</span></td>
+                          <td>{sec.legal_status || sec.legalStatus || 'حكومي'}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div className="row-actions" style={{ justifyContent: 'center' }}>
+                              <button
+                                type="button"
+                                className="action-btn view"
+                                onClick={() => handleOpenSectionEdit(sec)}
+                                title="تعديل بيانات القسم"
+                              >
+                                <Edit3 size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="action-btn view"
+                                style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
+                                disabled={sections.length <= 1}
+                                onClick={() => handleDeleteSection(sec.id, sec.name)}
+                                title={sections.length <= 1 ? 'يجب إبقاء قسم واحد على الأقل للمؤسسة' : 'حذف القسم'}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1990,8 +2344,6 @@ export default function SettingsPage({
                   </tbody>
                 </table>
               </div>
-
-              {/* Section Leadership Cards hidden to reduce distraction */}
             </div>
 
             {/* 2. STAGES PANEL */}
@@ -2017,43 +2369,53 @@ export default function SettingsPage({
                       <select className="filter-select" required value={stageForm.sectionId}
                         onChange={e => setStageForm({ ...stageForm, sectionId: e.target.value })} disabled={editingStage}>
                         <option value="">اختر القسم...</option>
-                        {sections.filter(sec => sec.is_active === 1 || sec.is_active === true || sec.is_active === '1').map(s => (
+                        {sections.map(s => (
                           <option key={s.id} value={s.id}>{s.name}</option>
                         ))}
                       </select>
                     </div>
                     <div className="field-group">
-                      <label className="field-label">اختر المرحلة التعليمية المكودة ★</label>
-                      <select
-                        className="field-input"
-                        required
-                        value={stageForm.stageCode || ''}
-                        onChange={e => {
-                          const selectedCode = e.target.value;
-                          const matchedStage = masterLookups.stages.find(st => st.code === selectedCode || String(st.id) === selectedCode);
-                          const name = matchedStage ? matchedStage.name_ar : e.target.value;
-                          const code = matchedStage ? matchedStage.code : selectedCode;
-                          
-                          let defaultYears = 3;
-                          if (code === 'primary') defaultYears = 6;
-                          else if (code === 'kg') defaultYears = 2;
-                          else if (code === 'prep' || code === 'sec') defaultYears = 3;
+                      <label className="field-label">اختر المرحلة التعليمية ★</label>
+                      {(() => {
+                        const existingStagesForSec = stages.filter(st => String(st.section_id) === String(stageForm.sectionId));
+                        const availableStagesToAdd = editingStage
+                          ? masterLookups.stages
+                          : masterLookups.stages.filter(mst => !existingStagesForSec.some(es => es.stage_code === mst.code || es.stage_name === mst.name_ar));
 
-                          setStageForm({
-                            ...stageForm,
-                            stageName: name,
-                            stageCode: code,
-                            yearsCount: defaultYears
-                          });
-                        }}
-                      >
-                        <option value="">اختر المرحلة من التكواد المعتمدة...</option>
-                        {masterLookups.stages.map(stg => (
-                          <option key={stg.id} value={stg.code}>
-                            {stg.name_ar} ({stg.code})
-                          </option>
-                        ))}
-                      </select>
+                        return (
+                          <select
+                            className="field-input"
+                            required
+                            value={stageForm.stageCode || ''}
+                            onChange={e => {
+                              const selectedCode = e.target.value;
+                              const matchedStage = masterLookups.stages.find(st => st.code === selectedCode || String(st.id) === selectedCode);
+                              const name = matchedStage ? matchedStage.name_ar : e.target.value;
+                              const code = matchedStage ? matchedStage.code : selectedCode;
+                              
+                              let defaultYears = 3;
+                              if (code === 'primary') defaultYears = 6;
+                              else if (code === 'kindergarten' || code === 'kg') defaultYears = 2;
+                              else if (code === 'preliminary') defaultYears = 1;
+                              else if (code === 'preparatory' || code === 'prep' || code === 'secondary' || code === 'sec') defaultYears = 3;
+
+                              setStageForm({
+                                ...stageForm,
+                                stageName: name,
+                                stageCode: code,
+                                yearsCount: defaultYears
+                              });
+                            }}
+                          >
+                            <option value="">اختر المرحلة المراد إضافتها...</option>
+                            {availableStagesToAdd.map(stg => (
+                              <option key={stg.id} value={stg.code}>
+                                {stg.name_ar}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </div>
                     <div className="field-group">
                       <label className="field-label">كود المرحلة الموحد بالنظام</label>
@@ -2086,56 +2448,38 @@ export default function SettingsPage({
                       <th>القسم التابع له</th>
                       <th>عدد سنوات الدراسة (الصفوف)</th>
                       <th>ترتيب العرض</th>
-                      <th>الحالة</th>
                       <th>إجراءات</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {stages.map(stg => (
-                      <tr key={stg.id} className="table-row" style={{ opacity: stg.is_active ? 1 : 0.55 }}>
-                        <td style={{ fontWeight: 700 }}>{stg.stage_name}</td>
-                        <td><code className="student-code">{stg.stage_code || '—'}</code></td>
-                        <td>{stg.section_name}</td>
-                        <td>{stg.years_count} صفوف دراسية</td>
-                        <td>{stg.display_order}</td>
-                        <td>
-                          <span style={{
-                            display: 'inline-block',
-                            padding: '2px 10px',
-                            borderRadius: 20,
-                            fontSize: 11,
-                            fontWeight: 700,
-                            background: stg.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
-                            color: stg.is_active ? '#10b981' : '#ef4444',
-                            border: `1px solid ${stg.is_active ? '#10b98130' : '#ef444430'}`
-                          }}>
-                            {stg.is_active ? '✅ نشط' : '⛔ غير مفعل'}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="row-actions">
-                            <button className="action-btn view" onClick={() => handleOpenStageEdit(stg)} title="تعديل">
-                              <Edit3 size={14} />
-                            </button>
-                            <button
-                              className="action-btn view"
-                              style={{
-                                borderColor: stg.is_active ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)',
-                                color: stg.is_active ? '#ef4444' : '#10b981'
-                              }}
-                              onClick={() => handleToggleStageActive(stg)}
-                              title={stg.is_active ? 'تعطيل (إخفاء من النظام)' : 'تفعيل (إظهار في النظام)'}
-                            >
-                              {stg.is_active ? '⛔' : '✅'}
-                            </button>
-                            <button className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
-                              onClick={() => handleDeleteStage(stg.id, stg.stage_name)} title="حذف">
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                    {stages.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: 'center', opacity: 0.7, padding: 24, fontSize: 13 }}>
+                          📋 لا توجد مراحل مضافة في هذا القسم - اضغط <strong>«إضافة مرحلة جديدة»</strong> لربط المرحلة بالقسم.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      stages.map(stg => (
+                        <tr key={stg.id} className="table-row">
+                          <td style={{ fontWeight: 700 }}>{stg.stage_name}</td>
+                          <td><code className="student-code">{stg.stage_code || '—'}</code></td>
+                          <td>{stg.section_name}</td>
+                          <td>{stg.years_count} صفوف دراسية</td>
+                          <td>{stg.display_order}</td>
+                          <td>
+                            <div className="row-actions">
+                              <button className="action-btn view" onClick={() => handleOpenStageEdit(stg)} title="تعديل">
+                                <Edit3 size={14} />
+                              </button>
+                              <button className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
+                                onClick={() => handleDeleteStage(stg.id, stg.stage_name)} title="حذف">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2148,115 +2492,72 @@ export default function SettingsPage({
 
         {/* ── ACADEMIC YEARS TAB ──────────────────────────────── */}
         {activeTab === 'academic_years' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {showYearForm ? (
-              /* Add/Edit Year Form */
-              <form onSubmit={handleSaveYear} className="glass-panel form-body" style={{ maxWidth: '600px', margin: '0 auto' }}>
-                <h3 className="section-title">
-                  {editingYear ? '📅 تعديل العام الدراسي' : '📅 إضافة عام دراسي جديد'}
-                </h3>
-                
-                <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-                  <div className="field-group" style={{ gridColumn: 'span 2' }}>
-                    <label className="field-label">تسمية العام الدراسي (أدخل سنة البداية 2026 للاستكمال التلقائي)</label>
-                    <input type="text" className="field-input" required value={yearForm.yearLabel}
-                      dir="rtl"
-                      style={{ textAlign: 'right', direction: 'rtl' }}
-                      onChange={e => {
-                        const val = e.target.value;
-                        const match = val.match(/(\d{4})/);
-                        if (match) {
-                          const num = parseInt(match[1]);
-                          setYearForm(prev => ({
-                            ...prev,
-                            yearLabel: `${num}/${num + 1}`,
-                            startDate: `${num}-09-01`,
-                            endDate: `${num + 1}-08-31`
-                          }));
-                        } else {
-                          setYearForm(prev => ({ ...prev, yearLabel: val }));
-                        }
-                      }} placeholder="مثال: 2026 أو 2026/2027" />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">تاريخ البدء (بداية سبتمبر)</label>
-                    <input type="date" className="field-input" required value={yearForm.startDate}
-                      onChange={e => setYearForm({ ...yearForm, startDate: e.target.value })} />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">تاريخ الانتهاء (نهاية أغسطس)</label>
-                    <input type="date" className="field-input" required value={yearForm.endDate}
-                      onChange={e => setYearForm({ ...yearForm, endDate: e.target.value })} />
-                  </div>
-                  <div className="field-group" style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                    <input type="checkbox" id="isCurrentYear" checked={yearForm.isCurrent}
-                      onChange={e => setYearForm({ ...yearForm, isCurrent: e.target.checked })} />
-                    <label htmlFor="isCurrentYear" className="field-label" style={{ margin: 0, cursor: 'pointer' }}>تعيين كعام دراسي نشط حالياً</label>
-                  </div>
-                </div>
+          <div className="glass-panel form-body" style={{ maxWidth: '650px', margin: '0 auto', padding: '28px 32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+              <span style={{ fontSize: 28 }}>📅</span>
+              <div>
+                <h3 className="section-title" style={{ margin: 0 }}>العام الدراسي المعتمد للمؤسسة</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                  تحديد وتعديل العام الدراسي الحالي النشط في البرنامج بالكامل
+                </p>
+              </div>
+            </div>
 
-                <div className="form-footer" style={{ background: 'transparent', padding: '20px 0 0', marginTop: 24 }}>
-                  <button type="button" className="btn-cancel" onClick={() => setShowYearForm(false)}><X size={16} /> إلغاء</button>
-                  <button type="submit" className="btn-save"><Save size={16} /> حفظ العام الدراسي</button>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const res = await fetch(`${API_BASE_URL}/settings/academic-years/set-single`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ startYear: selectedStartYear })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'فشل حفظ العام الدراسي');
+                toast.success(data.message || 'تم اعتماد العام الدراسي بنجاح');
+                loadData();
+              } catch (err) {
+                toast.error(err.message);
+              }
+            }}>
+              <div className="field-group" style={{ marginBottom: 20 }}>
+                <label className="field-label" style={{ fontWeight: 700, fontSize: 14 }}>
+                  سنة بدء العام الدراسي (أدخل سنة البداية للاستكمال التلقائي)
+                </label>
+                <select
+                  className="field-input"
+                  style={{ fontSize: 15, fontWeight: 700, padding: '10px 14px' }}
+                  value={selectedStartYear}
+                  onChange={e => setSelectedStartYear(e.target.value)}
+                >
+                  {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => (
+                    <option key={y} value={y}>{y} / {y + 1} م</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Live Preview Box */}
+              <div style={{
+                background: 'rgba(16,185,129,0.08)',
+                border: '1.5px solid rgba(16,185,129,0.3)',
+                borderRadius: 12,
+                padding: '16px 20px',
+                marginBottom: 24
+              }}>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>العام الدراسي الحالي المعتمد بالنظام والتقارير:</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: '#10b981', direction: 'rtl', textAlign: 'right' }}>
+                  {selectedStartYear} / {parseInt(selectedStartYear) + 1} م
                 </div>
-              </form>
-            ) : (
-              /* Years List Table */
-              <div className="table-container glass-panel">
-                <div className="table-scroll">
-                  <table className="students-table">
-                    <thead>
-                      <tr>
-                        <th>العام الدراسي</th>
-                        <th>تاريخ البدء</th>
-                        <th>تاريخ الانتهاء</th>
-                        <th>الحالة</th>
-                        <th>إجراءات</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {academicYears.map(y => (
-                        <tr key={y.id} className="table-row">
-                          <td dir="rtl" style={{ fontWeight: 800, fontSize: 15, textAlign: 'right' }}>{y.year_label}</td>
-                          <td dir="rtl" style={{ textAlign: 'right' }}>{y.start_date}</td>
-                          <td dir="rtl" style={{ textAlign: 'right' }}>{y.end_date}</td>
-                          <td>
-                            {y.is_current === 1 || y.is_current === true ? (
-                              <span className="status-badge" style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid #10b98122' }}>
-                                ✓ نشط حالياً
-                              </span>
-                            ) : (
-                              <span className="status-badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}>
-                                غير نشط
-                              </span>
-                            )}
-                          </td>
-                          <td>
-                            <div className="row-actions">
-                              {!(y.is_current === 1 || y.is_current === true) && (
-                                <button className="action-btn view" style={{ borderColor: 'rgba(16,185,129,0.3)', color: '#10b981' }}
-                                  onClick={() => handleSetCurrentYear(y.id)} title="تعيين كعام نشط">
-                                  تفعيل
-                                </button>
-                              )}
-                              <button className="action-btn view" onClick={() => handleOpenYearEdit(y)} title="تعديل">
-                                <Edit3 size={14} />
-                              </button>
-                              {!(y.is_current === 1 || y.is_current === true) && (
-                                <button className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
-                                  onClick={() => handleDeleteYear(y.id, y.year_label)} title="حذف">
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+                  تاريخ الإطار الفعلي: من <strong>{selectedStartYear}-09-01</strong> إلى <strong>{parseInt(selectedStartYear) + 1}-08-31</strong>
                 </div>
               </div>
-            )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="submit" className="btn-save" style={{ padding: '10px 24px', fontSize: 14 }}>
+                  💾 حفظ واعتماد العام الدراسي للمدرسة بالكامل
+                </button>
+              </div>
+            </form>
           </div>
         )}
       </div>
@@ -2570,6 +2871,17 @@ export default function SettingsPage({
         </div>
       )}
 
+      <RenderResetModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onSubmit={handleExecuteReset}
+        resetAdminPassword={resetAdminPassword}
+        setResetAdminPassword={setResetAdminPassword}
+        resetConfirmText={resetConfirmText}
+        setResetConfirmText={setResetConfirmText}
+        resetLoading={resetLoading}
+        resetError={resetError}
+      />
     </div>
   );
 }
@@ -2615,14 +2927,12 @@ function SectionDirectorCard({ section, onSaved, API }) {
   }, [saved]);
 
   const handleInputChange = (field, value) => {
-    if (error) setError('');
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
   const handleSave = async () => {
-    setError('');
     if (form.sectionDirectorNationalId && form.sectionDirectorNationalId.trim().length !== 14) {
-      setError('الرقم القومي لمدير القسم يجب أن يتكون من 14 رقماً.');
+      toast.error('الرقم القومي لمدير القسم يجب أن يتكون من 14 رقماً.');
       return;
     }
 
@@ -2646,7 +2956,7 @@ function SectionDirectorCard({ section, onSaved, API }) {
       setSaved(true);
       if (onSaved) onSaved();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -2710,7 +3020,7 @@ function SectionDirectorCard({ section, onSaved, API }) {
         </div>
       </div>
 
-      {error && <div style={{ marginTop: 10, fontSize: 12, color: '#ef4444' }}>⚠️ {error}</div>}
+
 
       <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn-save" style={{ fontSize: 13, padding: '7px 18px' }} onClick={handleSave} disabled={saving}>
@@ -2762,14 +3072,14 @@ function StageDirectorCard({ stage, onSaved, API }) {
   }, [saved]);
 
   const handleInputChange = (field, value) => {
-    if (error) setError('');
+    if (error) toast.error('');
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
   const handleSave = async () => {
-    setError('');
+    toast.error('');
     if (form.stageDirectorNationalId && form.stageDirectorNationalId.trim().length !== 14) {
-      setError('الرقم القومي لمدير المرحلة يتكون من 14 رقماً.');
+      toast.error('الرقم القومي لمدير المرحلة يتكون من 14 رقماً.');
       return;
     }
 
@@ -2792,7 +3102,7 @@ function StageDirectorCard({ stage, onSaved, API }) {
       setSaved(true);
       if (onSaved) onSaved();
     } catch (err) {
-      setError(err.message || 'حدث خطأ أثناء الحفظ.');
+      toast.error(err.message || 'حدث خطأ أثناء الحفظ.');
     } finally {
       setSaving(false);
     }
@@ -2856,12 +3166,122 @@ function StageDirectorCard({ stage, onSaved, API }) {
         </div>
       </div>
 
-      {error && <div style={{ marginTop: 10, fontSize: 12, color: '#ef4444' }}>⚠️ {error}</div>}
+
 
       <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn-save" style={{ fontSize: 13, padding: '7px 18px' }} onClick={handleSave} disabled={saving}>
           {saving ? '⏳ جاري الحفظ...' : saved ? '✓ تم حفظ قيادات المرحلة' : '💾 حفظ قيادات المرحلة'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── RenderResetModal Component ────────────────────────────────
+function RenderResetModal({
+  isOpen, onClose, onSubmit,
+  resetAdminPassword, setResetAdminPassword,
+  resetConfirmText, setResetConfirmText,
+  resetLoading, resetError
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      direction: 'rtl'
+    }}>
+      <div style={{
+        background: '#1a1a2e', border: '1.5px solid #ef4444',
+        borderRadius: 16, padding: '32px 36px', maxWidth: 520, width: '95%',
+        boxShadow: '0 0 40px rgba(239,68,68,0.3)'
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+          <span style={{ fontSize: 28 }}>💣</span>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17, color: '#ef4444' }}>منطقة الخطر — تصفير قاعدة البيانات</div>
+            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 3 }}>هذا الإجراء لا يمكن التراجع عنه</div>
+          </div>
+          <button onClick={onClose} style={{ marginRight: 'auto', background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: 20 }}>✕</button>
+        </div>
+
+        {/* Warning box */}
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, padding: '14px 16px', marginBottom: 20, fontSize: 13, color: '#fca5a5', lineHeight: 1.7 }}>
+          ⚠️ سيتم <strong>نسخ قاعدة البيانات احتياطياً</strong> تلقائياً إلى مجلد الـ Backups قبل تصفيرها.<br/>
+          ثم سيتم <strong>مسح كافة بيانات المؤسسة والطلاب والمستخدمين</strong> وإعادة البرنامج إلى حالة التهيئة الأولى.
+        </div>
+
+        <form onSubmit={onSubmit}>
+          {/* Admin password */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 13, color: '#d1d5db', marginBottom: 6, fontWeight: 700 }}>
+              🔑 كلمة مرور مسؤول النظام
+            </label>
+            <input
+              type="password"
+              value={resetAdminPassword}
+              onChange={e => setResetAdminPassword(e.target.value)}
+              placeholder="ادخل كلمة مرور الأدمن للتحقق"
+              style={{
+                width: '100%', padding: '10px 14px', borderRadius: 8,
+                border: '1px solid rgba(239,68,68,0.4)', background: '#0f0f1a',
+                color: '#f3f4f6', fontSize: 13, boxSizing: 'border-box'
+              }}
+            />
+          </div>
+
+          {/* Confirm text */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: 'block', fontSize: 13, color: '#d1d5db', marginBottom: 6, fontWeight: 700 }}>
+              ✏️ اكتب للتأكيد: <span style={{ color: '#ef4444', fontFamily: 'monospace' }}>إعادة تهيئة النظام بالكامل</span>
+            </label>
+            <input
+              type="text"
+              value={resetConfirmText}
+              onChange={e => setResetConfirmText(e.target.value)}
+              placeholder="اكتب الجملة التأكيدية بالضبط..."
+              style={{
+                width: '100%', padding: '10px 14px', borderRadius: 8,
+                border: '1px solid rgba(239,68,68,0.4)', background: '#0f0f1a',
+                color: '#f3f4f6', fontSize: 13, boxSizing: 'border-box'
+              }}
+            />
+          </div>
+
+          {/* Error */}
+          {resetError && (
+            <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '10px 14px', color: '#fca5a5', fontSize: 13, marginBottom: 16 }}>
+              ⚠️ {resetError}
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={resetLoading}
+              style={{ padding: '9px 22px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#d1d5db', cursor: 'pointer', fontSize: 13 }}
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              disabled={resetLoading || resetConfirmText !== 'إعادة تهيئة النظام بالكامل' || !resetAdminPassword}
+              style={{
+                padding: '9px 22px', borderRadius: 8, border: 'none',
+                background: resetLoading || resetConfirmText !== 'إعادة تهيئة النظام بالكامل' || !resetAdminPassword
+                  ? 'rgba(239,68,68,0.3)' : '#ef4444',
+                color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700
+              }}
+            >
+              {resetLoading ? '⏳ جاري التصفير...' : '💣 تصفير وإعادة التهيئة'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

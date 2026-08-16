@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Database, Shield, Layers, ArrowLeft, ArrowRight, CheckCircle2, 
   Activity, Settings, Lock, FileText, UserPlus, HelpCircle,
-  GraduationCap, Users, UserCheck, Calendar, DollarSign, BookOpen, FileSpreadsheet
+  GraduationCap, Users, UserCheck, Calendar, DollarSign, BookOpen, FileSpreadsheet,
+  ShieldAlert
 } from 'lucide-react';
 import './App.css';
 import StudentsList   from './pages/students/StudentsList';
@@ -21,12 +22,20 @@ import ReportsPage          from './pages/reports/ReportsPage';
 import StudentAbsenceManager from './pages/students/StudentAbsenceManager';
 import StudentSeatingLists   from './pages/students/StudentSeatingLists';
 import ControlMainPage       from './pages/control/ControlMainPage';
+import FinancePage           from './pages/finance/FinancePage';
 import LicenseActivationModal from './components/ui/LicenseActivationModal';
+import LockedModuleView       from './components/ui/LockedModuleView';
+import WorkspaceSwitchboard from './components/workspace/WorkspaceSwitchboard';
+import HeaderScopeBar from './components/layout/HeaderScopeBar';
+import LoginGateway from './components/auth/LoginGateway';
+import { useWorkspace } from './context/WorkspaceContext';
 import API_BASE_URL, { SERVER_ORIGIN } from './config/api';
 
 import './pages/students/students.css';
 
 function App() {
+  const { activeWorkspace, openSwitchboard, setWorkspace } = useWorkspace();
+
   // Status check states
   const [loading, setLoading] = useState(true);
   const [dbConfigured, setDbConfigured] = useState(false);
@@ -110,30 +119,32 @@ function App() {
       .then(d => {
         if (d.success && d.governorates && d.governorates.length > 0) {
           setGovernoratesList(d.governorates);
-          const first = d.governorates[0];
-          setSelectedGovId(first.id);
-          setSchoolForm(prev => ({ ...prev, governorate: first.name_ar }));
+          const currentGovName = schoolForm.governorate || 'القاهرة';
+          const match = d.governorates.find(g => g.name_ar === currentGovName) || d.governorates[0];
+          if (match) setSelectedGovId(match.id);
         }
       })
       .catch(() => {});
-  }, []);
+  }, [step]);
 
   useEffect(() => {
-    if (!selectedGovId) return;
-    fetch(`${API_BASE_URL}/setup/administrations?governorateId=${selectedGovId}`)
+    if (!schoolForm.governorate) return;
+    const url = selectedGovId 
+      ? `${API_BASE_URL}/setup/administrations?governorateId=${selectedGovId}`
+      : `${API_BASE_URL}/setup/administrations?governorateName=${encodeURIComponent(schoolForm.governorate)}`;
+    
+    fetch(url)
       .then(r => r.json())
       .then(d => {
         if (d.success && d.administrations) {
           setAdministrationsList(d.administrations);
-          if (d.administrations.length > 0) {
+          if (d.administrations.length > 0 && !schoolForm.directorate) {
             setSchoolForm(prev => ({ ...prev, directorate: d.administrations[0].name_ar }));
-          } else {
-            setSchoolForm(prev => ({ ...prev, directorate: '' }));
           }
         }
       })
       .catch(() => {});
-  }, [selectedGovId]);
+  }, [selectedGovId, schoolForm.governorate]);
 
   const handleAddCustomAdmin = async () => {
     if (!newAdminInput.trim() || !selectedGovId) return;
@@ -162,8 +173,8 @@ function App() {
   const [secondLanguage, setSecondLanguage] = useState('فرنسي');
 
   const [adminForm, setAdminForm] = useState({
-    username: '',
-    nationalId: '',
+    username: 'admin',
+    nationalId: 'admin',
     fullName: '',
     password: '',
     confirmPassword: ''
@@ -235,24 +246,35 @@ function App() {
   const [selectedStaffId,   setSelectedStaffId]   = useState(null);
   const [dashboardStats,    setDashboardStats]    = useState({ students: 0, staff: 0, revenue: '0.00' });
 
-  const checkStatus = async () => {
+  const checkStatus = async (retryCount = 0) => {
     try {
       const res = await fetch(`${API_BASE_URL}/setup/status`);
       const data = await res.json();
-      if (data.success) {
+      if (data && data.success) {
+        if (data.databaseConfigured && data.initialized) {
+          setDbConfigured(true);
+          setInitialized(true);
+          if (data.schoolName) setSchoolName(data.schoolName);
+          if (data.logoUrl) setSchoolLogo(data.logoUrl);
+          setLoading(false);
+          return;
+        }
+
+        // If backend is still initializing database on cold boot, retry up to 4 times
+        if (retryCount < 4) {
+          setTimeout(() => checkStatus(retryCount + 1), 800);
+          return;
+        }
+
         setDbConfigured(data.databaseConfigured);
         setInitialized(data.initialized);
         if (data.schoolName) setSchoolName(data.schoolName);
         if (data.logoUrl) setSchoolLogo(data.logoUrl);
         
-        // If DB is configured but school is not initialized, start at wizard step 2 and clear all user sessions
         if (data.databaseConfigured && !data.initialized) {
           setStep(2);
           setIsLoggedIn(false);
           setCurrentUser(null);
-          setAdminForm({ username: '', nationalId: '', fullName: '', password: '', confirmPassword: '' });
-          setSchoolForm({ schoolCode: '', schoolName: '', governorate: 'القاهرة', directorate: '', address: '', phone: '', email: '' });
-          setLoginForm({ username: '', password: '' });
         } else if (!data.databaseConfigured) {
           setStep(1);
           setIsLoggedIn(false);
@@ -260,9 +282,15 @@ function App() {
         }
       }
     } catch (err) {
+      if (retryCount < 5) {
+        setTimeout(() => checkStatus(retryCount + 1), 800);
+        return;
+      }
       console.error('Failed to check status:', err);
     } finally {
-      setLoading(false);
+      if (retryCount >= 4) {
+        setLoading(false);
+      }
     }
   };
 
@@ -345,7 +373,7 @@ function App() {
       setWizardLoading(false);
       return;
     }
-    if (adminForm.nationalId.length !== 14 || isNaN(adminForm.nationalId)) {
+    if (adminForm.nationalId && adminForm.nationalId !== 'admin' && (adminForm.nationalId.length !== 14 || isNaN(adminForm.nationalId))) {
       setWizardError('الرقم القومي يجب أن يتكون من 14 رقماً.');
       setWizardLoading(false);
       return;
@@ -390,18 +418,20 @@ function App() {
       schoolName: schoolForm.schoolName,
       governorate: schoolForm.governorate,
       directorate: schoolForm.directorate,
+      governorateId: selectedGovId,
+      administrationId: administrationsList.find(a => a.name_ar === schoolForm.directorate)?.id || null,
+      classificationId: selectedClassificationId,
       address: schoolForm.address,
       phone: schoolForm.phone,
       email: schoolForm.email,
       startYear: startYearInput,
-      sections: sectionsPayload,
+      sections: [],
       adminUsername: adminForm.username,
       adminNationalId: adminForm.nationalId,
       adminFullName: adminForm.fullName,
       adminPassword: adminForm.password,
       secondLanguage
     };
-
 
     try {
       const res = await fetch(`${API_BASE_URL}/setup/wizard`, {
@@ -411,20 +441,6 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'فشل إكمال معالج التأسيس');
-      
-      // Save Master Institution Structure
-      await fetch(`${API_BASE_URL}/setup/save-institution-structure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          schoolName: schoolForm.schoolName,
-          governorateId: selectedGovId,
-          administrationId: administrationsList.find(a => a.name_ar === schoolForm.directorate)?.id || null,
-          classificationId: selectedClassificationId,
-          startYear: startYearInput,
-          configuredSections: configuredSections
-        })
-      });
 
       setStep(6); // Success screen
       setSchoolName(schoolForm.schoolName);
@@ -436,14 +452,33 @@ function App() {
   };
 
   const handleLogin = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    handleGatewayLogin({ username: loginForm.username, password: loginForm.password, domain: 'admin' });
+  };
+
+  const handleGatewayLogin = async (payload) => {
+    const { 
+      username, 
+      password, 
+      domain = 'students', 
+      sectionId = 'all', 
+      stageId = 'all', 
+      gradeId = 'all', 
+      sectionName = 'كافة الأقسام', 
+      stageName = 'كافة المراحل', 
+      gradeName = 'كافة الصفوف',
+      targetAdminTab = null
+    } = typeof payload === 'string' 
+      ? { username: payload, password: arguments[1], domain: 'admin' }
+      : payload;
+
     setLoginError('');
     setLoginLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/setup/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginForm.username, password: loginForm.password }),
+        body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -452,10 +487,75 @@ function App() {
         const user = data.user;
         setCurrentUser(user);
         setIsLoggedIn(true);
-        
-        // Determine active section scope from roleScopes
-        const scopes = user.roleScopes || [];
-        const hasGlobal = scopes.some(s => !s.sectionId); // null sectionId = global access
+
+        const userRoles = user.roles || [];
+        const isSuperAdminUser = userRoles.includes('super_admin') || user.username === 'admin';
+        const isHRUser         = !isSuperAdminUser && userRoles.includes('hr_officer');
+        const isDataEntryUser  = !isSuperAdminUser && userRoles.includes('data_entry');
+        const isControlUser    = !isSuperAdminUser && userRoles.includes('head_control');
+        const isAccountantUser = !isSuperAdminUser && userRoles.includes('accountant');
+
+        // Resolve authorized domain strictly based on user roles
+        let finalDomain = domain;
+        if (!isSuperAdminUser) {
+          if (isAccountantUser) {
+            finalDomain = 'finance';
+          } else if (isHRUser) {
+            finalDomain = 'staff';
+          } else if (isControlUser) {
+            finalDomain = 'control';
+          } else if (isDataEntryUser) {
+            finalDomain = 'students';
+          } else {
+            // Check permissions
+            const userPerms = user.permissions || [];
+            if (userPerms.some(p => p.startsWith('finance.'))) finalDomain = 'finance';
+            else if (userPerms.some(p => p.startsWith('staff.'))) finalDomain = 'staff';
+            else if (userPerms.some(p => p.startsWith('control.'))) finalDomain = 'control';
+            else if (userPerms.some(p => p.startsWith('students.'))) finalDomain = 'students';
+            else finalDomain = 'students';
+          }
+        }
+
+        // Update active workspace in WorkspaceContext
+        let scopeLevel = 'institution';
+        if (gradeId && gradeId !== 'all') scopeLevel = 'grade';
+        else if (stageId && stageId !== 'all') scopeLevel = 'stage';
+        else if (sectionId && sectionId !== 'all') scopeLevel = 'section';
+
+        setWorkspace({
+          domain: finalDomain || 'students',
+          sectionId: sectionId || 'all',
+          stageId: stageId || 'all',
+          gradeId: gradeId || 'all',
+          sectionName: sectionName || 'كافة الأقسام',
+          stageName: stageName || 'كافة المراحل',
+          gradeName: gradeName || 'كافة الصفوف',
+          scopeLevel
+        });
+
+        if (sectionId) setActiveSectionId(sectionId);
+
+        if (isSuperAdminUser) {
+          if (targetAdminTab === 'settings') setCurrentPage('settings');
+          else if (targetAdminTab === 'users') setCurrentPage('users');
+          else if (targetAdminTab === 'backups') setCurrentPage('backups');
+          else if (finalDomain === 'students') setCurrentPage('students-list');
+          else if (finalDomain === 'staff') setCurrentPage('staff-list');
+          else if (finalDomain === 'control') setCurrentPage('control');
+          else if (finalDomain === 'finance') setCurrentPage('finance-fees');
+          else setCurrentPage('dashboard');
+        } else if (isHRUser) {
+          setCurrentPage('staff-list');
+        } else if (isDataEntryUser) {
+          setCurrentPage('students-list');
+        } else if (isControlUser) {
+          setCurrentPage('control');
+        } else if (isAccountantUser) {
+          setCurrentPage('finance-fees');
+        } else {
+          setCurrentPage(finalDomain === 'staff' ? 'staff-list' : finalDomain === 'control' ? 'control' : finalDomain === 'finance' ? 'finance-fees' : 'students-list');
+        }
         
         // Fetch all available sections from the API
         fetch(`${API_BASE_URL}/students/form-options`)
@@ -463,14 +563,6 @@ function App() {
           .then(d => {
             if (d.success && d.sections) {
               setSchoolSections(d.sections);
-              
-              if (hasGlobal) {
-                // Global user: default to 'all', they can switch
-                setActiveSectionId('all');
-              } else if (scopes.length > 0) {
-                // Restricted user: lock to first (and likely only) section
-                setActiveSectionId(scopes[0].sectionId);
-              }
             }
           })
           .catch(() => {});
@@ -574,11 +666,42 @@ function App() {
     // Role detection for UI filtering
     const userRoles = currentUser?.roles || [];
     const isSuperAdmin = userRoles.includes('super_admin') || currentUser?.username === 'admin';
-    const isHR         = userRoles.includes('hr_officer');
-    const isDataEntry  = userRoles.includes('data_entry');
-    const isAccountant = userRoles.includes('accountant');
-    const isControl    = userRoles.includes('head_control');
-    const isViewer     = userRoles.includes('viewer');
+    const isHR         = !isSuperAdmin && userRoles.includes('hr_officer');
+    const isDataEntry  = !isSuperAdmin && userRoles.includes('data_entry');
+    const isAccountant = !isSuperAdmin && userRoles.includes('accountant');
+    const isControl    = !isSuperAdmin && userRoles.includes('head_control');
+    const isViewer     = !isSuperAdmin && userRoles.includes('viewer');
+
+    const getAuthorizedDefaultPage = () => {
+      if (isSuperAdmin) return 'students-list';
+      if (isAccountant) return 'finance-fees';
+      if (isHR) return 'staff-list';
+      if (isControl) return 'control';
+      if (isDataEntry) return 'students-list';
+      const perms = currentUser?.permissions || [];
+      if (perms.some(p => p.startsWith('finance.'))) return 'finance-fees';
+      if (perms.some(p => p.startsWith('staff.'))) return 'staff-list';
+      if (perms.some(p => p.startsWith('control.'))) return 'control';
+      return 'students-list';
+    };
+
+    const isCurrentPageAuthorized = () => {
+      if (isSuperAdmin) return true;
+      const domain = activeWorkspace?.domain;
+      if (domain === 'finance') {
+        return currentPage.startsWith('finance');
+      }
+      if (domain === 'staff') {
+        return currentPage.startsWith('staff');
+      }
+      if (domain === 'control') {
+        return currentPage === 'control';
+      }
+      if (domain === 'students') {
+        return currentPage.startsWith('students') || currentPage === 'student-absence' || currentPage === 'emis-sync';
+      }
+      return true;
+    };
 
     return (
       <div className="dashboard-container">
@@ -595,227 +718,117 @@ function App() {
           <p className="school-tagline">{schoolName}</p>
 
           <nav className="sidebar-nav">
-            {/* 1. Dashboard (All roles) */}
-            <div className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
-                 onClick={goToDashboard}>
-              <Layers size={17} /> <span>الرئيسية</span>
-            </div>
-
-            {/* 2. Students Affairs (Super Admin, Data Entry, Viewer) */}
-            {(isSuperAdmin || isDataEntry || isViewer) && (
+            {/* 1. STUDENTS DOMAIN WORKSPACE */}
+            {activeWorkspace?.domain === 'students' && (
               <>
                 <div className={`nav-item ${isStudentsModule ? 'active' : ''}`}
                      onClick={goToStudentsList}>
-                  <GraduationCap size={17} /> <span>شئون الطلاب والقبول</span>
+                  <GraduationCap size={18} /> <span>شئون الطلاب والقبول</span>
                 </div>
-                {isStudentsModule && (
-                  <div className="nav-submenu">
-                    <div className={`nav-subitem ${currentPage === 'students-list' ? 'active' : ''}`}
-                         onClick={goToStudentsList}>
-                      <span>•</span> <span>قائمة الطلاب</span>
-                    </div>
-                    <div className={`nav-subitem ${currentPage === 'students-reports' ? 'active' : ''}`}
-                         onClick={() => setCurrentPage('students-reports')}>
-                      <span>•</span> <span>التقارير والوثائق</span>
-                    </div>
+                <div className="nav-submenu">
+                  <div className={`nav-subitem ${currentPage === 'students-list' ? 'active' : ''}`}
+                       onClick={goToStudentsList}>
+                    <span>•</span> <span>قائمة الطلاب والقيد</span>
                   </div>
-                )}
+                  <div className={`nav-subitem ${currentPage === 'students-quick-edit' ? 'active' : ''}`}
+                       onClick={goToQuickEdit}>
+                    <span>•</span> <span>تعديل سريع</span>
+                  </div>
+                  <div className={`nav-subitem ${currentPage === 'students-distribute' ? 'active' : ''}`}
+                       onClick={goToDistribute}>
+                    <span>•</span> <span>توزيع الفصول</span>
+                  </div>
+                  <div className={`nav-subitem ${currentPage === 'students-transfers' ? 'active' : ''}`}
+                       onClick={goToTransfers}>
+                    <span>•</span> <span>التحويلات المدرسية</span>
+                  </div>
+                  <div className={`nav-subitem ${currentPage === 'student-absence' ? 'active' : ''}`}
+                       onClick={() => setCurrentPage('student-absence')}>
+                    <span>•</span> <span>إنذارات الغياب والقيد</span>
+                  </div>
+                  <div className={`nav-subitem ${currentPage === 'students-reports' ? 'active' : ''}`}
+                       onClick={() => setCurrentPage('students-reports')}>
+                    <span>•</span> <span>التقارير وسجلات القيد</span>
+                  </div>
+                  <div className={`nav-subitem ${currentPage === 'emis-sync' ? 'active' : ''}`}
+                       onClick={goToEMISSync}>
+                    <span>•</span> <span>🔗 مزامنة EMIS</span>
+                  </div>
+                </div>
               </>
             )}
 
-            {/* 3. HR / Staff Affairs (Super Admin, HR Officer, Viewer) */}
-            {(isSuperAdmin || isHR || isViewer) && (
-              <div className={`nav-item ${currentPage.startsWith('staff') ? 'active' : ''}`}
-                   onClick={goToStaffList}>
-                <Users size={17} /> <span>شئون العاملين (HR)</span>
+            {/* 2. STAFF / HR DOMAIN WORKSPACE */}
+            {activeWorkspace?.domain === 'staff' && (
+              <div className={`nav-item active`} style={{ opacity: 0.85 }}>
+                <Users size={18} /> <span>شئون العاملين 🔒 (قيد التطوير)</span>
               </div>
             )}
 
-            {/* 4. Treasury / Finance (Super Admin, Accountant) */}
-            {(isSuperAdmin || isAccountant) && (
-              <div className="nav-item">
-                <DollarSign size={17} /> <span>الرسوم والأقساط</span>
+            {/* 3. FINANCE DOMAIN WORKSPACE */}
+            {activeWorkspace?.domain === 'finance' && (
+              <div className={`nav-item active`} style={{ opacity: 0.85 }}>
+                <DollarSign size={18} /> <span>الحسابات والخزينة 🔒 (قيد التطوير)</span>
               </div>
             )}
 
-            {/* 5. Exams & Grading / Control (Super Admin, Control Officer) */}
-            {(isSuperAdmin || isControl) && (
+            {/* 4. CONTROL DOMAIN WORKSPACE */}
+            {activeWorkspace?.domain === 'control' && (
+              <div className={`nav-item active`} style={{ opacity: 0.85 }}>
+                <Shield size={18} /> <span>الكنترول والامتحانات 🔒 (قيد التطوير)</span>
+              </div>
+            )}
+
+            {/* 5. ADMIN GENERAL DOMAIN WORKSPACE */}
+            {activeWorkspace?.domain === 'admin' && (
               <>
-                <div className={`nav-item ${currentPage === 'control' ? 'active' : ''}`}
-                     onClick={() => { setCurrentPage('control'); setSelectedStudentId(null); }}>
-                  <Shield size={17} /> <span>الكنترول والامتحانات</span>
+                <div className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
+                     onClick={goToDashboard}>
+                  <Layers size={18} /> <span>لوحة القيادة والمتابعة</span>
                 </div>
-                {currentPage === 'control' && (
-                  <div className="nav-submenu" style={{ paddingRight: '12px', margin: '6px 0 10px 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {/* 1. Setup Stage */}
-                    <div style={{ background: controlActiveTab === 'setup' ? 'rgba(255,255,255,0.05)' : 'transparent', borderRadius: '8px', padding: '2px' }}>
-                      <div 
-                        className={`nav-subitem ${controlActiveTab === 'setup' ? 'active' : ''}`}
-                        onClick={() => setControlActiveTab('setup')}
-                        style={{ cursor: 'pointer', padding: '6px 10px', fontSize: '12.5px', fontWeight: 800, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                      >
-                        <span>⚙️ 1. إعدادات الأعمال</span>
-                        <span style={{ fontSize: '10px' }}>{controlActiveTab === 'setup' ? '▼' : '◀'}</span>
-                      </div>
-                      {controlActiveTab === 'setup' && (
-                        <div style={{ paddingRight: '14px', display: 'flex', flexDirection: 'column', gap: '2px', margin: '4px 0 6px 0' }}>
-                          <div className={`nav-subitem ${controlSubTabSetup === 'subjects' ? 'active' : ''}`} onClick={() => setControlSubTabSetup('subjects')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📚 تجهيز مواد الكنترول</div>
-                          <div className={`nav-subitem ${controlSubTabSetup === 'seats' ? 'active' : ''}`} onClick={() => setControlSubTabSetup('seats')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🔢 أرقام الجلوس</div>
-                          <div className={`nav-subitem ${controlSubTabSetup === 'committees' ? 'active' : ''}`} onClick={() => setControlSubTabSetup('committees')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🏛️ توزيع اللجان والمقاعد</div>
-                          <div className={`nav-subitem ${controlSubTabSetup === 'reports' ? 'active' : ''}`} onClick={() => setControlSubTabSetup('reports')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📊 تقارير كشوف المناداة</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 2. Term 1 Stage */}
-                    <div style={{ background: controlActiveTab === 'term1' ? 'rgba(255,255,255,0.05)' : 'transparent', borderRadius: '8px', padding: '2px' }}>
-                      <div 
-                        className={`nav-subitem ${controlActiveTab === 'term1' ? 'active' : ''}`}
-                        onClick={() => setControlActiveTab('term1')}
-                        style={{ cursor: 'pointer', padding: '6px 10px', fontSize: '12.5px', fontWeight: 800, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                      >
-                        <span>📘 2. الفصل الدراسي الأول</span>
-                        <span style={{ fontSize: '10px' }}>{controlActiveTab === 'term1' ? '▼' : '◀'}</span>
-                      </div>
-                      {controlActiveTab === 'term1' && (
-                        <div style={{ paddingRight: '14px', display: 'flex', flexDirection: 'column', gap: '2px', margin: '4px 0 6px 0' }}>
-                          <div className={`nav-subitem ${controlSubTabTerm1 === 'work' ? 'active' : ''}`} onClick={() => setControlSubTabTerm1('work')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📝 تسجيل أعمال السنة</div>
-                          <div className={`nav-subitem ${controlSubTabTerm1 === 'secret' ? 'active' : ''}`} onClick={() => setControlSubTabTerm1('secret')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🔑 التوزيع السري</div>
-                          <div className={`nav-subitem ${controlSubTabTerm1 === 'exam' ? 'active' : ''}`} onClick={() => setControlSubTabTerm1('exam')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📊 تسجيل امتحان نصف العام</div>
-                          <div className={`nav-subitem ${controlSubTabTerm1 === 'reports' ? 'active' : ''}`} onClick={() => setControlSubTabTerm1('reports')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🖨️ مطبوعات الكنترول</div>
-                          <div className={`nav-subitem ${controlSubTabTerm1 === 'search' ? 'active' : ''}`} onClick={() => setControlSubTabTerm1('search')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🔍 بحث عن طالب بالسرّي</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 3. Term 2 Stage */}
-                    <div style={{ background: controlActiveTab === 'term2' ? 'rgba(255,255,255,0.05)' : 'transparent', borderRadius: '8px', padding: '2px' }}>
-                      <div 
-                        className={`nav-subitem ${controlActiveTab === 'term2' ? 'active' : ''}`}
-                        onClick={() => setControlActiveTab('term2')}
-                        style={{ cursor: 'pointer', padding: '6px 10px', fontSize: '12.5px', fontWeight: 800, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                      >
-                        <span>📗 3. الفصل الدراسي الثاني</span>
-                        <span style={{ fontSize: '10px' }}>{controlActiveTab === 'term2' ? '▼' : '◀'}</span>
-                      </div>
-                      {controlActiveTab === 'term2' && (
-                        <div style={{ paddingRight: '14px', display: 'flex', flexDirection: 'column', gap: '2px', margin: '4px 0 6px 0' }}>
-                          <div className={`nav-subitem ${controlSubTabTerm2 === 'work' ? 'active' : ''}`} onClick={() => setControlSubTabTerm2('work')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📝 تسجيل أعمال السنة (ترم ثان)</div>
-                          <div className={`nav-subitem ${controlSubTabTerm2 === 'secret' ? 'active' : ''}`} onClick={() => setControlSubTabTerm2('secret')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🔑 التوزيع السري (ترم ثان)</div>
-                          <div className={`nav-subitem ${controlSubTabTerm2 === 'exam' ? 'active' : ''}`} onClick={() => setControlSubTabTerm2('exam')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📊 تسجيل امتحان آخر العام</div>
-                          <div className={`nav-subitem ${controlSubTabTerm2 === 'review_raffa' ? 'active' : ''}`} onClick={() => setControlSubTabTerm2('review_raffa')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>⚖️ لجنة مراجعة الرفع والحالات</div>
-                          <div className={`nav-subitem ${controlSubTabTerm2 === 'reports' ? 'active' : ''}`} onClick={() => setControlSubTabTerm2('reports')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🖨️ مطبوعات الشهادات والنتائج</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 4. Second Round Stage */}
-                    <div style={{ background: controlActiveTab === 'second_round' ? 'rgba(255,255,255,0.05)' : 'transparent', borderRadius: '8px', padding: '2px' }}>
-                      <div 
-                        className={`nav-subitem ${controlActiveTab === 'second_round' ? 'active' : ''}`}
-                        onClick={() => setControlActiveTab('second_round')}
-                        style={{ cursor: 'pointer', padding: '6px 10px', fontSize: '12.5px', fontWeight: 800, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                      >
-                        <span>📙 4. الدور الثاني</span>
-                        <span style={{ fontSize: '10px' }}>{controlActiveTab === 'second_round' ? '▼' : '◀'}</span>
-                      </div>
-                      {controlActiveTab === 'second_round' && (
-                        <div style={{ paddingRight: '14px', display: 'flex', flexDirection: 'column', gap: '2px', margin: '4px 0 6px 0' }}>
-                          <div className={`nav-subitem ${controlSubTabSecondRound === 'seats' ? 'active' : ''}`} onClick={() => setControlSubTabSecondRound('seats')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🔢 أرقام جلوس الدور الثاني</div>
-                          <div className={`nav-subitem ${controlSubTabSecondRound === 'secret' ? 'active' : ''}`} onClick={() => setControlSubTabSecondRound('secret')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🔑 سري الدور الثاني</div>
-                          <div className={`nav-subitem ${controlSubTabSecondRound === 'exam' ? 'active' : ''}`} onClick={() => setControlSubTabSecondRound('exam')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>📊 رصد درجات الدور الثاني</div>
-                          <div className={`nav-subitem ${controlSubTabSecondRound === 'reports' ? 'active' : ''}`} onClick={() => setControlSubTabSecondRound('reports')} style={{ cursor: 'pointer', padding: '5px 8px', fontSize: '11.5px', fontWeight: 700 }}>🖨️ مطبوعات الدور الثاني</div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 5. Reports Engine Stage */}
-                    <div style={{ background: controlActiveTab === 'reports' ? 'rgba(255,255,255,0.05)' : 'transparent', borderRadius: '8px', padding: '2px' }}>
-                      <div 
-                        className={`nav-subitem ${controlActiveTab === 'reports' ? 'active' : ''}`}
-                        onClick={() => setControlActiveTab('reports')}
-                        style={{ cursor: 'pointer', padding: '6px 10px', fontSize: '12.5px', fontWeight: 800, borderRadius: '6px' }}
-                      >
-                        📊 5. تقارير ومخرجات الكنترول
-                      </div>
-                    </div>
-
-                    {/* 6. Close Control Stage */}
-                    <div style={{ background: controlActiveTab === 'close' ? 'rgba(255,255,255,0.05)' : 'transparent', borderRadius: '8px', padding: '2px' }}>
-                      <div 
-                        className={`nav-subitem ${controlActiveTab === 'close' ? 'active' : ''}`}
-                        onClick={() => setControlActiveTab('close')}
-                        style={{ cursor: 'pointer', padding: '6px 10px', fontSize: '12.5px', fontWeight: 800, borderRadius: '6px' }}
-                      >
-                        🔒 6. غلق الكنترول
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <div className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
+                     onClick={() => { setCurrentPage('settings'); setSelectedStudentId(null); }}>
+                  <Settings size={18} /> <span>إعدادات المؤسسة والهياكل</span>
+                </div>
+                <div className={`nav-item ${currentPage === 'users' ? 'active' : ''}`}
+                     onClick={() => { setCurrentPage('users'); setSelectedStudentId(null); }}>
+                  <Lock size={18} /> <span>المستخدمون والصلاحيات</span>
+                </div>
+                <div className={`nav-item ${currentPage === 'backups' ? 'active' : ''}`}
+                     onClick={() => { setCurrentPage('backups'); setSelectedStudentId(null); }}>
+                  <Database size={18} /> <span>النسخ الاحتياطي</span>
+                </div>
               </>
-            )}
-
-
-
-            {/* 7. User management (Super Admin only) */}
-            {isSuperAdmin && (
-              <div className={`nav-item ${currentPage === 'users' ? 'active' : ''}`}
-                   onClick={() => { setCurrentPage('users'); setSelectedStudentId(null); }}>
-                <Lock size={17} /> <span>المستخدمون</span>
-              </div>
-            )}
-
-            {/* 8. Settings (Super Admin only) */}
-            {isSuperAdmin && (
-              <div className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
-                   onClick={() => { setCurrentPage('settings'); setSelectedStudentId(null); }}>
-                <Settings size={17} /> <span>الإعدادات</span>
-              </div>
-            )}
-
-            {/* 9. Backups (Super Admin only) */}
-            {isSuperAdmin && (
-              <div className={`nav-item ${currentPage === 'backups' ? 'active' : ''}`}
-                   onClick={() => { setCurrentPage('backups'); setSelectedStudentId(null); }}>
-                <Database size={17} /> <span>النسخ الاحتياطي</span>
-              </div>
-            )}
-
-            {/* 10. EMIS Sync (Super Admin + Data Entry) */}
-            {(isSuperAdmin || isDataEntry) && (
-              <div className={`nav-item ${currentPage === 'emis-sync' ? 'active' : ''}`}
-                   onClick={goToEMISSync}
-                   style={{ borderTop: '1px solid var(--border-color)', marginTop: 4, paddingTop: 8 }}>
-                <span style={{ fontSize: 16 }}>🔗</span> <span>مزامنة EMIS</span>
-              </div>
             )}
           </nav>
 
 
-          {/* ── Section Switcher / Scope Badge ── */}
-          <div className="section-scope-panel">
-            <div className="scope-label">نطاق العمل الحالي</div>
-            {canSwitchSections ? (
-              <div className="section-tabs">
-                <button
-                  className={`section-tab ${activeSectionId === 'all' ? 'active' : ''}`}
-                  onClick={() => setActiveSectionId('all')}
-                >🏫 كل الأقسام</button>
-                {userSections.map(sec => (
+          {/* ── Section Switcher / Scope Badge (Super Admin Only) ── */}
+          {isSuperAdmin && (
+            <div className="section-scope-panel">
+              <div className="scope-label">نطاق العمل الحالي</div>
+              {canSwitchSections ? (
+                <div className="section-tabs">
                   <button
-                    key={sec.id}
-                    className={`section-tab ${String(activeSectionId) === String(sec.id) ? 'active' : ''}`}
-                    onClick={() => setActiveSectionId(sec.id)}
-                  >{sec.name}</button>
-                ))}
-              </div>
-            ) : (
-              <div className="section-badge-fixed">
-                <span>📌</span>
-                <span>{activeSectionName}</span>
-              </div>
-            )}
-          </div>
+                    className={`section-tab ${activeSectionId === 'all' ? 'active' : ''}`}
+                    onClick={() => setActiveSectionId('all')}
+                  >🏫 كل الأقسام</button>
+                  {userSections.map(sec => (
+                    <button
+                      key={sec.id}
+                      className={`section-tab ${String(activeSectionId) === String(sec.id) ? 'active' : ''}`}
+                      onClick={() => setActiveSectionId(sec.id)}
+                    >{sec.name}</button>
+                  ))}
+                </div>
+              ) : (
+                <div className="section-badge-fixed">
+                  <span>📌</span>
+                  <span>{activeSectionName}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="sidebar-footer">
             <div className="user-info-mini">
@@ -839,8 +852,45 @@ function App() {
         {/* Main Content Area */}
         <main className="dashboard-content" style={{ overflowY: 'auto' }}>
 
-          {/* Onboarding Status Banner */}
-          {onboardingStatus && !onboardingStatus.complete && !dismissBanner && (
+          {/* Top Scope & Utility Bar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 20,
+            gap: 16,
+            flexWrap: 'wrap'
+          }}>
+            <HeaderScopeBar 
+              onNavigate={(page) => { 
+                setCurrentPage(page); 
+                setSelectedStudentId(null); 
+              }} 
+              isSuperAdmin={isSuperAdmin} 
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => setIsLicenseModalOpen(true)}
+                style={{
+                  background: licenseInfo?.isActivated ? 'rgba(5, 150, 105, 0.12)' : 'rgba(217, 119, 6, 0.12)',
+                  border: `1px solid ${licenseInfo?.isActivated ? '#10b981' : '#f59e0b'}`,
+                  color: licenseInfo?.isActivated ? '#059669' : '#d97706',
+                  padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 800,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6
+                }}
+              >
+                <span>{licenseInfo?.isActivated ? '🛡️ مفعّل رسمياً' : `🔑 النسخة تجريبية (متبقي ${licenseInfo?.trialDaysRemaining ?? 14} يوم)`}</span>
+              </button>
+
+              <div className="user-badge" style={{ background: 'var(--primary)', color: '#fff', border: 'none', padding: '6px 16px', borderRadius: 30, fontSize: 12.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                👤 {currentUser?.full_name || currentUser?.username || 'مدير النظام'}
+              </div>
+            </div>
+          </div>
+
+          {/* Onboarding Status Banner — Visible strictly to Super Admin only */}
+          {isSuperAdmin && onboardingStatus && !onboardingStatus.complete && !dismissBanner && (
             <div style={{
               background: 'linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%)',
               color: '#fff',
@@ -1033,7 +1083,11 @@ function App() {
               onTransfers={goToTransfers}
               onQuickEdit={goToQuickEdit}
               onAbsence={() => setCurrentPage('student-absence')}
-              onSeating={() => setCurrentPage('student-seating')}
+              onSeating={() => {
+                setControlActiveTab('setup');
+                setControlSubTabSetup('seats');
+                setCurrentPage('control');
+              }}
               activeSectionId={activeSectionId}
               currentUser={currentUser}
               isSuperAdmin={isSuperAdmin}
@@ -1112,20 +1166,12 @@ function App() {
             />
           )}
 
-          {/* ── Staff List ───────────────────────── */}
-          {currentPage === 'staff-list' && (
-            <StaffList
-              onAdd={goToStaffAdd}
-              onView={goToStaffEdit}
-            />
-          )}
-
-          {/* ── Add/Edit Staff ───────────────────── */}
-          {(currentPage === 'staff-add' || currentPage === 'staff-edit') && (
-            <StaffForm
-              staffId={selectedStaffId}
-              onSaved={goToStaffList}
-              onCancel={goToStaffList}
+          {/* ── Staff Module (Locked in Trial) ─────────────── */}
+          {(currentPage.startsWith('staff') || activeWorkspace?.domain === 'staff') && (
+            <LockedModuleView 
+              moduleTitle="شؤون العاملين والكوادر التعليمية (HR)" 
+              icon="👔"
+              onGoToStudents={goToStudentsList}
             />
           )}
 
@@ -1134,28 +1180,23 @@ function App() {
             <StudentAbsenceManager onBack={goToStudentsList} />
           )}
 
-          {/* ── Student Seating Lists (12 d) ─────────────── */}
-          {currentPage === 'student-seating' && (
-            <StudentSeatingLists onBack={goToStudentsList} />
-          )}
-
-          {/* ── Control Room & Exams Module ─────────────── */}
-          {currentPage === 'control' && (
-            <ControlMainPage
-              externalActiveTab={controlActiveTab}
-              setExternalActiveTab={setControlActiveTab}
-              externalSubTabSetup={controlSubTabSetup}
-              setExternalSubTabSetup={setControlSubTabSetup}
-              externalSubTabTerm1={controlSubTabTerm1}
-              setExternalSubTabTerm1={setControlSubTabTerm1}
-              externalSubTabTerm2={controlSubTabTerm2}
-              setExternalSubTabTerm2={setControlSubTabTerm2}
-              externalSubTabSecondRound={controlSubTabSecondRound}
-              setExternalSubTabSecondRound={setControlSubTabSecondRound}
+          {/* ── Control Room & Exams Module (Locked in Trial) ─────────────── */}
+          {(currentPage === 'control' || activeWorkspace?.domain === 'control') && (
+            <LockedModuleView 
+              moduleTitle="الكنترول العام والامتحانات" 
+              icon="📋"
+              onGoToStudents={goToStudentsList}
             />
           )}
 
-
+          {/* ── Finance & Treasury Module (Locked in Trial) ────────────────── */}
+          {(currentPage.startsWith('finance') || (activeWorkspace?.domain === 'finance' && !['settings', 'users', 'backups'].includes(currentPage))) && (
+            <LockedModuleView 
+              moduleTitle="الحسابات والخزينة المدرسية" 
+              icon="💰"
+              onGoToStudents={goToStudentsList}
+            />
+          )}
 
           {/* ── Users Page ───────────────────────── */}
           {currentPage === 'users' && (
@@ -1172,93 +1213,112 @@ function App() {
             <BackupPage />
           )}
 
+          {/* ── Executive Access Denied Guard (Prevents White Blank Screen) ── */}
+          {!isCurrentPageAuthorized() && (
+            <div style={{
+              minHeight: '65vh',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              padding: '40px 20px'
+            }}>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 38, 0.03) 100%)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '24px',
+                padding: '48px 36px',
+                maxWidth: '560px',
+                width: '100%',
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.08)',
+                backdropFilter: 'blur(10px)'
+              }}>
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 24px',
+                  boxShadow: '0 8px 16px rgba(239, 68, 68, 0.2)'
+                }}>
+                  <ShieldAlert size={42} style={{ color: '#dc2626' }} />
+                </div>
+
+                <h2 style={{ fontSize: '22px', fontWeight: 900, color: 'var(--text-primary, #0f172a)', margin: '0 0 12px' }}>
+                  غير مصرح بالدخول إلى هذا القسم
+                </h2>
+
+                <p style={{ fontSize: '14.5px', color: 'var(--text-secondary, #475569)', lineHeight: 1.7, margin: '0 0 24px' }}>
+                  عذراً <strong>{currentUser?.full_name || currentUser?.username}</strong>، صلاحيات حسابك مخصصة لمساحة عمل محددة، ولا تملك ترخيصاً للوصول إلى هذا القسم.
+                </p>
+
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                  <button
+                    onClick={() => setCurrentPage(getAuthorizedDefaultPage())}
+                    style={{
+                      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '12px 28px',
+                      borderRadius: '12px',
+                      fontSize: '14px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <span>العودة إلى مساحة عملك المصرح بها</span>
+                    <span>⬅</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
 
         </main>
       </div>
     );
   }
 
-  // --- LOGIN SCREEN ---
+  // --- LOGIN GATEWAY SCREEN ---
   if (initialized && !isLoggedIn) {
     return (
-      <div className="app-container">
-        <div className="glass-panel main-card max-w-sm text-center">
-          <header className="app-header">
-            <div className="logo-container" style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-              {schoolLogo ? (
-                <img src={schoolLogo} alt="School Logo" style={{ maxHeight: 80, maxWidth: 150, objectFit: 'contain', borderRadius: 6, padding: 5, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-color)' }} />
-              ) : (
-                <Layers className="logo-icon" size={40} />
-              )}
-            </div>
-            <h2>سجل الدخول للمنظومة</h2>
-            <p className="subtitle">{schoolName}</p>
-          </header>
-
-          {loginError && <div className="alert alert-danger">{loginError}</div>}
-
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
-            <div className="form-group text-right">
-              <label>اسم المستخدم</label>
-              <input 
-                type="text" 
-                placeholder="أدخل اسم المستخدم"
-                required
-                value={loginForm.username}
-                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-              />
-            </div>
-
-            <div className="form-group text-right">
-              <label>كلمة المرور</label>
-              <input 
-                type="password" 
-                placeholder="أدخل كلمة المرور"
-                required
-                value={loginForm.password}
-                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="btn-primary"
-              style={{ width: '100%', marginTop: 10, opacity: loginLoading ? 0.7 : 1 }}
-              disabled={loginLoading}
-            >
-              {loginLoading ? '⏳ جارٍ التحقق...' : 'دخول المنظومة'}
-            </button>
-
-            <div style={{ textAlign: 'center', marginTop: 12 }}>
-              <button 
-                type="button" 
-                onClick={() => { setIsRecoverModalOpen(true); setRecoverError(''); setRecoverSuccess(''); }}
-                style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 13, textDecoration: 'underline', fontWeight: 700 }}
-              >
-                🔑 نسيت كلمة السر / استعادة حساب الأدمن
-              </button>
-            </div>
-          </form>
-        </div>
+      <>
+        <LoginGateway
+          schoolName={schoolName}
+          schoolLogo={schoolLogo}
+          onLogin={handleGatewayLogin}
+          loginLoading={loginLoading}
+          loginError={loginError}
+          onOpenRecover={() => { setIsRecoverModalOpen(true); setRecoverError(''); setRecoverSuccess(''); }}
+        />
 
         {/* RECOVERY MODAL */}
         {isRecoverModalOpen && (
-          <div className="modal-overlay" style={{ zIndex: 9999 }}>
-            <div className="modal-content" style={{ maxWidth: 460, padding: 25, textAlign: 'right' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, borderBottom: '1px solid var(--border-color)', paddingBottom: 10 }}>
-                <h3 style={{ margin: 0, fontSize: 18, color: 'var(--primary)' }}>🔑 استعادة حساب الأدمن وإعادة تعيين كلمة السر</h3>
-                <button type="button" onClick={() => setIsRecoverModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
+          <div className="modal-overlay" onClick={() => setIsRecoverModalOpen(false)}>
+            <div className="modal-card glass-panel text-right" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+              <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                <h3 style={{ margin: 0, fontSize: 16 }}>🔑 استعادة حساب المشرف الرئيسي</h3>
+                <button className="btn-icon" onClick={() => setIsRecoverModalOpen(false)}>✕</button>
               </div>
 
-              {recoverError && <div className="alert alert-danger" style={{ marginBottom: 15 }}>{recoverError}</div>}
-              {recoverSuccess && <div className="alert alert-success" style={{ marginBottom: 15 }}>{recoverSuccess}</div>}
+              {recoverError && <div className="alert alert-danger">{recoverError}</div>}
+              {recoverSuccess && <div className="alert alert-success">{recoverSuccess}</div>}
 
               <form onSubmit={handleRecoverPassword} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div className="form-group">
-                  <label style={{ fontSize: 13, fontWeight: 700 }}>كود المدرسة الرسمي</label>
+                  <label style={{ fontSize: 13, fontWeight: 700 }}>كود المدرسة</label>
                   <input 
                     type="text" 
-                    placeholder="مثال: 12345" 
+                    placeholder="كود المدرسة المسجل" 
                     required 
                     value={recoverForm.schoolCode} 
                     onChange={(e) => setRecoverForm({ ...recoverForm, schoolCode: e.target.value })} 
@@ -1266,13 +1326,24 @@ function App() {
                 </div>
 
                 <div className="form-group">
-                  <label style={{ fontSize: 13, fontWeight: 700 }}>الرقم القومي للأدمن (أو كود الطوارئ الماستر)</label>
+                  <label style={{ fontSize: 13, fontWeight: 700 }}>الرقم القومي لمسؤول النظام</label>
                   <input 
                     type="text" 
-                    placeholder="أدخل الرقم القومي أو مفتاح الطوارئ" 
+                    placeholder="الرقم القومي المسجل أثناء التأسيس" 
                     required 
                     value={recoverForm.nationalId} 
                     onChange={(e) => setRecoverForm({ ...recoverForm, nationalId: e.target.value })} 
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontSize: 13, fontWeight: 700 }}>مفتاح الترخيص (License Key) الخاص بالمنظومة</label>
+                  <input 
+                    type="text" 
+                    placeholder="مفتاح الترخيص الخاص بمدرستك" 
+                    required 
+                    value={recoverForm.recoveryKey} 
+                    onChange={(e) => setRecoverForm({ ...recoverForm, recoveryKey: e.target.value })} 
                   />
                 </div>
 
@@ -1310,7 +1381,7 @@ function App() {
             </div>
           </div>
         )}
-      </div>
+      </>
     );
   }
 
@@ -1324,15 +1395,15 @@ function App() {
       <div className="glass-panel main-card">
         {/* Progress header */}
         <div className="wizard-progress">
-          <div className={`step-dot ${step >= 1 ? 'active' : ''}`}>1</div>
+          <div className={`step-dot ${step >= 1 ? 'active' : ''}`} title="قاعدة البيانات">1</div>
           <div className="step-line"></div>
-          <div className={`step-dot ${step >= 2 ? 'active' : ''}`}>2</div>
+          <div className={`step-dot ${step >= 2 ? 'active' : ''}`} title="بيانات المدرسة">2</div>
           <div className="step-line"></div>
-          <div className={`step-dot ${step >= 3 ? 'active' : ''}`}>3</div>
+          <div className={`step-dot ${step >= 3 ? 'active' : ''}`} title="المراحل والصفوف">3</div>
           <div className="step-line"></div>
-          <div className={`step-dot ${step >= 4 ? 'active' : ''}`}>4</div>
+          <div className={`step-dot ${step >= 4 ? 'active' : ''}`} title="اللغة الثانية">4</div>
           <div className="step-line"></div>
-          <div className={`step-dot ${step >= 5 ? 'active' : ''}`}>5</div>
+          <div className={`step-dot ${step >= 5 ? 'active' : ''}`} title="حساب المدير">5</div>
         </div>
 
         {wizardError && <div className="alert alert-danger text-right">{wizardError}</div>}
@@ -1468,29 +1539,24 @@ function App() {
 
               <div className="form-group">
                 <label>المحافظة</label>
-                {governoratesList.length > 0 ? (
-                  <select
-                    value={selectedGovId || ''}
-                    required
-                    onChange={(e) => {
-                      const govId = parseInt(e.target.value);
-                      setSelectedGovId(govId);
-                      const gov = governoratesList.find(g => g.id === govId);
-                      setSchoolForm(prev => ({ ...prev, governorate: gov ? gov.name_ar : '' }));
-                    }}
-                  >
-                    {governoratesList.map(g => (
-                      <option key={g.id} value={g.id}>{g.name_ar} ({g.region})</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input 
-                    type="text" 
-                    value={schoolForm.governorate} 
-                    required
-                    onChange={(e) => setSchoolForm({ ...schoolForm, governorate: e.target.value })}
-                  />
-                )}
+                <select
+                  value={schoolForm.governorate}
+                  required
+                  onChange={(e) => {
+                    const selectedGov = e.target.value;
+                    const matchedGov = governoratesList.find(g => g.name_ar === selectedGov);
+                    setSelectedGovId(matchedGov ? matchedGov.id : null);
+                    setSchoolForm(prev => ({ ...prev, governorate: selectedGov, directorate: '' }));
+                  }}
+                >
+                  <option value="">اختر المحافظة...</option>
+                  {['القاهرة','الجيزة','الإسكندرية','الدقهلية','البحيرة','الفيوم','الغربية','الإسماعيلية',
+                    'المنوفية','المنيا','القليوبية','السويس','الشرقية','أسوان','أسيوط','بني سويف','بورسعيد',
+                    'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج','الأقصر'
+                  ].filter((v, i, a) => a.indexOf(v) === i).map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="form-group">
@@ -1518,24 +1584,17 @@ function App() {
                     <button type="button" className="btn-primary" onClick={handleAddCustomAdmin} style={{ padding: '6px 12px', fontSize: 12 }}>حفظ</button>
                     <button type="button" className="btn-secondary" onClick={() => setIsAddingAdmin(false)} style={{ padding: '6px 10px', fontSize: 12 }}>إلغاء</button>
                   </div>
-                ) : administrationsList.length > 0 ? (
+                ) : (
                   <select
                     value={schoolForm.directorate}
                     required
                     onChange={(e) => setSchoolForm({ ...schoolForm, directorate: e.target.value })}
                   >
+                    <option value="">اختر الإدارة التعليمية...</option>
                     {administrationsList.map(a => (
                       <option key={a.id} value={a.name_ar}>{a.name_ar}</option>
                     ))}
                   </select>
-                ) : (
-                  <input 
-                    type="text" 
-                    value={schoolForm.directorate} 
-                    required
-                    placeholder="إدارة الدقي التعليمية"
-                    onChange={(e) => setSchoolForm({ ...schoolForm, directorate: e.target.value })}
-                  />
                 )}
               </div>
 
@@ -1567,33 +1626,6 @@ function App() {
                 </select>
               </div>
 
-              <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                <label>العنوان بالكامل</label>
-                <input 
-                  type="text" 
-                  value={schoolForm.address} 
-                  placeholder="مثال: شارع التحرير، الدقي، الجيزة"
-                  onChange={(e) => setSchoolForm({ ...schoolForm, address: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>رقم الهاتف</label>
-                <input 
-                  type="text" 
-                  value={schoolForm.phone} 
-                  onChange={(e) => setSchoolForm({ ...schoolForm, phone: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>البريد الإلكتروني</label>
-                <input 
-                  type="email" 
-                  value={schoolForm.email} 
-                  onChange={(e) => setSchoolForm({ ...schoolForm, email: e.target.value })}
-                />
-              </div>
             </div>
 
 
@@ -1841,7 +1873,7 @@ function App() {
           <div>
             <div className="step-header text-right">
               <UserPlus size={32} style={{ color: 'var(--primary)', marginBottom: 10 }} />
-              <h2>الخطوة 5: حساب المسؤول الأول (Super Admin)</h2>
+              <h2>الخطوة 3: حساب المسؤول الأول (Super Admin)</h2>
               <p>تأسيس الحساب الرئيسي للمدير العام الذي يمتلك الصلاحية الكاملة لتوزيع المهام والأدوار.</p>
             </div>
 
@@ -1869,13 +1901,12 @@ function App() {
               </div>
 
               <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                <label>الرقم القومي (14 خانة)</label>
+                <label>الرقم القومي (الافتراضي: admin)</label>
                 <input 
                   type="text" 
                   value={adminForm.nationalId} 
                   required
-                  maxLength={14}
-                  placeholder="29012010102934"
+                  placeholder="admin"
                   onChange={(e) => setAdminForm({ ...adminForm, nationalId: e.target.value })}
                 />
               </div>
@@ -1902,7 +1933,7 @@ function App() {
             </div>
 
             <div className="wizard-actions">
-              <button className="btn-secondary" onClick={() => setStep(4)}>
+              <button className="btn-secondary" onClick={() => setStep(2)}>
                 <ArrowLeft size={16} />
                 <span>رجوع</span>
               </button>

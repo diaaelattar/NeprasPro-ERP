@@ -97,7 +97,7 @@ const foreignStudentsReport = {
   id:          'foreign_students_report',
   name:        'سجل الطلاب الوافدين',
   desc:        'سجل تفصيلي بالطلاب غير المصريين المسجلين في المدرسة موضحاً جنسياتهم وبيانات تواصلهم',
-  category:    'إحصائيات',
+  category:    'سجلات أخرى',
   icon:        '🌍',
   orientation: 'landscape',
   available:   true,

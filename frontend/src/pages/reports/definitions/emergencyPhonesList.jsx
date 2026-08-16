@@ -4,7 +4,7 @@
 import React from 'react';
 
 function EmergencyPhonesListPreview({ students = [], meta = {}, schoolInfo = {} }) {
-  const { selectedGrade, selectedYear, selectedClassroom } = meta;
+  const { selectedGrade, selectedYear, selectedClassroom, classroomLabel } = meta;
 
   return (
     <div className="report-preview" id="print-area" data-orientation="portrait">
@@ -21,7 +21,7 @@ function EmergencyPhonesListPreview({ students = [], meta = {}, schoolInfo = {} 
             كشف هواتف ولي الأمر والعناوين للطوارئ
           </h2>
           <div className="report-subtitle-meta">
-            {selectedGrade?.grade_name_ar} | فصل: {selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
+            {selectedGrade?.grade_name_ar} | فصل: {classroomLabel || selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
           </div>
         </div>
 

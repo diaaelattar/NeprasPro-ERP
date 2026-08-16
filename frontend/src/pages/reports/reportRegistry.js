@@ -48,16 +48,8 @@ import secPortraitSheet          from './definitions/secPortraitSheet';
 import gradesSheet               from './definitions/gradesSheet';
 
 // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────────
-import statisticalStatement1    from './definitions/statisticalStatement1';
-import ageStat1Oct              from './definitions/ageStat1Oct';
-import orphansRegister          from './definitions/orphansRegister';
-import twinsRegister            from './definitions/twinsRegister';
-import droppedStudentsReport    from './definitions/droppedStudentsReport';
-import specialCasesFeeDiscount  from './definitions/specialCasesFeeDiscount';
-import religionGenderDistribution from './definitions/religionGenderDistribution';
-import classCapacityStat        from './definitions/classCapacityStat';
-import emisSummary              from './definitions/emisSummary';
-import outstandingStudentsRegister from './definitions/outstandingStudentsRegister';
+import generalEnrolledCensus     from './definitions/generalEnrolledCensus';
+import enrollmentStatusCensus    from './definitions/enrollmentStatusCensus';
 
 const REPORTS = [
   // ── سجلات القيد ─────────────────────────────────────────────
@@ -104,16 +96,8 @@ const REPORTS = [
   foreignStudentsReport,
 
   // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────
-  statisticalStatement1,
-  ageStat1Oct,
-  orphansRegister,
-  twinsRegister,
-  droppedStudentsReport,
-  specialCasesFeeDiscount,
-  religionGenderDistribution,
-  classCapacityStat,
-  emisSummary,
-  outstandingStudentsRegister,
+  generalEnrolledCensus,
+  enrollmentStatusCensus,
 ];
 
 export default REPORTS;

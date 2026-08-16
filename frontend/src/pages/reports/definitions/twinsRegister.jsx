@@ -4,11 +4,16 @@
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
 
-function TwinsRegisterPreview({ students, meta, schoolInfo }) {
+function TwinsRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear } = meta;
 
+  // Clean School & Administration names
+  const cleanSchool = (schoolInfo.schoolName || '').replace(/^مدرسة\s*/, '').trim();
+  const rawAdmin = schoolInfo.directorate || '';
+  const cleanAdmin = rawAdmin.replace(/التعليمية\s*$/, '').trim();
+  const governorate = schoolInfo.governorate || 'الجيزة';
+
   // Group twins: same parent_name + same birth_date = likely twins
-  // Also check is_twin field if exists
   const twinStudents = students.filter(s => s.is_twin === 1 || s.is_twin === true);
 
   // Try grouping by family name + birth year as fallback
@@ -45,93 +50,117 @@ function TwinsRegisterPreview({ students, meta, schoolInfo }) {
 
   return (
     <div className="report-preview" id="print-area" data-orientation="landscape">
-      <div className="official-header">
-        <div className="official-logo-box"><div className="logo-placeholder">شعار<br />المدرسة</div></div>
-        <div className="official-title-block">
-          <div className="official-title" style={{ fontSize: 16 }}>سجل الطلاب التوائم</div>
-          <div style={{ fontSize: 12, marginTop: 4 }}>
-            {selectedGrade?.grade_name_ar || 'جميع الصفوف'} — {selectedYear?.year_label}
+      <div className="printable-page-block" style={{ padding: '12px 16px', boxSizing: 'border-box' }}>
+        
+        {/* Standard Official Header */}
+        <div className="report-official-header" style={{ marginBottom: 10, paddingBottom: 6, borderBottom: '1.5px solid #000', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div className="header-col-right" style={{ textAlign: 'right', fontSize: 11.5, lineHeight: 1.4, fontWeight: 700 }}>
+            <div>محافظة: <strong>{governorate || '................'}</strong></div>
+            <div>إدارة: <strong>{cleanAdmin ? `${cleanAdmin} التعليمية` : '................'}</strong></div>
+            <div>مدرسة: <strong>{cleanSchool || '................'}</strong></div>
+          </div>
+
+          <div className="header-col-center" style={{ textAlign: 'center', flex: 1 }}>
+            <h2 className="report-title-main" style={{ fontSize: 16, fontWeight: 900, margin: 0, textDecoration: 'underline', color: '#0f172a' }}>
+              سجل الطلاب التوائم - {selectedGrade?.grade_name_ar || 'جميع الصفوف'}
+            </h2>
+            <div className="report-subtitle-meta" style={{ fontSize: 11.5, fontWeight: 700, color: '#334155', marginTop: 2 }}>
+              للعام الدراسي {selectedYear?.year_label || '...............'} | إجمالي التوائم: <strong>{allTwins.length}</strong> طالب ({groups.length} مجموعات)
+            </div>
+          </div>
+
+          <div className="header-col-left" style={{ textAlign: 'left' }}>
+            {schoolInfo.logoUrl ? (
+              <img src={schoolInfo.logoUrl} alt="Logo" style={{ maxHeight: 42, maxWidth: 85, objectFit: 'contain' }} />
+            ) : (
+              <div style={{ border: '1px dashed #94a3b8', borderRadius: 4, padding: '3px 6px', fontSize: 9.5, color: '#64748b', textAlign: 'center', background: '#f8fafc' }}>
+                شعار المدرسة
+              </div>
+            )}
+            <div style={{ fontSize: 9, color: '#64748b', marginTop: 2 }}>التاريخ: {new Date().toLocaleDateString('ar-EG')}</div>
           </div>
         </div>
-        <div className="official-school-info">
-          <div>محافظة: <span>{schoolInfo.governorate || '....'}</span></div>
-          <div>إدارة: <span>{schoolInfo.directorate || '....'}</span></div>
-          <div>مدرسة: <span>{schoolInfo.schoolName || '....'}</span></div>
-        </div>
-      </div>
 
-      {/* Summary */}
-      <div style={{ display: 'flex', gap: 16, margin: '10px 0' }}>
-        <div style={{ padding: '6px 14px', background: '#1e3a5f', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
-          إجمالي التوائم: <span style={{ fontSize: 15 }}>{allTwins.length}</span>
+        {/* Summary Badges */}
+        <div style={{ display: 'flex', gap: 12, margin: '8px 0 12px', justifyContent: 'center' }}>
+          <div style={{ padding: '4px 14px', background: '#1e293b', color: '#fff', borderRadius: 6, fontSize: 11, fontWeight: 800 }}>
+            إجمالي التوائم: <span style={{ fontSize: 13, marginRight: 4 }}>{allTwins.length}</span>
+          </div>
+          <div style={{ padding: '4px 14px', background: '#059669', color: '#fff', borderRadius: 6, fontSize: 11, fontWeight: 800 }}>
+            عدد مجموعات التوائم: <span style={{ fontSize: 13, marginRight: 4 }}>{groups.length}</span>
+          </div>
         </div>
-        <div style={{ padding: '6px 14px', background: '#059669', color: '#fff', borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
-          عدد مجموعات التوائم: <span style={{ fontSize: 15 }}>{groups.length}</span>
-        </div>
-      </div>
 
-      {groups.length > 0 ? (
-        <table className="register-table" dir="rtl" style={{ fontSize: 10.5 }}>
-          <thead>
-            <tr>
-              <th style={{ width: 32 }}>م</th>
-              <th>اسم الطالب</th>
-              <th style={{ width: 35 }}>النوع</th>
-              <th style={{ width: 40 }}>السن</th>
-              <th style={{ width: 100 }}>تاريخ الميلاد</th>
-              <th style={{ width: 110 }}>الرقم القومي</th>
-              <th style={{ width: 90 }}>الصف</th>
-              <th style={{ width: 70 }}>الفصل</th>
-              <th>ولي الأمر</th>
-              <th style={{ width: 100 }}>التليفون</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((group, gi) => (
-              <React.Fragment key={gi}>
-                <tr>
-                  <td colSpan={10} style={{
-                    background: '#dbeafe',
-                    fontWeight: 800,
-                    fontSize: 11,
-                    padding: '4px 12px',
-                    borderTop: '2px solid #3b82f6',
-                    color: '#1e40af',
-                  }}>
-                    👥 المجموعة {gi + 1} — {group[0]?.guardian_name || group[0]?.parent_name || 'عائلة مشتركة'} — عدد التوائم: {group.length}
-                  </td>
+        {groups.length > 0 ? (
+          <div className="register-table-wrap" style={{ width: '100%', overflowX: 'hidden' }}>
+            <table className="register-table" dir="rtl" style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', fontSize: 10, textAlign: 'center', tableLayout: 'fixed' }}>
+              <thead>
+                <tr style={{ background: '#e2e8f0', color: '#000', fontWeight: 800 }}>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 30 }}>م</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 4px', textAlign: 'right', width: 180 }}>اسم التلميذ</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 35 }}>النوع</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 35 }}>السن</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 75 }}>تاريخ الميلاد</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 110 }}>الرقم القومي</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 90 }}>الصف</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 50 }}>الفصل</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 4px', textAlign: 'right', width: 160 }}>ولي الأمر</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 95 }}>رقم الهاتف</th>
                 </tr>
-                {group.map((s, i) => (
-                  <tr key={s.id} style={{ background: i % 2 === 0 ? '#fff' : '#eff6ff' }}>
-                    <td className="cell-num">{i + 1}</td>
-                    <td className="cell-name" style={{ textAlign: 'right', fontWeight: 600 }}>{s.full_name_ar}</td>
-                    <td className="cell-sm">{s.gender === 'ذكر' ? 'م' : 'أ'}</td>
-                    <td className="cell-sm">{calcAge(s.birth_date)}</td>
-                    <td className="cell-sm" dir="ltr" style={{ fontSize: 9.5 }}>
-                      {s.birth_date ? new Date(s.birth_date).toLocaleDateString('ar-EG') : '—'}
-                    </td>
-                    <td className="cell-id" dir="ltr">{s.national_id || '—'}</td>
-                    <td>{s.grade_name_ar || '—'}</td>
-                    <td>{s.class_name || '—'}</td>
-                    <td>{s.guardian_name || s.parent_name || '—'}</td>
-                    <td>{s.guardian_phone || s.parent_phone || '—'}</td>
-                  </tr>
+              </thead>
+              <tbody>
+                {groups.map((group, gi) => (
+                  <React.Fragment key={gi}>
+                    <tr>
+                      <td colSpan={10} style={{
+                        background: '#dbeafe',
+                        fontWeight: 900,
+                        fontSize: 11,
+                        padding: '4px 12px',
+                        border: '1px solid #000',
+                        color: '#1e40af',
+                        textAlign: 'right'
+                      }}>
+                        👥 توأم عائلة: {group[0]?.guardian_name || group[0]?.parent_name || group[0]?.full_name_ar.split(' ').slice(1).join(' ')} ({group.length} طلاب)
+                      </td>
+                    </tr>
+                    {group.map((s, si) => (
+                      <tr key={s.id || si} style={{ background: si % 2 === 1 ? '#f8fafc' : '#fff' }}>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px', fontWeight: 700 }}>{si + 1}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {s.full_name_ar}
+                        </td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px', fontWeight: 700 }}>{s.gender === 'ذكر' ? 'ذكر' : 'أنثى'}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px' }}>{calcAge(s.birth_date)}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px', fontFamily: 'monospace', fontSize: 9.5 }}>{s.birth_date || '—'}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px', fontFamily: 'monospace', fontSize: 9.5 }}>{s.national_id || '—'}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px' }}>{s.grade_name_ar || '—'}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px', direction: 'ltr' }}>{s.classroom_name || s.class_name || '—'}</td>
+                        <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {s.guardian_name || s.parent_name || '—'}
+                        </td>
+                        <td style={{ border: '1px solid #000', padding: '3px 2px', fontFamily: 'monospace', fontSize: 9 }} dir="ltr">
+                          {s.guardian_phone || s.parent_phone || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
                 ))}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <div style={{ textAlign: 'center', padding: 40, color: '#6b7280', fontSize: 14 }}>
-          لا يوجد توائم مسجلون في هذا الصف
-          <br />
-          <small style={{ fontSize: 11 }}>يتم التعرف عليهم من حقل "توأم" في بيانات الطالب أو عبر مطابقة ولي الأمر + تاريخ الميلاد</small>
-        </div>
-      )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 28, color: '#64748b', fontWeight: 700, border: '1px dashed #cbd5e1', borderRadius: 8 }}>
+            لا يوجد طلاب توائم مسجلون في هذا البحث
+          </div>
+        )}
 
-      <div style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-        <div>الأخصائي الاجتماعي: ..........................</div>
-        <div>يعتمد مدير المدرسة: ..........................</div>
+        {/* Official Signatures Footer */}
+        <div className="official-signatures-footer" style={{ marginTop: 16, paddingTop: 6, borderTop: '1px solid #000', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, fontWeight: 800 }}>
+          <div>الأخصائي الاجتماعي: ..........................</div>
+          <div>مسؤول شئون الطلاب: ..........................</div>
+          <div>يعتمد مدير المدرسة: ..........................</div>
+        </div>
       </div>
     </div>
   );
@@ -140,33 +169,32 @@ function TwinsRegisterPreview({ students, meta, schoolInfo }) {
 const twinsRegister = {
   id:          'twins_register',
   name:        'سجل الطلاب التوائم',
-  desc:        'يُظهر التوائم مجمعين معاً مع بيانات ولي الأمر — يدعم الاكتشاف التلقائي بالتاريخ والولي',
-  category:    'إحصائيات',
+  desc:        'يُظهر الطلاب التوائم المسجلين في المدرسة مرتبين ومجمعين معاً في كشف واحد',
+  category:    'سجلات القيد',
   icon:        '👥',
   orientation: 'landscape',
   available:   true,
 
   filters: {
-    requiresYear:    true,
-    requiresSection: true,
-    requiresStage:   true,
+    requiresGrade: false,
+    showClass:     true,
   },
 
   excelEndpoint: (f) =>
-    `/api/students/export/excel?academicYearId=${f.academicYearId}&isTwin=true`,
+    `/api/students/export/excel?academicYearId=${f.academicYearId || ''}&isTwin=true`,
 
   excelFileName: (f, meta) =>
     `سجل_التوائم_${meta.selectedYear?.year_label?.replace('/', '_') || ''}.xlsx`,
 
   buildQuery: (f) => {
     const q = new URLSearchParams({
-      academicYearId: f.academicYearId,
-      limit: 2000,
+      limit: 'all',
       status: 'all',
     });
+    if (f.academicYearId) q.set('academicYearId', f.academicYearId);
     if (f.sectionId) q.set('sectionId', f.sectionId);
     if (f.stageId)   q.set('stageId', f.stageId);
-    if (f.gradeId)   q.set('gradeId', f.gradeId);
+    if (f.gradeId && f.gradeId !== 'all_stage')   q.set('gradeId', f.gradeId);
     return q.toString();
   },
 

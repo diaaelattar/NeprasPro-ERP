@@ -13,6 +13,8 @@ export default function StudentSeatingLists({ onBack }) {
   const [perCommittee, setPerCommittee] = useState(20);
   const [successMsg, setSuccessMsg] = useState('');
 
+  const [schoolInfo, setSchoolInfo] = useState(null);
+
   const loadSeating = () => {
     setLoading(true);
     setError('');
@@ -24,6 +26,11 @@ export default function StudentSeatingLists({ onBack }) {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
+
+    fetch(`${API}/setup/status`)
+      .then(r => r.json())
+      .then(d => { if (d.success) setSchoolInfo(d); })
+      .catch(() => {});
   };
 
   useEffect(() => { loadSeating(); }, []);
@@ -54,52 +61,119 @@ export default function StudentSeatingLists({ onBack }) {
   };
 
   const handlePrintSeatingList = () => {
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <html dir="rtl">
+    const rawSchool   = schoolInfo?.school_name || schoolInfo?.schoolName || '';
+    const cleanSchool = rawSchool.replace(/^مدرسة\s*/, '').trim() || '...............';
+    const rawAdmin    = schoolInfo?.directorate || schoolInfo?.administration || '';
+    const cleanAdmin  = rawAdmin.replace(/التعليمية\s*$/, '').trim() || '...............';
+    const gov         = schoolInfo?.governorate || '...............';
+    const logo        = schoolInfo?.logo_url || schoolInfo?.logoUrl || '';
+    const academicYear = schoolInfo?.academicYear || schoolInfo?.academic_year || '....../......';
+
+    const now     = new Date();
+    const dateStr = now.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
         <head>
-          <title>كشف مناداة لجان الامتحانات الرسمية (كشف 12 د)</title>
+          <meta charset="UTF-8" />
+          <title>كشف مناداة لجان الامتحانات (كشف 12 د)</title>
           <style>
-            body { font-family: 'Cairo', sans-serif; padding: 20px; text-align: right; }
-            h2, h3 { text-align: center; margin: 5px 0; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #000; padding: 8px 12px; font-size: 13px; text-align: center; }
-            th { background: #f0f0f0; }
+            @page { size: A4 portrait; margin: 12mm 15mm; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: 'Calibri', 'Segoe UI', Tahoma, Arial, sans-serif; padding: 10px; text-align: right; color: #000; direction: rtl; font-size: 11pt; }
+            .hd-box { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2pt solid #000; padding-bottom: 6pt; margin-bottom: 12pt; }
+            .hd-r { text-align: right; font-size: 11pt; font-weight: 700; line-height: 1.45; min-width: 55mm; }
+            .hd-c { text-align: center; flex: 1; }
+            .hd-c h2 { font-size: 16pt; font-weight: 900; text-decoration: underline; margin-bottom: 2pt; }
+            .hd-yr { font-size: 11.5pt; font-weight: 800; text-decoration: underline; }
+            .hd-l { text-align: left; min-width: 55mm; font-size: 9.5pt; font-weight: 600; }
+            .hd-l img { max-height: 38pt; max-width: 75pt; object-fit: contain; margin-bottom: 2pt; }
+            .logo-box { display: inline-block; border: 1pt dashed #999; padding: 2pt 6pt; font-size: 9pt; }
+
+            table { width: 100%; border-collapse: collapse; border: 1.5pt solid #000; margin-top: 10pt; font-size: 10pt; text-align: center; }
+            th, td { border: 1pt solid #000; padding: 5pt 4pt; }
+            th { background: #f1f5f9; font-weight: 800; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; }
+            .sigs-table { width: 100%; border: none; margin-top: 25pt; font-weight: 800; font-size: 11pt; text-align: center; }
+            .sigs-table td { border: none; padding: 4pt; }
+            .sig-line { width: 70%; height: 1pt; border-bottom: 1pt dotted #000; margin: 20pt auto 0; }
           </style>
         </head>
         <body>
-          <h2>وزارة التربية والتعليم والتعليم الفني</h2>
-          <h3>كشف مناداة ولجان الامتحانات الرسمية (كشف 12 د)</h3>
+          <div class="hd-box">
+            <div class="hd-r">
+              <div>محافظة: <strong>${gov}</strong></div>
+              <div>إدارة: <strong>${cleanAdmin} التعليمية</strong></div>
+              <div>مدرسة: <strong>${cleanSchool}</strong></div>
+            </div>
+            <div class="hd-c">
+              <h2>كشف مناداة ولجان الامتحانات (كشف 12 د)</h2>
+              <div class="hd-yr">للعام الدراسي: ${academicYear} م</div>
+            </div>
+            <div class="hd-l">
+              ${logo ? `<img src="${logo}" alt="شعار" />` : '<div class="logo-box">شعار المدرسة</div>'}
+              <div>التاريخ: ${dateStr}</div>
+            </div>
+          </div>
+
           <table>
             <thead>
               <tr>
-                <th>رقم الجلوس</th>
-                <th>اسم الطالب رباعياً</th>
-                <th>الرقم القومي</th>
-                <th>كود الطالب</th>
-                <th>اسم اللجنة / القاعة</th>
-                <th>التوقيع / ملاحظات</th>
+                <th style="width: 30pt;">م</th>
+                <th style="width: 65pt;">رقم الجلوس</th>
+                <th style="text-align: right; min-width: 140pt; padding-right: 8pt;">اسم الطالب رباعياً</th>
+                <th style="width: 95pt;">الرقم القومي</th>
+                <th style="width: 80pt;">اسم اللجنة / القاعة</th>
+                <th style="min-width: 70pt;">التوقيع / ملاحظات</th>
               </tr>
             </thead>
             <tbody>
-              ${seatingList.map(st => `
-                <tr>
-                  <td><strong>${st.seating_number}</strong></td>
-                  <td style="text-align: right;">${st.full_name_ar}</td>
-                  <td>${st.national_id}</td>
-                  <td>${st.emis_student_code || '-'}</td>
-                  <td>${st.committee_name}</td>
+              ${seatingList.map((st, idx) => `
+                <tr style="background: ${idx % 2 === 1 ? '#fafafa' : '#fff'};">
+                  <td>${idx + 1}</td>
+                  <td><strong>${st.seating_number || '—'}</strong></td>
+                  <td style="text-align: right; font-weight: 700; padding-right: 8pt;">${st.full_name_ar}</td>
+                  <td style="font-family: monospace;">${st.national_id || '—'}</td>
+                  <td>${st.committee_name || '—'}</td>
                   <td></td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
+
+          <table class="sigs-table">
+            <tr>
+              <td style="width: 33%;"><div>مسؤول شؤون الطلاب والامتحانات</div><div class="sig-line"></div></td>
+              <td style="width: 33%;"><div>رئيس لجنة النظام والمراقبة (الكنترول)</div><div class="sig-line"></div></td>
+              <td style="width: 33%;"><div>مدير المدرسة (رئيس عام الامتحان)</div><div class="sig-line"></div></td>
+            </tr>
+          </table>
         </body>
       </html>
     `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    doc.close();
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      iframe.contentWindow.print();
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 1500);
+    }, 300);
   };
 
   return (

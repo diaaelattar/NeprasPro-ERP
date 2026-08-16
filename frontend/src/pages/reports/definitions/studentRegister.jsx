@@ -26,15 +26,75 @@ const STATUS_LABELS = {
   promoted: 'منقول',
   retained: 'باقٍ للإعادة',
   suspended: 'موقوف قيده',
-  active: 'قيد',
+  active: 'مقيد',
 };
 
-const PAGE_SIZE = 20; // 20 students per page chunk for official register print
+const PAGE_SIZE = 22; // 22 students per page chunk for official register print
 
 /* ── Preview Component ─────────────────────────────────────────── */
 function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear } = meta;
   
+  // Clean School & Administration names
+  const cleanSchool = (schoolInfo.schoolName || '').replace(/^مدرسة\s*/, '').trim();
+  const rawAdmin = schoolInfo.directorate || '';
+  const cleanAdmin = rawAdmin.replace(/التعليمية\s*$/, '').trim();
+  const governorate = schoolInfo.governorate || 'الجيزة';
+
+  // Calculate overall statistical summary for all students in the grade
+  const stats = React.useMemo(() => {
+    let boys = 0;
+    let girls = 0;
+    let muslimBoys = 0;
+    let muslimGirls = 0;
+    let christianBoys = 0;
+    let christianGirls = 0;
+    let mergedCount = 0;
+    let promotedCount = 0;
+    let retainedCount = 0;
+    const classroomsSet = new Set();
+
+    students.forEach(s => {
+      const isMale = s.gender === 'ذكر';
+      const isMuslim = s.religion === 'مسلم';
+      const isChristian = s.religion === 'مسيحي';
+
+      if (isMale) {
+        boys++;
+        if (isMuslim) muslimBoys++;
+        if (isChristian) christianBoys++;
+      } else {
+        girls++;
+        if (isMuslim) muslimGirls++;
+        if (isChristian) christianGirls++;
+      }
+
+      if (s.is_merged === 1) mergedCount++;
+      if (s.status === 'promoted' || s.status === 'active') promotedCount++;
+      if (s.status === 'retained') retainedCount++;
+
+      if (s.classroom_name || s.class_name) {
+        classroomsSet.add(s.classroom_name || s.class_name);
+      }
+    });
+
+    return {
+      total: students.length,
+      boys,
+      girls,
+      muslimBoys,
+      muslimGirls,
+      muslimTotal: muslimBoys + muslimGirls,
+      christianBoys,
+      christianGirls,
+      christianTotal: christianBoys + christianGirls,
+      mergedCount,
+      promotedCount,
+      retainedCount,
+      classesCount: classroomsSet.size || 1
+    };
+  }, [students]);
+
   // Calculate total pages (at least 1 page)
   const totalPages = Math.ceil(students.length / PAGE_SIZE) || 1;
   const pageChunks = [];
@@ -50,63 +110,61 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
   return (
     <div className="report-preview" id="print-area" data-orientation="landscape">
       {pageChunks.map(({ pageIndex, students: pageStudents }) => (
-        <div key={pageIndex} className="printable-page-block">
+        <div key={pageIndex} className="printable-page-block" style={{ padding: '8px 12px', boxSizing: 'border-box' }}>
           
-          {/* Standard Official Header (Repeated on every page) */}
-          <div className="report-official-header">
-            <div className="header-col-right">
-              <div>مديرية التربية والتعليم بمحافظة: <strong>{schoolInfo.governorate || '................'}</strong></div>
-              <div>إدارة: <strong>{schoolInfo.directorate || '................'} التعليمية</strong></div>
-              <div>مدرسة: <strong>{schoolInfo.schoolName || '................'}</strong></div>
+          {/* Standard Official 3-Column Ministerial Header (Repeated on every page) */}
+          <div className="report-official-header" style={{ marginBottom: 6, paddingBottom: 5, borderBottom: '2px solid #1e3a8a', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div className="header-col-right" style={{ textAlign: 'right', fontSize: 10, lineHeight: 1.35, fontWeight: 700, width: '32%' }}>
+              <div>جمهورية مصر العربية</div>
+              <div>وزارة التربية والتعليم والتعليم الفني</div>
+              <div>مديرية التربية والتعليم بمحافظة: <strong>{governorate || '................'}</strong></div>
+              <div>إدارة: <strong>{cleanAdmin ? `${cleanAdmin} التعليمية` : '................'}</strong></div>
+              <div>مدرسة: <strong>{cleanSchool || '................'}</strong></div>
             </div>
 
-            <div className="header-col-center">
-              <h2 className="report-title-main">
-                سجل قيد تلاميذ {selectedGrade?.grade_name_ar || '...............'}
+            <div className="header-col-center" style={{ textAlign: 'center', flex: 1 }}>
+              <h2 className="report-title-main" style={{ fontSize: 15, fontWeight: 900, color: '#1e3a8a', margin: 0, textDecoration: 'underline' }}>
+                سجل قيد تلاميذ الصف (سجل 41 د) - {selectedGrade?.grade_name_ar || '...............'}
               </h2>
-              <div className="report-subtitle-meta">
-                للعام الدراسي {selectedYear?.year_label || '...............'} | إجمالي المسجلين: {students.length} طالب
+              <div className="report-subtitle-meta" style={{ fontSize: 10, fontWeight: 800, color: '#334155', marginTop: 2 }}>
+                إجمالي الطلاب المقيدين: <strong>{students.length}</strong> طالب
               </div>
             </div>
 
-            <div className="header-col-left">
-              {schoolInfo.logoUrl ? (
-                <img src={schoolInfo.logoUrl} alt="Logo" style={{ maxHeight: 55, maxWidth: 110, objectFit: 'contain' }} />
-              ) : (
-                <div style={{ border: '1.5px dashed #94a3b8', borderRadius: 8, padding: '6px 12px', fontSize: 11, color: '#64748b', textAlign: 'center', background: '#f8fafc' }}>
-                  شعار المدرسة
-                </div>
-              )}
-              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>التاريخ: {new Date().toLocaleDateString('ar-EG')}</div>
+            <div className="header-col-left" style={{ textAlign: 'left', fontSize: 9.5, fontWeight: 700, width: '30%', lineHeight: 1.35 }}>
+              <div>العام الدراسي: <strong>{selectedYear?.year_label || '2024 / 2025'}</strong></div>
+              <div>الفصل الدراسي: <strong>العام بالكامل</strong></div>
+              <div>تاريخ الطباعة: <strong>{new Date().toLocaleDateString('ar-EG')}</strong></div>
+              <div>كود النموذج: <strong>استمارة 41 د المعتمدة</strong></div>
             </div>
           </div>
 
           {/* Table */}
-          <div className="register-table-wrap">
-            <table className="register-table" dir="rtl">
+          <div className="register-table-wrap" style={{ width: '100%', overflowX: 'hidden' }}>
+            <table className="register-table" dir="rtl" style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', fontSize: 9, textAlign: 'center', tableLayout: 'fixed' }}>
               <thead>
-                <tr>
-                  <th rowSpan="2" style={{ width: 26 }}>م</th>
-                  <th rowSpan="2" style={{ width: 175 }}>اسم التلميذ</th>
-                  <th rowSpan="2" style={{ width: 108 }}>الرقم القومي</th>
-                  <th rowSpan="2" style={{ width: 78 }}>تاريخ الميلاد</th>
-                  <th colSpan="3" style={{ width: 82 }}>السن في 1/10</th>
-                  <th rowSpan="2" style={{ width: 36 }}>النوع</th>
-                  <th rowSpan="2" style={{ width: 42 }}>الفصل</th>
-                  <th rowSpan="2" style={{ width: 42 }}>الديانة</th>
-                  <th rowSpan="2" style={{ width: 50 }}>الجنسية</th>
-                  <th rowSpan="2" style={{ width: 58 }}>حالة القيد</th>
-                  <th rowSpan="2" style={{ width: 40 }}>الدمج</th>
-                  <th colSpan="2">ولي أمر التلميذ</th>
-                  <th rowSpan="2" style={{ width: 85 }}>رقم الهاتف</th>
-                  <th rowSpan="2" style={{ width: 105 }}>العـنـوان</th>
+                <tr style={{ background: '#e2e8f0', color: '#000', fontWeight: 800 }}>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '2px 0', width: 20 }}>م</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '2px 3px', textAlign: 'right', width: 140 }}>اسم التلميذ</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '2px 0', width: 95 }}>الرقم القومي</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '2px 0', width: 65 }}>تاريخ الميلاد</th>
+                  <th colSpan="3" style={{ border: '1px solid #000', padding: '1px 0', width: 57 }}>السن في 1/10</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '1px 0', width: 22, writingMode: 'vertical-rl', fontSize: 8.5 }}>النوع</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '1px 0', width: 22, writingMode: 'vertical-rl', fontSize: 8.5 }}>الفصل</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '1px 0', width: 24, writingMode: 'vertical-rl', fontSize: 8.5 }}>الديانة</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '1px 0', width: 24, writingMode: 'vertical-rl', fontSize: 8.5 }}>الجنسية</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '1px 0', width: 34, fontSize: 8, lineHeight: 1.15 }}>حالة<br/>القيد</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '1px 0', width: 22, writingMode: 'vertical-rl', fontSize: 8.5 }}>الدمج</th>
+                  <th colSpan="2" style={{ border: '1px solid #000', padding: '1px 2px', width: 145, background: '#cbd5e1' }}>ولي الأمر</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '2px 0', width: 70 }}>الهاتف</th>
+                  <th rowSpan="2" style={{ border: '1px solid #000', padding: '2px 4px', textAlign: 'right', width: 150 }}>العـنـوان</th>
                 </tr>
-                <tr>
-                  <th style={{ width: 26 }}>يوم</th>
-                  <th style={{ width: 26 }}>شهر</th>
-                  <th style={{ width: 30 }}>سنة</th>
-                  <th style={{ width: 185 }}>الاسم</th>
-                  <th style={{ width: 105 }}>الوظيفة</th>
+                <tr style={{ background: '#f1f5f9', color: '#000', fontWeight: 800, fontSize: 8.5 }}>
+                  <th style={{ border: '1px solid #000', padding: '1px 0', width: 19 }}>يوم</th>
+                  <th style={{ border: '1px solid #000', padding: '1px 0', width: 19 }}>شهر</th>
+                  <th style={{ border: '1px solid #000', padding: '1px 0', width: 19 }}>سنة</th>
+                  <th style={{ border: '1px solid #000', padding: '1px 3px', textAlign: 'right', width: 95 }}>الاسم</th>
+                  <th style={{ border: '1px solid #000', padding: '1px 2px', textAlign: 'right', width: 50 }}>المهنة</th>
                 </tr>
               </thead>
               <tbody>
@@ -114,59 +172,131 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
                   const globalIdx = pageIndex * PAGE_SIZE + idx + 1;
                   const age = calculateAgeOnOct1st(s.birth_date, selectedYear?.year_label);
                   return (
-                    <tr key={s.id || idx}>
-                      <td className="cell-num">{globalIdx}</td>
-                      <td className="cell-name" style={{ fontWeight: 800 }}>{s.full_name_ar}</td>
-                      <td className="cell-id" dir="ltr" style={{ fontFamily: 'Cairo, monospace' }}>{s.national_id || '—'}</td>
-                      <td className="cell-id" style={{ fontFamily: 'Cairo, monospace' }}>{s.birth_date || '—'}</td>
-                      <td className="cell-sm">{age.days}</td>
-                      <td className="cell-sm">{age.months}</td>
-                      <td className="cell-sm">{age.years}</td>
-                      <td className="cell-sm" style={{ fontWeight: 700 }}>{s.gender || '—'}</td>
-                      <td className="cell-sm" style={{ direction: 'ltr' }}>{s.classroom_name || '—'}</td>
-                      <td className="cell-sm">{s.religion || '—'}</td>
-                      <td className="cell-sm">{s.nationality_name || '—'}</td>
-                      <td className="cell-sm">{STATUS_LABELS[s.status] || s.enrollment_status || 'منقول'}</td>
-                      <td className="cell-sm">{s.is_merged === 1 ? (s.merge_type || 'مدمج') : 'لا يوجد'}</td>
-                      <td className="cell-name">{s.guardian_name || '—'}</td>
-                      <td className="cell-sm">{s.guardian_job || '—'}</td>
-                      <td className="cell-phone" dir="ltr">{s.guardian_phone || '—'}</td>
-                      <td className="cell-addr" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.address || '—'}</td>
+                    <tr key={s.id || idx} style={{ background: idx % 2 === 1 ? '#f8fafc' : '#fff' }}>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontWeight: 700 }}>{globalIdx}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 3px', textAlign: 'right', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 9.5 }}>
+                        {s.full_name_ar}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontFamily: 'monospace', fontSize: 9, whiteSpace: 'nowrap' }}>
+                        {s.national_id || '—'}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontFamily: 'monospace', fontSize: 8.5, whiteSpace: 'nowrap' }}>
+                        {s.birth_date || '—'}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8.5 }}>{age.days}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8.5 }}>{age.months}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8.5 }}>{age.years}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontWeight: 700, fontSize: 9 }}>{s.gender || '—'}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', direction: 'ltr', fontSize: 9 }}>{s.classroom_name || s.class_number || '—'}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8.5 }}>{s.religion || '—'}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8.5 }}>{s.nationality_name || 'مصري'}</td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8.5 }}>
+                        {STATUS_LABELS[s.status] || s.enrollment_status || 'منقول'}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontSize: 8 }}>
+                        {s.is_merged === 1 ? (s.merge_type || 'مدمج') : ''}
+                      </td>
+                      {/* Guardian Name & Job */}
+                      <td style={{ border: '1px solid #000', padding: '2px 3px', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: 9 }}>
+                        {s.guardian_name || '—'}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 2px', textAlign: 'right', fontSize: 8.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.guardian_job || '—'}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 0', fontFamily: 'monospace', fontSize: 8, whiteSpace: 'nowrap' }} dir="ltr">
+                        {s.guardian_phone || s.guardian_phone_2 || '—'}
+                      </td>
+                      <td style={{ border: '1px solid #000', padding: '2px 4px', textAlign: 'right', fontSize: 8.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.address || '—'}
+                      </td>
                     </tr>
                   );
                 })}
 
-                {/* Empty filler rows to complete full 20 rows on the page */}
+                {/* Empty filler rows to complete full page layout if needed */}
                 {Array.from({ length: Math.max(0, PAGE_SIZE - pageStudents.length) }, (_, idx) => (
-                  <tr key={`filler-${idx}`}>
-                    <td className="cell-num">{pageIndex * PAGE_SIZE + pageStudents.length + idx + 1}</td>
-                    <td /><td /><td />
-                    <td /><td /><td />
-                    <td /><td /><td />
-                    <td /><td /><td />
-                    <td /><td /><td />
-                    <td />
+                  <tr key={`filler-${idx}`} style={{ height: 19 }}>
+                    <td style={{ border: '1px solid #000', padding: '2px 0' }}>{pageIndex * PAGE_SIZE + pageStudents.length + idx + 1}</td>
+                    <td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} />
+                    <td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} />
+                    <td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} />
+                    <td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} />
+                    <td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} /><td style={{ border: '1px solid #000' }} />
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Official Signatures Footer (Repeated on every page) */}
-          <div className="official-signatures-footer">
-            <div style={{ textAlign: 'center' }}>
-              <div>وكيل شئون الطلاب</div>
-              <div style={{ marginTop: 32, color: '#64748b' }}>....................................</div>
+          {/* ── Statistical Summary Table at the End of the Register (On the Last Page) ── */}
+          {pageIndex === totalPages - 1 && (
+            <div style={{ marginTop: 8, marginBottom: 4, pageBreakInside: 'avoid' }}>
+              <div style={{ fontWeight: 800, fontSize: 10.5, marginBottom: 2, textAlign: 'right', color: '#0f172a' }}>
+                📊 جدول إحصائي شامل بطلاب الصف:
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', fontSize: 9, textAlign: 'center' }}>
+                <thead>
+                  <tr style={{ background: '#e2e8f0', fontWeight: 800 }}>
+                    <th style={{ border: '1px solid #000', padding: '2px' }}>عدد الفصول</th>
+                    <th colSpan="3" style={{ border: '1px solid #000', padding: '2px', background: '#cbd5e1' }}>الديانة المسلمة</th>
+                    <th colSpan="3" style={{ border: '1px solid #000', padding: '2px', background: '#cbd5e1' }}>الديانة المسيحية</th>
+                    <th colSpan="3" style={{ border: '1px solid #000', padding: '2px', background: '#bfdbfe' }}>الإجمالي العام</th>
+                    <th style={{ border: '1px solid #000', padding: '2px' }}>الدمج</th>
+                  </tr>
+                  <tr style={{ background: '#f1f5f9', fontWeight: 700, fontSize: 8.5 }}>
+                    <th style={{ border: '1px solid #000', padding: '2px' }}>فصول</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنين</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنات</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 50 }}>جملة</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنين</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنات</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 50 }}>جملة</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 50, background: '#dbeafe' }}>بنين</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 50, background: '#dbeafe' }}>بنات</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 60, background: '#93c5fd', fontWeight: 900 }}>الجملة</th>
+                    <th style={{ border: '1px solid #000', padding: '2px', width: 55 }}>طلاب دمج</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={{ fontWeight: 800, fontSize: 10, background: '#fff' }}>
+                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.classesCount}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.muslimBoys}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.muslimGirls}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px', background: '#f8fafc' }}>{stats.muslimTotal}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.christianBoys}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.christianGirls}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px', background: '#f8fafc' }}>{stats.christianTotal}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px', background: '#eff6ff' }}>{stats.boys}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px', background: '#eff6ff' }}>{stats.girls}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px', background: '#bfdbfe', fontSize: 11, fontWeight: 900 }}>{stats.total}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.mergedCount}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
+          )}
 
-            <div style={{ textAlign: 'center', fontSize: 11, color: '#475569' }}>
-              صفحة ({pageIndex + 1}) من ({totalPages})
+          {/* Standard Official 4-Column Signatures Footer (Repeated on every page) */}
+          <div className="official-signatures-footer" style={{ marginTop: 8, paddingTop: 4, borderTop: '1.5px solid #1e3a8a', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', textAlign: 'center', fontSize: 9.5, fontWeight: 800 }}>
+            <div>
+              <div>مسؤول شئون الطلاب (كاتب السجل)</div>
+              <div style={{ marginTop: 14, color: '#000' }}>التوقيع: ..........................</div>
             </div>
-
-            <div style={{ textAlign: 'center' }}>
-              <div>مدير المدرسة (يعتمد)</div>
-              <div style={{ marginTop: 32, color: '#64748b' }}>....................................</div>
+            <div>
+              <div>المراجع / الأخصائي</div>
+              <div style={{ marginTop: 14, color: '#000' }}>التوقيع: ..........................</div>
             </div>
+            <div>
+              <div>وكيل شؤون الطلاب والتعليم</div>
+              <div style={{ marginTop: 14, color: '#000' }}>التوقيع: ..........................</div>
+            </div>
+            <div>
+              <div>مدير المدرسة (يعتمد) وخاتم المدرسة</div>
+              <div style={{ marginTop: 14, color: '#000' }}>التوقيع: ..........................</div>
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', fontSize: 8.5, color: '#64748b', marginTop: 2 }}>
+            صفحة ({pageIndex + 1}) من ({totalPages})
           </div>
         </div>
       ))}
@@ -178,43 +308,44 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
 const studentRegister = {
   id:          'student_register',
   name:        'سجل القيد',
-  desc:        'النموذج الرسمي المعتمد من الوزارة لسجل قيد الطلاب',
+  desc:        'سجل قيد تلاميذ الصف المعتمد والمفصل',
   category:    'سجلات القيد',
-  icon:        '📖',
+  icon:        '📋',
   orientation: 'landscape',
   available:   true,
 
   filters: {
-    requiresGrade:   true,
-    requiresYear:    true,
-    requiresClass:   false,
-    requiresSection: true,
-    requiresStage:   true,
+    requiresGrade: true,
+    showClass:     true
   },
 
-  // URL لتصدير Excel من الـ backend
-  excelEndpoint: (f) =>
-    `/api/students/export/excel?gradeId=${f.gradeId}&academicYearId=${f.academicYearId}` +
-    `&sectionId=${f.sectionId || ''}&stageId=${f.stageId || ''}&status=all&genderOrder=${f.genderOrder || 'none'}`,
-
-  excelFileName: (f, meta) =>
-    `سجل_قيد_${meta.selectedGrade?.grade_name_ar || 'الصف'}_${meta.selectedYear?.year_label?.replace('/', '_') || ''}.xlsx`,
-
-  // دالة تحميل البيانات للمعاينة
-  buildQuery: (f) => {
-    const q = new URLSearchParams({
-      gradeId: f.gradeId,
-      academicYearId: f.academicYearId,
-      limit: '10000',
-      status: 'all',
-    });
-    if (f.sectionId)   q.set('sectionId',   f.sectionId);
-    if (f.stageId)     q.set('stageId',     f.stageId);
-    if (f.genderOrder) q.set('genderOrder', f.genderOrder);
+  buildQuery: (filters) => {
+    const q = new URLSearchParams();
+    if (filters.academicYearId) q.set('academicYearId', filters.academicYearId);
+    if (filters.sectionId)      q.set('sectionId', filters.sectionId);
+    if (filters.stageId)        q.set('stageId', filters.stageId);
+    if (filters.gradeId && filters.gradeId !== 'all_stage') q.set('gradeId', filters.gradeId);
+    if (filters.classId && filters.classId !== 'all_grade' && filters.classId !== 'all_stage') q.set('classId', filters.classId);
+    if (filters.genderOrder)    q.set('genderOrder', filters.genderOrder);
+    q.set('limit', 'all');
     return q.toString();
   },
 
-  PreviewComponent: StudentRegisterPreview,
+  excelEndpoint: (filters) => {
+    const q = new URLSearchParams();
+    if (filters.academicYearId) q.set('academicYearId', filters.academicYearId);
+    if (filters.stageId)        q.set('stageId', filters.stageId);
+    if (filters.gradeId && filters.gradeId !== 'all_stage') q.set('gradeId', filters.gradeId);
+    if (filters.classId && filters.classId !== 'all_grade' && filters.classId !== 'all_stage') q.set('classId', filters.classId);
+    return `/api/students/export/excel?${q.toString()}`;
+  },
+
+  excelFileName: (filters, meta) => {
+    const gradeName = meta.selectedGrade?.grade_name_ar || 'الصف';
+    return `سجل_قيد_الطلاب_${gradeName}.xlsx`;
+  },
+
+  PreviewComponent: StudentRegisterPreview
 };
 
 export default studentRegister;

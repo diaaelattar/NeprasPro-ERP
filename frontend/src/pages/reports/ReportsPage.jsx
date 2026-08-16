@@ -11,6 +11,7 @@ import JSZip from 'jszip';
 import REPORTS from './reportRegistry';
 import './reports.css';
 import API_BASE_URL, { SERVER_ORIGIN } from '../../config/api';
+import { formatClassroomLabel } from '../../utils/classroomFormatter';
 
 const API = API_BASE_URL;
 
@@ -64,27 +65,41 @@ export default function ReportsPage({ activeSectionId }) {
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, label: '' });
   const [exportingPdf,  setExportingPdf]  = useState(false);
 
-  const filteredStages = formOpts.stages?.filter(
-    s => !filters.sectionId || String(s.section_id) === filters.sectionId) || [];
-  const filteredGrades = formOpts.grades?.filter(
-    g => !filters.stageId || String(g.stage_id) === filters.stageId) || [];
+  const filteredStages = formOpts.stages || [];
+  const filteredGrades = filters.stageId
+    ? (formOpts.grades?.filter(g => String(g.stage_id) === String(filters.stageId)) || [])
+    : [];
 
   const selectedYear      = formOpts.academicYears?.find(y => String(y.id) === filters.academicYearId);
   const selectedGrade     = formOpts.grades?.find(g => String(g.id) === filters.gradeId);
   const selectedStage     = formOpts.stages?.find(s => String(s.id) === filters.stageId);
   const selectedClassroom = classrooms.find(c => String(c.id) === filters.classId);
 
+  const formattedClassLabel = selectedClassroom ? formatClassroomLabel({
+    classNumber: selectedClassroom.class_number || selectedClassroom.class_name,
+    className: selectedClassroom.class_name,
+    gradeNumber: selectedGrade?.grade_number || 1,
+    stageName: selectedStage?.stage_name || selectedGrade?.stage_name || '',
+    sectionType: selectedStage?.section_type || 'general'
+  }) : '';
+
   const classroomLabel =
     filters.classId === 'all_stage' ? 'جميع فصول المرحلة بالكامل' :
     filters.classId === 'all_grade' ? `جميع فصول ${selectedGrade?.grade_name_ar || 'الصف'}` :
-    selectedClassroom?.class_name;
+    (formattedClassLabel || selectedClassroom?.class_name);
+
+  const selectedClassroomEnhanced = selectedClassroom ? {
+    ...selectedClassroom,
+    class_name: formattedClassLabel || selectedClassroom.class_name,
+    formatted_name: formattedClassLabel || selectedClassroom.class_name
+  } : null;
 
   const gradeLabel =
     filters.gradeId === 'all_stage' || filters.classId === 'all_stage'
       ? (selectedStage?.stage_name ? `المرحلة ال${selectedStage.stage_name}` : 'جميع صفوف المرحلة')
       : selectedGrade?.grade_name_ar;
 
-  const meta = { selectedYear, selectedGrade, selectedStage, selectedClassroom, classroomLabel, gradeLabel };
+  const meta = { selectedYear, selectedGrade, selectedStage, selectedClassroom: selectedClassroomEnhanced, classroomLabel, gradeLabel, formOpts };
 
   /* ─── Boot ───────────────────────────────────────────────────── */
   useEffect(() => {
@@ -102,17 +117,34 @@ export default function ReportsPage({ activeSectionId }) {
           });
         }
       });
-    fetch(`${API}/setup/status`)
+    fetch(`${API}/settings/institution`)
       .then(r => r.json())
       .then(d => {
-        if (d.success)
+        if (d.success && d.institution) {
           setSchoolInfo({
-            schoolName: d.schoolName || '',
-            governorate: d.governorate || '',
-            directorate: d.directorate || '',
-            logoUrl: d.logoUrl || null
+            schoolName: d.institution.school_name || d.institution.schoolName || '',
+            governorate: d.institution.governorate || '',
+            directorate: d.institution.directorate || '',
+            educationType: d.institution.education_type || d.institution.educationType || 'رسمي',
+            directorName: d.institution.director_name || d.institution.directorName || '',
+            logoUrl: d.institution.logo_url || d.institution.logoUrl || null
           });
-      });
+        } else {
+          fetch(`${API}/setup/status`)
+            .then(r => r.json())
+            .then(st => {
+              if (st.success) {
+                setSchoolInfo({
+                  schoolName: st.schoolName || '',
+                  governorate: st.governorate || '',
+                  directorate: st.directorate || '',
+                  logoUrl: st.logoUrl || null
+                });
+              }
+            });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -561,23 +593,8 @@ export default function ReportsPage({ activeSectionId }) {
 
             <div className="filters-grid">
 
-              {/* Academic Year */}
-              {activeReport.filters?.requiresYear && (
-                <div className="filter-field">
-                  <label>العام الدراسي *</label>
-                  <select
-                    value={filters.academicYearId}
-                    onChange={e => setF({ academicYearId: e.target.value })}
-                  >
-                    <option value="">اختر العام...</option>
-                    {formOpts.academicYears?.map(y =>
-                      <option key={y.id} value={y.id}>{y.year_label}</option>)}
-                  </select>
-                </div>
-              )}
-
               {/* Section */}
-              {activeReport.filters?.requiresSection && (
+              {!activeReport.filters?.hideSection && (
                 <div className="filter-field">
                   <label>القسم</label>
                   <select
@@ -588,37 +605,39 @@ export default function ReportsPage({ activeSectionId }) {
                   >
                     <option value="">كل الأقسام</option>
                     {formOpts.sections?.map(s =>
-                      <option key={s.id} value={s.id}>{s.name}</option>)}
+                      <option key={s.id} value={s.id}>{s.name || s.name_ar}</option>)}
                   </select>
                 </div>
               )}
 
               {/* Stage */}
-              {activeReport.filters?.requiresStage && (
+              {!activeReport.filters?.hideStage && (
                 <div className="filter-field">
                   <label>المرحلة</label>
                   <select
                     value={filters.stageId}
                     onChange={e => setF({ stageId: e.target.value, gradeId: '', classId: '' })}
                   >
-                    <option value="">اختر المرحلة</option>
+                    <option value="">كل المراحل</option>
                     {filteredStages.map(s =>
-                      <option key={s.id} value={s.id}>{s.stage_name}</option>)}
+                      <option key={s.id} value={s.id}>{s.stage_name_ar || s.stage_name || s.name}</option>)}
                   </select>
                 </div>
               )}
 
               {/* Grade */}
-              {activeReport.filters?.requiresGrade && (
+              {!activeReport.filters?.hideGrade && (
                 <div className="filter-field">
-                  <label>الصف الدراسي *</label>
+                  <label>الصف الدراسي {activeReport.filters?.requiresGrade ? '*' : ''}</label>
                   <select
                     value={filters.gradeId}
                     onChange={e => setF({ gradeId: e.target.value, classId: '' })}
+                    disabled={!filters.stageId}
+                    style={!filters.stageId ? { opacity: 0.65, cursor: 'not-allowed' } : {}}
                   >
-                    <option value="">اختر الصف...</option>
+                    <option value="">{filters.stageId ? (activeReport.filters?.requiresGrade ? 'اختر الصف...' : 'كل الصفوف') : 'اختر المرحلة أولاً--'}</option>
                     {filteredGrades.map(g =>
-                      <option key={g.id} value={g.id}>{g.grade_name_ar}</option>)}
+                      <option key={g.id} value={g.id}>{g.grade_name_ar || g.name_ar || g.name}</option>)}
                   </select>
                 </div>
               )}
@@ -631,6 +650,7 @@ export default function ReportsPage({ activeSectionId }) {
                     value={filters.classId}
                     onChange={e => setF({ classId: e.target.value })}
                     disabled={!classrooms.length}
+                    style={!classrooms.length ? { opacity: 0.65, cursor: 'not-allowed' } : {}}
                   >
                     <option value="">
                       {filters.gradeId && filters.academicYearId
@@ -662,31 +682,35 @@ export default function ReportsPage({ activeSectionId }) {
               )}
 
               {/* Gender Sorting Order (البنون أولاً / البنات أولاً) */}
-              <div className="filter-field">
-                <label style={{ color: '#4338ca', fontWeight: 800 }}>فرز ترتيب النوع</label>
-                <select
-                  value={filters.genderOrder || 'none'}
-                  onChange={e => setF({ genderOrder: e.target.value })}
-                  style={{ background: '#f5f3ff', borderColor: '#a5b4fc', fontWeight: 700, color: '#312e81' }}
-                >
-                  <option value="none">أبجدي شامل (ذكور وإناث)</option>
-                  <option value="boys_first">👦 البنون (الذكور) أولاً</option>
-                  <option value="girls_first">👧 البنات (الإناث) أولاً</option>
-                </select>
-              </div>
+              {!activeReport.filters?.hideGenderOrder && activeReport?.category !== 'إحصائيات' && (
+                <div className="filter-field">
+                  <label style={{ color: '#4338ca', fontWeight: 800 }}>فرز ترتيب النوع</label>
+                  <select
+                    value={filters.genderOrder || 'none'}
+                    onChange={e => setF({ genderOrder: e.target.value })}
+                    style={{ background: '#f5f3ff', borderColor: '#a5b4fc', fontWeight: 700, color: '#312e81' }}
+                  >
+                    <option value="none">أبجدي شامل (ذكور وإناث)</option>
+                    <option value="boys_first">👦 البنون (الذكور) أولاً</option>
+                    <option value="girls_first">👧 البنات (الإناث) أولاً</option>
+                  </select>
+                </div>
+              )}
 
               {/* Checkbox for Batch Exporting All Classes */}
-              <div className="filter-field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, color: '#1e40af', background: '#eff6ff', padding: '8px 12px', borderRadius: 8, border: '1px solid #bfdbfe', width: '100%' }}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(filters.isBatchMode)}
-                    onChange={e => setF({ isBatchMode: e.target.checked })}
-                    style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: 'pointer' }}
-                  />
-                  <span>📦 تصدير كل فصول الصف/المرحلة مجمعة (ملف ZIP)</span>
-                </label>
-              </div>
+              {!activeReport.filters?.hideBatchMode && activeReport?.category !== 'إحصائيات' && (
+                <div className="filter-field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, color: '#1e40af', background: '#eff6ff', padding: '8px 12px', borderRadius: 8, border: '1px solid #bfdbfe', width: '100%' }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(filters.isBatchMode)}
+                      onChange={e => setF({ isBatchMode: e.target.checked })}
+                      style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: 'pointer' }}
+                    />
+                    <span>📦 تصدير كل فصول الصف/المرحلة مجمعة (ملف ZIP)</span>
+                  </label>
+                </div>
+              )}
 
               <button
                 className="btn-generate"
@@ -707,59 +731,72 @@ export default function ReportsPage({ activeSectionId }) {
               <span className="badge-dot" />
               <span>تم تجهيز التقرير: <strong>{students.length}</strong> طالب مسجل</span>
             </div>
-            <div className="action-buttons" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div className="action-buttons" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
 
-              {/* ── Excel Export button ── */}
-              <button
-                className={`btn-action excel ${exportingExcel ? 'loading' : ''}`}
-                onClick={exportExcel}
-                disabled={exportingExcel || exportingPdf}
-                style={{ opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, cursor: (exportingExcel || exportingPdf) ? 'wait' : 'pointer', background: '#15803d', color: '#fff' }}
-                title="تصدير الشيت المعتمد بصيغة .xlsm الممتلئ بالبيانات"
-              >
-                {exportingExcel ? <RefreshCw size={15} className="spin" /> : <FileSpreadsheet size={15} />}
-                <span>
-                  {isBatchMode ? '📦 تصدير كل الفصول (.zip)' : '📊 تصدير شيت إكسيل (.xlsm)'}
-                </span>
-              </button>
-
-              {/* ── PDF Preview button ── */}
-              {!activeReport?.excelOnly && (
+              {/* ── Direct Instant Print (A4 / PDF) button ── */}
+              {activeReport?.PreviewComponent && (
                 <button
-                  className="btn-action print"
-                  onClick={() => exportPdf(true)}
-                  disabled={exportingExcel || exportingPdf}
-                  style={{ background: '#0284c7', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1 }}
-                  title="توليد PDF مباشرة من شيت الإكسيل"
+                  className="btn-action print-direct"
+                  onClick={() => {
+                    const orientation = activeReport?.orientation || 'portrait';
+                    let style = document.getElementById('dynamic-print-page-style');
+                    if (!style) {
+                      style = document.createElement('style');
+                      style.id = 'dynamic-print-page-style';
+                      document.head.appendChild(style);
+                    }
+                    style.textContent = `@media print { @page { size: A4 ${orientation}; margin: 6mm; } }`;
+                    window.print();
+                  }}
+                  style={{ background: '#1d4ed8', color: '#fff', padding: '9px 18px', fontSize: 13, fontWeight: 800, borderRadius: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7, boxShadow: '0 2px 6px rgba(29,78,216,0.3)' }}
+                  title="طباعة التقرير المعروض على الشاشة فوراً على ورق A4 أو حفظه بصيغة PDF مباشرة"
                 >
-                  {exportingPdf ? <RefreshCw size={15} className="spin" /> : <Printer size={15} />}
-                  <span>🖨️ طباعة إكسيل مباشرة</span>
+                  <Printer size={16} />
+                  <span>🖨️ طباعة النموذج المعروض (A4 / PDF)</span>
                 </button>
               )}
 
-              {/* ── Open Directly in MS Excel Desktop button ── */}
-              <button
-                className="btn-action"
-                onClick={openInExcelApp}
-                disabled={exportingExcel || exportingPdf}
-                style={{ background: '#0d9488', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-                title="فتح ملف الإكسيل الممتلئ بالبيانات ببرنامج MS Excel على شاشتك فوراً للمعاينة والطباعة اليدوية"
-              >
-                <FileSpreadsheet size={15} />
-                <span>💻 فتح ببرنامج MS Excel</span>
-              </button>
+              {/* ── Excel Export button ── */}
+              {activeReport?.excelEndpoint && (
+                <button
+                  className={`btn-action excel ${exportingExcel ? 'loading' : ''}`}
+                  onClick={exportExcel}
+                  disabled={exportingExcel || exportingPdf}
+                  style={{ opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, cursor: (exportingExcel || exportingPdf) ? 'wait' : 'pointer', background: '#15803d', color: '#fff', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, border: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
+                  title="تصدير ملف الإكسيل الممتلئ بالبيانات"
+                >
+                  {exportingExcel ? <RefreshCw size={15} className="spin" /> : <FileSpreadsheet size={15} />}
+                  <span>
+                    {isBatchMode ? '📦 تصدير كل الفصول (.zip)' : '📊 تصدير شيت إكسيل (.xlsx)'}
+                  </span>
+                </button>
+              )}
 
-              {/* ── PDF Download button ── */}
-              {!activeReport?.excelOnly && (
+              {/* ── Open Directly in MS Excel Desktop button (Only for reports that support COM/Macro desktop opening) ── */}
+              {Boolean(activeReport?.hasDesktopExcel) && (
+                <button
+                  className="btn-action"
+                  onClick={openInExcelApp}
+                  disabled={exportingExcel || exportingPdf}
+                  style={{ background: '#0d9488', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                  title="فتح ملف الإكسيل الممتلئ بالبيانات ببرنامج MS Excel على شاشتك فوراً للمعاينة والطباعة اليدوية"
+                >
+                  <FileSpreadsheet size={15} />
+                  <span>💻 فتح ببرنامج MS Excel</span>
+                </button>
+              )}
+
+              {/* ── Ministerial Macro-to-PDF button (Only for ministerial macro sheets) ── */}
+              {Boolean(activeReport?.hasMacroPdf) && !activeReport?.excelOnly && (
                 <button
                   className="btn-action"
                   onClick={() => exportPdf(false)}
                   disabled={exportingExcel || exportingPdf}
-                  style={{ background: '#7c3aed', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-                  title="تحميل ملف PDF مباشرة"
+                  style={{ background: '#6366f1', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                  title="توليد وتنزيل PDF من شيت الماكرو الوزاري"
                 >
                   <FileText size={15} />
-                  <span>⬇️ تحميل PDF</span>
+                  <span>📄 تصدير ماكرو PDF</span>
                 </button>
               )}
 

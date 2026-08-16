@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS institution_config (
   school_name_en TEXT,
   governorate    TEXT NOT NULL,
   directorate    TEXT NOT NULL,
+  governorate_id    INTEGER,
+  administration_id INTEGER,
+  classification_id INTEGER,
   education_type TEXT,
   address        TEXT,
   phone          TEXT,
@@ -32,9 +35,9 @@ CREATE TABLE IF NOT EXISTS institution_config (
 CREATE TABLE IF NOT EXISTS sections (
   id                              INTEGER PRIMARY KEY AUTOINCREMENT,
   name                            TEXT UNIQUE NOT NULL,
-  type                            TEXT NOT NULL CHECK (type IN ('arabic', 'languages', 'kindergarten')),
+  type                            TEXT NOT NULL CHECK (type IN ('arabic', 'languages', 'international', 'kindergarten')),
   education_type                  TEXT,
-  legal_status                    TEXT CHECK (legal_status IN ('حكومي', 'خاص')),
+  legal_status                    TEXT CHECK (legal_status IN ('حكومي', 'خاص', 'دولي')),
   section_director_name           TEXT,
   section_director_qualification  TEXT,
   section_director_national_id    TEXT,
@@ -223,11 +226,44 @@ CREATE TABLE IF NOT EXISTS students (
   transferred_from_school       TEXT,
   transferred_from_directorate  TEXT,
   transferred_from_governorate  TEXT,
+  class_id              INTEGER REFERENCES classes(id),
+  section_code          TEXT,
+  stage_code            TEXT,
+  grade_code            TEXT,
+  class_code            TEXT,
+  student_serial_in_class INTEGER DEFAULT 0,
+  student_serial_in_grade INTEGER DEFAULT 0,
   -- ─── الحالة العامة ────────────────────────────────────
   enrollment_date       TEXT DEFAULT (date('now')),
   status                TEXT DEFAULT 'promoted' CHECK (status IN ('promoted','retained','suspended','disconnected','excluded','deleted')),
   created_at            TEXT DEFAULT (datetime('now'))
 );
+
+-- Index for ultra-fast queries by dedicated columns & codes
+CREATE INDEX IF NOT EXISTS idx_students_dedicated_lookup ON students(section_id, stage_id, grade_id, class_id);
+CREATE INDEX IF NOT EXISTS idx_students_code_lookup ON students(section_code, stage_code, grade_code, class_code);
+
+-- 14b. Student Academic History (Movement & Progress Tracking)
+CREATE TABLE IF NOT EXISTS student_academic_history (
+  id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id              INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  academic_year_id        INTEGER NOT NULL REFERENCES academic_years(id),
+  section_id              INTEGER NOT NULL REFERENCES sections(id),
+  stage_id                INTEGER NOT NULL REFERENCES stages_lookup(id),
+  grade_id                INTEGER NOT NULL REFERENCES grades_lookup(id),
+  class_id                INTEGER REFERENCES classes(id),
+  section_code            TEXT,
+  stage_code              TEXT,
+  grade_code              TEXT,
+  class_code              TEXT,
+  student_serial_in_class INTEGER DEFAULT 0,
+  student_serial_in_grade INTEGER DEFAULT 0,
+  enrollment_status       TEXT DEFAULT 'promoted',
+  created_at              TEXT DEFAULT (datetime('now')),
+  UNIQUE (student_id, academic_year_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_academic_history ON student_academic_history(student_id, academic_year_id);
 
 -- 15. Custom Fields Definition (Dynamic Fields Engine)
 CREATE TABLE IF NOT EXISTS system_custom_fields (
@@ -266,11 +302,15 @@ CREATE TABLE IF NOT EXISTS student_documents (
 
 -- 18. Classes / Classrooms
 CREATE TABLE IF NOT EXISTS classes (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  grade_id       INTEGER NOT NULL REFERENCES grades_lookup(id),
-  academic_year_id INTEGER NOT NULL REFERENCES academic_years(id),
-  class_name     TEXT NOT NULL,
-  capacity       INTEGER DEFAULT 40,
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id       INTEGER REFERENCES sections(id) ON DELETE CASCADE,
+  stage_id         INTEGER REFERENCES stages_lookup(id) ON DELETE CASCADE,
+  grade_id         INTEGER NOT NULL REFERENCES grades_lookup(id) ON DELETE CASCADE,
+  academic_year_id INTEGER NOT NULL REFERENCES academic_years(id) ON DELETE CASCADE,
+  class_name       TEXT NOT NULL,
+  class_code       INTEGER,
+  capacity         INTEGER DEFAULT 40,
+  created_at       TEXT DEFAULT (datetime('now')),
   UNIQUE (grade_id, academic_year_id, class_name)
 );
 

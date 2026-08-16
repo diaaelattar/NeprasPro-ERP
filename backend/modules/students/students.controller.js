@@ -1,5 +1,7 @@
 const excelReportEngine = require('../../services/excelReportEngine');
 const db = require('../../config/db');
+const { formatClassroomLabel, extractClassNumber } = require('../../utils/classroomFormatter');
+const { getSchoolMasterInfo } = require('../../utils/schoolHelper');
 
 // ─── sql.js helpers ───────────────────────────────────────────────────────────
 const _all = (sqliteDb, sql, params = []) => {
@@ -28,16 +30,60 @@ const _lastId = (sqliteDb) => {
   return row['last_insert_rowid()'] || row.id;
 };
 
+const _run = (sqliteDb, sql, params = []) => {
+  if (params && params.length) {
+    sqliteDb.run(sql, params);
+  } else {
+    sqliteDb.run(sql);
+  }
+};
+
 // ─── Generate student code ─────────────────────────────────────────────────
 const _generateCode = (sqliteDb, sectionId, stageId) => {
-  const counter = _get(sqliteDb,
+  let counter = _get(sqliteDb,
     'SELECT id, prefix, last_serial FROM stage_serial_counters WHERE section_id = ? AND stage_id = ?',
-    [sectionId, stageId]
+    [sectionId || 1, stageId || 1]
   );
-  if (!counter) throw new Error('لم يتم العثور على كاونتر التسلسل للقسم والمرحلة المحددَين.');
+
+  if (!counter) {
+    // Auto-create missing counter for section & stage
+    try {
+      const stageObj = _get(sqliteDb, 'SELECT stage_name FROM stages_lookup WHERE id = ?', [stageId || 1]);
+      const stageName = stageObj?.stage_name || '';
+      const prefix = stageName.includes('ابتدائ') ? 'PRI' :
+                     stageName.includes('اعداد') || stageName.includes('إعداد') ? 'PREP' :
+                     stageName.includes('ثانو') ? 'SEC' :
+                     stageName.includes('روض') || stageName.includes('طفل') ? 'KG' : 'STU';
+
+      sqliteDb.run(
+        'INSERT OR IGNORE INTO stage_serial_counters (section_id, stage_id, prefix, last_serial) VALUES (?, ?, ?, 0)',
+        [sectionId || 1, stageId || 1, prefix]
+      );
+      db.flushSQLite();
+
+      counter = _get(sqliteDb,
+        'SELECT id, prefix, last_serial FROM stage_serial_counters WHERE section_id = ? AND stage_id = ?',
+        [sectionId || 1, stageId || 1]
+      );
+    } catch (e) {
+      console.error('[DB] Counter auto-create error:', e.message);
+    }
+  }
+
+  if (!counter) {
+    counter = { id: 0, prefix: 'STU', last_serial: Math.floor(Math.random() * 8000) };
+  }
+
   const year = new Date().getFullYear();
   const next = (counter.last_serial || 0) + 1;
-  sqliteDb.run('UPDATE stage_serial_counters SET last_serial = ? WHERE id = ?', [next, counter.id]);
+
+  if (counter.id > 0) {
+    try {
+      sqliteDb.run('UPDATE stage_serial_counters SET last_serial = ? WHERE id = ?', [next, counter.id]);
+      db.flushSQLite();
+    } catch (_) {}
+  }
+
   return `${counter.prefix}-${year}-${String(next).padStart(4, '0')}`;
 };
 
@@ -78,13 +124,20 @@ const RELIGION_MAP = {
 
 const normalizeReligion = (val) => {
   if (!val) return null;
-  const cleaned = normalizeAr(val).toLowerCase().trim();
-  // Try exact map first
-  const direct = RELIGION_MAP[val.trim()];
+  const str = String(val).trim();
+  if (str === '2' || str.includes('مسيح') || str.includes('نصران') || str.toLowerCase().includes('christian')) {
+    return 'مسيحي';
+  }
+  if (str === '1' || str.includes('مسلم') || str.toLowerCase().includes('muslim')) {
+    return 'مسلم';
+  }
+  if (str === '3' || str.includes('أخر') || str.includes('اخر') || str.toLowerCase().includes('other')) {
+    return 'أخرى';
+  }
+  const direct = RELIGION_MAP[str];
   if (direct) return direct;
-  // Try after normalization
-  const normalized = normalizeAr(val.trim());
-  return RELIGION_MAP[normalized] || normalized || null;
+  const normalized = normalizeAr(str);
+  return RELIGION_MAP[normalized] || str;
 };
 
 const parseNationalId = (nid) => {
@@ -126,13 +179,67 @@ const getFormOptions = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const sections      = _all(sqliteDb, 'SELECT id, name, type FROM sections WHERE is_active = 1 OR is_active IS NULL ORDER BY name');
-    const stages        = _all(sqliteDb, 'SELECT id, section_id, stage_name, years_count FROM stages_lookup ORDER BY section_id, display_order');
-    const grades        = _all(sqliteDb, 'SELECT id, stage_id, grade_number, grade_name_ar, secondary_system FROM grades_lookup ORDER BY stage_id, grade_number');
+    const sections      = _all(sqliteDb, 'SELECT id, name, type FROM sections WHERE is_active = 1 ORDER BY id ASC');
+    const stages        = _all(sqliteDb, `
+      SELECT id, section_id, stage_name, stage_name AS name, stage_name AS stage_name_ar, stage_code, years_count, display_order
+      FROM stages_lookup
+      WHERE (is_active = 1 OR is_active IS NULL)
+      ORDER BY display_order ASC, id ASC
+    `);
+    const grades        = _all(sqliteDb, `
+      SELECT gl.id, gl.stage_id, gl.grade_number, gl.grade_name_ar, gl.grade_name_ar AS name, gl.secondary_system 
+      FROM grades_lookup gl
+      WHERE (gl.is_active = 1 OR gl.is_active IS NULL)
+      ORDER BY gl.id ASC
+    `);
     const nationalities = _all(sqliteDb, 'SELECT id, name FROM nationalities ORDER BY name');
-    const academicYears = _all(sqliteDb, 'SELECT id, year_label, is_current FROM academic_years ORDER BY id DESC');
+    let academicYears = _all(sqliteDb, 'SELECT id, year_label, is_current FROM academic_years WHERE is_current = 1 ORDER BY id DESC LIMIT 1');
+    if (!academicYears || academicYears.length === 0) {
+      academicYears = _all(sqliteDb, 'SELECT id, year_label, is_current FROM academic_years ORDER BY id DESC LIMIT 1');
+      if (academicYears && academicYears.length > 0) {
+        sqliteDb.run('UPDATE academic_years SET is_current = 1 WHERE id = ?', [academicYears[0].id]);
+        academicYears[0].is_current = 1;
+      }
+    }
     const caseTypes     = _all(sqliteDb, 'SELECT id, code, name_ar FROM special_case_types WHERE is_active = 1 ORDER BY name_ar');
-    return res.json({ success: true, sections, stages, grades, nationalities, academicYears, caseTypes });
+    const enrollmentStatuses = _all(sqliteDb, 'SELECT id, code, name_ar, color, sort_order FROM enrollment_status_lookup ORDER BY sort_order');
+    const foreignLanguages   = _all(sqliteDb, 'SELECT id, code, name_ar AS name FROM foreign_languages_lookup ORDER BY sort_order');
+    const specialNeeds       = _all(sqliteDb, 'SELECT id, code, name_ar FROM special_needs_types_lookup ORDER BY sort_order');
+    const schoolTracks       = _all(sqliteDb, 'SELECT id, code, name_ar FROM school_tracks_lookup ORDER BY sort_order');
+    const schoolSpecializations = _all(sqliteDb, 'SELECT id, code, name_ar, track_code FROM school_specializations_lookup ORDER BY sort_order');
+    const religions          = [{ id: 1, name: 'مسلم' }, { id: 2, name: 'مسيحي' }];
+    const genders            = [{ id: 1, name: 'ذكر' }, { id: 2, name: 'أنثى' }];
+    const guardianRelations  = [
+      { id: 1, name: 'أب', name_ar: 'أب', label: 'أب' },
+      { id: 2, name: 'أم', name_ar: 'أم', label: 'أم' },
+      { id: 3, name: 'جد', name_ar: 'جد', label: 'جد' },
+      { id: 4, name: 'جدة', name_ar: 'جدة', label: 'جدة' },
+      { id: 5, name: 'عم', name_ar: 'عم', label: 'عم' },
+      { id: 6, name: 'عمة', name_ar: 'عمة', label: 'عمة' },
+      { id: 7, name: 'خال', name_ar: 'خال', label: 'خال' },
+      { id: 8, name: 'خالة', name_ar: 'خالة', label: 'خالة' },
+      { id: 9, name: 'أخ', name_ar: 'أخ', label: 'أخ' },
+      { id: 10, name: 'أخت', name_ar: 'أخت', label: 'أخت' },
+      { id: 11, name: 'وصي قانوني', name_ar: 'وصي قانوني', label: 'وصي قانوني' }
+    ];
+
+    return res.json({
+      success: true,
+      sections,
+      stages,
+      grades,
+      nationalities,
+      academicYears,
+      caseTypes,
+      enrollmentStatuses,
+      foreignLanguages,
+      specialNeeds,
+      schoolTracks,
+      schoolSpecializations,
+      religions,
+      genders,
+      guardianRelations
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -172,6 +279,11 @@ const getStats = async (req, res) => {
     const deleted      = _get(sqliteDb, `SELECT COUNT(*) AS n FROM students s WHERE s.is_deleted = 1 AND ${condStr}`, params)?.n || 0;
     const male         = _get(sqliteDb, `SELECT COUNT(*) AS n FROM students s WHERE s.gender='ذكر' AND ${activeFilter}`, params)?.n || 0;
     const female       = _get(sqliteDb, `SELECT COUNT(*) AS n FROM students s WHERE s.gender='أنثى' AND ${activeFilter}`, params)?.n || 0;
+    const merged       = _get(sqliteDb, `SELECT COUNT(*) AS n FROM students s WHERE ${baseFilter} AND (s.is_merged = 1 OR s.is_merged = '1')`, params)?.n || 0;
+    // عدد التحويلات الصادرة والواردة النشطة (pending أو completed في العام المحدد)
+    const transfersParams = academicYearId ? [academicYearId] : [];
+    const transfersFilter = academicYearId ? 'WHERE academic_year_id = ?' : '';
+    const transfers = _get(sqliteDb, `SELECT COUNT(*) AS n FROM student_transfers ${transfersFilter}`, transfersParams)?.n || 0;
     
     const bySection = _all(sqliteDb, `
       SELECT sec.name, COUNT(s.id) AS cnt
@@ -179,7 +291,7 @@ const getStats = async (req, res) => {
       WHERE ${activeFilter}
       GROUP BY s.section_id`, params);
 
-    return res.json({ success: true, stats: { total, promoted, retained, disconnected, suspended, excluded, deleted, male, female, bySection } });
+    return res.json({ success: true, stats: { total, promoted, retained, disconnected, suspended, excluded, deleted, male, female, bySection, merged, transfers } });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -210,15 +322,25 @@ const getStudents = async (req, res) => {
       where.push('(s.is_deleted IS NULL OR s.is_deleted = 0)');
 
       if (activeMode === 'disconnected') {
-        where.push("(s.status IN ('disconnected', 'منقطع') OR s.enrollment_status = 'منقطع')");
+        where.push("(s.status IN ('disconnected', 'منقطع') OR s.enrollment_status = 'منقطع' OR s.registration_status_id = 5)");
       } else if (activeMode === 'suspended') {
-        where.push("(s.status IN ('suspended', 'موقوف قيده') OR s.enrollment_status = 'موقوف قيده')");
+        where.push("(s.status IN ('suspended', 'موقوف قيده') OR s.enrollment_status = 'موقوف قيده' OR s.registration_status_id = 4)");
       } else if (activeMode === 'excluded') {
-        where.push("(s.status IN ('excluded', 'مستبعد') OR s.enrollment_status = 'مستبعد')");
-      } else if (activeMode === 'active' || activeMode === 'normal' || activeMode === 'promoted' || activeMode === 'retained') {
-        where.push("(s.status IN ('promoted', 'retained', 'منقول', 'باق', 'منقولين', 'باقون', 'active', 'نشط') OR s.status IS NULL OR s.status = '' OR s.enrollment_status IN ('منقول', 'باق', 'منقولين', 'باقون') OR s.enrollment_status IS NULL OR s.enrollment_status = '') AND (s.status NOT IN ('excluded', 'disconnected', 'suspended', 'مستبعد', 'منقطع', 'موقوف قيده') AND (s.enrollment_status NOT IN ('مستبعد', 'منقطع', 'موقوف قيده') OR s.enrollment_status IS NULL))");
+        where.push("(s.status IN ('excluded', 'مستبعد') OR s.enrollment_status = 'مستبعد' OR s.registration_status_id = 6)");
+      } else if (activeMode === 'new' || activeMode === 'مستجد') {
+        where.push("(s.status IN ('new', 'مستجد') OR s.enrollment_status = 'مستجد' OR s.registration_status_id = 1)");
+      } else if (activeMode === 'promoted' || activeMode === 'منقول') {
+        where.push("(s.status IN ('promoted', 'منقول') OR s.enrollment_status = 'منقول' OR s.registration_status_id = 2)");
+      } else if (activeMode === 'retained' || activeMode === 'باق') {
+        where.push("(s.status IN ('retained', 'باق') OR s.enrollment_status LIKE '%باق%' OR s.registration_status_id = 3)");
+      } else if (activeMode === 'merged' || activeMode === 'دمج') {
+        where.push("(s.is_merged = 1 OR s.is_merged = '1')");
+      } else if (activeMode === 'active' || activeMode === 'normal') {
+        where.push("(s.status IN ('new', 'promoted', 'retained', 'مستجد', 'منقول', 'باق', 'active', 'نشط') OR s.status IS NULL OR s.status = '' OR s.enrollment_status IN ('مستجد', 'منقول', 'باق') OR s.enrollment_status IS NULL OR s.enrollment_status = '') AND (s.status NOT IN ('excluded', 'disconnected', 'suspended', 'مستبعد', 'منقطع', 'موقوف قيده') AND (s.enrollment_status NOT IN ('مستبعد', 'منقطع', 'موقوف قيده') OR s.enrollment_status IS NULL))");
+      } else if (activeMode === 'all') {
+        // All non-deleted students
       } else {
-        // Main registry by default: promoted + retained only
+        // Main registry by default: all active students (new, promoted, retained)
         where.push("(s.status NOT IN ('excluded', 'disconnected', 'suspended', 'مستبعد', 'منقطع', 'موقوف قيده') AND (s.enrollment_status NOT IN ('مستبعد', 'منقطع', 'موقوف قيده') OR s.enrollment_status IS NULL))");
       }
     }
@@ -271,17 +393,18 @@ const getStudents = async (req, res) => {
     const offset = (parseInt(page) - 1) * queryLimit;
 
     const students = _all(sqliteDb, `
-      SELECT s.id, s.student_code, s.full_name_ar, s.gender, s.status,
-             s.birth_date, s.guardian_phone, s.enrollment_date,
-             s.secondary_track, s.second_language,
-             s.national_id, s.religion, s.guardian_name, s.guardian_job, s.address,
-             s.is_merged, s.merge_type, s.merge_decision_number, s.merge_decision_date, s.merge_notes,
-             n.name AS nationality_name,
-             sec.name  AS section_name,
-             st.stage_name,
-             g.grade_name_ar,
-             ay.year_label AS academic_year,
+      SELECT s.id, s.student_code, s.full_name_ar, s.gender, s.status, s.enrollment_status,
+             s.birth_date, s.birth_place, s.guardian_phone, s.guardian_phone_2, s.enrollment_date,
+             s.secondary_track, s.second_language, s.language_id_1, s.language_id_2,
+             s.national_id, s.religion, s.guardian_name, s.guardian_job, s.guardian_relation, s.guardian_national_id, s.address,
+             s.is_merged, s.merge_type, s.disability_id, s.merge_decision_number, s.merge_decision_date, s.merge_notes,
+             s.nationality_id, s.registration_status_id, n.name AS nationality_name,
+             s.section_id, sec.name AS section_name, sec.type AS section_type,
+             s.stage_id, st.stage_name,
+             s.grade_id, g.grade_name_ar, g.grade_number,
+             s.academic_year_id, ay.year_label AS academic_year,
              c.class_name AS classroom_name,
+             c.class_number,
              c.id AS classroom_id,
              s.deletion_reason
       FROM students s
@@ -291,11 +414,23 @@ const getStudents = async (req, res) => {
       LEFT JOIN academic_years ay ON ay.id  = s.academic_year_id
       LEFT JOIN nationalities  n  ON n.id   = s.nationality_id
       LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
-      LEFT JOIN classes c ON c.id = ce.class_id
+      LEFT JOIN classes c ON c.id = COALESCE(ce.class_id, s.class_id)
       WHERE ${whereStr}
       ORDER BY ${orderClause}
       LIMIT ? OFFSET ?
     `, [...params, queryLimit, offset]);
+
+    for (const s of students) {
+      if (s.classroom_name || s.class_number) {
+        s.classroom_name = formatClassroomLabel({
+          classNumber: s.class_number || s.classroom_name,
+          className: s.classroom_name,
+          gradeNumber: s.grade_number || 1,
+          stageName: s.stage_name || '',
+          sectionType: s.section_type || 'general'
+        });
+      }
+    }
 
     return res.json({ success: true, students, total, page: parseInt(page), limit: queryLimit });
   } catch (err) {
@@ -312,12 +447,13 @@ const getStudent = async (req, res) => {
       SELECT s.*,
              sec.name AS section_name, sec.type AS section_type,
              st.stage_name,
-             g.grade_name_ar, g.secondary_system,
+             g.grade_name_ar, g.grade_number, g.secondary_system,
              ay.year_label AS academic_year,
              n.name  AS nationality_name,
              mn.name AS mother_nationality_name,
              mg.grade_name_ar AS merged_grade_name,
              c.class_name AS classroom_name,
+             c.class_number,
              c.id AS classroom_id
       FROM students s
       LEFT JOIN sections      sec ON sec.id  = s.section_id
@@ -332,6 +468,16 @@ const getStudent = async (req, res) => {
       WHERE s.id = ?`, [req.params.id]);
 
     if (!student) return res.status(404).json({ success: false, error: 'الطالب غير موجود.' });
+
+    if (student.classroom_name || student.class_number) {
+      student.classroom_name = formatClassroomLabel({
+        classNumber: student.class_number || student.classroom_name,
+        className: student.classroom_name,
+        gradeNumber: student.grade_number || 1,
+        stageName: student.stage_name || '',
+        sectionType: student.section_type || 'general'
+      });
+    }
 
     const specialCases = _all(sqliteDb, `
       SELECT ssc.*, sct.name_ar AS case_name, sct.code AS case_code
@@ -374,23 +520,94 @@ const getDuplicateStudents = async (req, res) => {
   }
 };
 
-// Helper status mapper
+// Helper status mapper — مطابق لمعايير وزارة التربية والتعليم الرسمية الـ 6
 const mapStudentStatus = (rawStatus) => {
-  const s = (rawStatus || 'promoted').trim();
-  const MAP = {
-    promoted:       { status: 'promoted', enrollment: 'منقول', is_excluded: 0 },
-    retained:       { status: 'retained', enrollment: 'باق', is_excluded: 0 },
-    disconnected:   { status: 'disconnected', enrollment: 'منقطع', is_excluded: 0 },
-    suspended:      { status: 'suspended', enrollment: 'موقوف قيده', is_excluded: 0 },
-    excluded:       { status: 'excluded', enrollment: 'مستبعد', is_excluded: 1 },
-    'منقول':        { status: 'promoted', enrollment: 'منقول', is_excluded: 0 },
-    'باق':          { status: 'retained', enrollment: 'باق', is_excluded: 0 },
-    'باقٍ للإعادة': { status: 'retained', enrollment: 'باق', is_excluded: 0 },
-    'منقطع':        { status: 'disconnected', enrollment: 'منقطع', is_excluded: 0 },
-    'موقوف قيده':   { status: 'suspended', enrollment: 'موقوف قيده', is_excluded: 0 },
-    'مستبعد':       { status: 'excluded', enrollment: 'مستبعد', is_excluded: 1 },
-  };
-  return MAP[s] || { status: 'promoted', enrollment: 'منقول', is_excluded: 0 };
+  if (!rawStatus) return { status: 'promoted', enrollment: 'منقول', registration_status_id: 2, is_excluded: 0 };
+  const s = String(rawStatus).trim();
+  const clean = s
+    .toLowerCase()
+    .replace(/[\u064B-\u0652]/g, '') // إزالة التشكيل
+    .replace(/\u0640/g, '')           // إزالة التطويل
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/[ىي]/g, 'ي')
+    .replace(/ة/g, 'ه');
+
+  // 1. باق (راسب، باق للإعادة، دور ثان، راسب سنة أولى...) -> 3
+  if (
+    clean.includes('باق') ||
+    clean.includes('اعاده') ||
+    clean.includes('راسب') ||
+    clean.includes('دور ثان') ||
+    clean.includes('دور 2') ||
+    clean.includes('يكمل') ||
+    clean === 'retained' ||
+    clean === '3'
+  ) {
+    return { status: 'retained', enrollment: 'باق', registration_status_id: 3, is_excluded: 0 };
+  }
+
+  // 2. مستجد (مستجد، جديد، قيد أول مرة...) -> 1
+  if (
+    clean.includes('مستجد') ||
+    clean.includes('جديد') ||
+    clean === 'new' ||
+    clean === 'fresh' ||
+    clean === '1'
+  ) {
+    return { status: 'new', enrollment: 'مستجد', registration_status_id: 1, is_excluded: 0 };
+  }
+
+  // 3. منقطع (انقطاع، تارك...) -> 4
+  if (
+    clean.includes('منقطع') ||
+    clean.includes('انقطاع') ||
+    clean.includes('تارك') ||
+    clean === 'disconnected' ||
+    clean === 'absent' ||
+    clean === '4'
+  ) {
+    return { status: 'disconnected', enrollment: 'منقطع', registration_status_id: 4, is_excluded: 0 };
+  }
+
+  // 4. موقوف قيده / مفصول -> 5
+  if (
+    clean.includes('موقوف') ||
+    clean.includes('مفصول') ||
+    clean.includes('فصل') ||
+    clean === 'suspended' ||
+    clean === 'dismissed' ||
+    clean === '5'
+  ) {
+    return { status: 'suspended', enrollment: 'موقوف قيده', registration_status_id: 5, is_excluded: 0 };
+  }
+
+  // 5. مستبعد / معفى -> 6
+  if (
+    clean.includes('مستبعد') ||
+    clean.includes('استبعاد') ||
+    clean.includes('معف') ||
+    clean === 'excluded' ||
+    clean === 'exempt' ||
+    clean === '6'
+  ) {
+    return { status: 'excluded', enrollment: 'مستبعد', registration_status_id: 6, is_excluded: 1 };
+  }
+
+  // 6. منقول (ناجح ومنقول / محول / الافتراضي) -> 2
+  if (
+    clean.includes('منقول') ||
+    clean.includes('ناجح') ||
+    clean.includes('محول') ||
+    clean.includes('تحويل') ||
+    clean.includes('مرق') ||
+    clean === 'promoted' ||
+    clean === 'transferred' ||
+    clean === '2'
+  ) {
+    return { status: 'promoted', enrollment: 'منقول', registration_status_id: 2, is_excluded: 0 };
+  }
+
+  return { status: 'promoted', enrollment: 'منقول', registration_status_id: 2, is_excluded: 0 };
 };
 
 // ─── POST /api/students ────────────────────────────────────────────────────
@@ -399,20 +616,51 @@ const createStudent = async (req, res) => {
 
   const {
     sectionId, stageId, gradeId, academicYearId,
-    fullNameAr, fullNameEn, birthDate, birthPlace,
+    fullNameAr: rawFullNameAr, fullNameEn, birthDate, birthPlace,
     nationalityId, nationalId, gender, religion,
     guardianName, guardianRelation, guardianNationalId, guardianPhone, guardianPhone2, guardianJob,
-    motherName, motherNationalityId, motherNationalId,
+    motherName: rawMotherName, motherNationalityId, motherNationalId,
     address, studentPhone, secondLanguage, secondaryTrack, secondaryElective,
     isMerged, mergedGradeId, mergeType, mergeDecisionNumber, mergeDecisionDate, mergeNotes, enrollmentDate,
-    status, specialCases, emisStudentCode
+    status, specialCases, emisStudentCode,
+    isReturnedFromAbroad, countryFrom, is_returned_from_abroad, country_from,
+    parentStaffId, siblingStudentIds, twinStudentId, isTalented, talentDescription,
+    transferredFromSchool, transferredFromDirectorate, transferredFromGovernorate,
+    // 4-part name fields & Ministry EMIS fields
+    firstName, fatherName, gFatherName, familyName,
+    motherFirstName, motherSecondName, motherThirdName, motherForthName,
+    birthGovernorateId, fatherNationalityId, studyTypeId, registrationStatusId,
+    divisionId, specializationId, languageId1, languageId2, disabilityId
   } = req.body;
+
+  // Build composite names with fallback
+  let fullNameAr = (rawFullNameAr || '').trim();
+  const fName = (firstName || '').trim();
+  const faName = (fatherName || '').trim();
+  const gfName = (gFatherName || '').trim();
+  const famName = (familyName || '').trim();
+
+  if (!fullNameAr && (fName || faName)) {
+    fullNameAr = [fName, faName, gfName, famName].filter(Boolean).join(' ');
+  }
+
+  let motherName = (rawMotherName || '').trim();
+  const m1 = (motherFirstName || '').trim();
+  const m2 = (motherSecondName || '').trim();
+  const m3 = (motherThirdName || '').trim();
+  const m4 = (motherForthName || '').trim();
+
+  if (!motherName && (m1 || m2)) {
+    motherName = [m1, m2, m3, m4].filter(Boolean).join(' ');
+  }
 
   if (!fullNameAr || !sectionId || !stageId || !gradeId || !academicYearId || !gender) {
     return res.status(400).json({ success: false, error: 'يرجى استكمال الحقول الإلزامية: الاسم، القسم، المرحلة، الصف، العام الدراسي، الجنس.' });
   }
 
   const mapped = mapStudentStatus(status);
+  const returnedAbroadVal = (isReturnedFromAbroad || is_returned_from_abroad) ? 1 : 0;
+  const countryFromVal = countryFrom || country_from || null;
 
   try {
     const sqliteDb = db.getSQLiteDb();
@@ -430,8 +678,15 @@ const createStudent = async (req, res) => {
           mother_name, mother_nationality_id, mother_national_id,
           address, student_phone, second_language, secondary_track, secondary_elective,
           is_merged, merged_grade_id, merge_type, merge_decision_number, merge_decision_date, merge_notes, enrollment_date,
-          status, enrollment_status, is_excluded, emis_student_code
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          status, enrollment_status, is_excluded, emis_student_code,
+          is_returned_from_abroad, country_from,
+          parent_staff_id, sibling_student_ids, twin_student_id, is_talented, talent_description,
+          transferred_from_school, transferred_from_directorate, transferred_from_governorate,
+          first_name, father_name, grandfather_name, family_name,
+          mother_first_name, mother_second_name, mother_third_name, mother_fourth_name,
+          birth_governorate_id, father_nationality_id, study_type_id, registration_status_id,
+          division_id, specialization_id, language_id_1, language_id_2, disability_id
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [
         sectionId, stageId, gradeId, academicYearId, studentCode,
         fullNameAr, fullNameEn||null, birthDate||null, birthPlace||null,
@@ -443,13 +698,27 @@ const createStudent = async (req, res) => {
         isMerged ? 1 : 0, mergedGradeId||null, mergeType||null, mergeDecisionNumber||null, mergeDecisionDate||null, mergeNotes||null,
         enrollmentDate || new Date().toISOString().split('T')[0],
         mapped.status, mapped.enrollment, mapped.is_excluded,
-        emisStudentCode || null
+        emisStudentCode || null,
+        returnedAbroadVal, countryFromVal,
+        parentStaffId||null, siblingStudentIds||null, twinStudentId||null, isTalented ? 1 : 0, talentDescription||null,
+        transferredFromSchool||null, transferredFromDirectorate||null, transferredFromGovernorate||null,
+        fName||null, faName||null, gfName||null, famName||null,
+        m1||null, m2||null, m3||null, m4||null,
+        birthGovernorateId||null, fatherNationalityId||null, studyTypeId||null, registrationStatusId||null,
+        divisionId||null, specializationId||null, languageId1||null, languageId2||null, disabilityId||null
       ]);
       studentId = _lastId(sqliteDb);
       for (const caseTypeId of (specialCases || [])) {
         sqliteDb.run('INSERT OR IGNORE INTO student_special_cases (student_id, case_type_id) VALUES (?,?)', [studentId, caseTypeId]);
       }
+      if (transferredFromSchool) {
+        const transCase = _get(sqliteDb, `SELECT id FROM special_case_types WHERE code = 'transferred_in' OR name_ar LIKE '%تحويل%' OR name_ar LIKE '%محول%'`);
+        if (transCase && transCase.id) {
+          sqliteDb.run('INSERT OR IGNORE INTO student_special_cases (student_id, case_type_id) VALUES (?,?)', [studentId, transCase.id]);
+        }
+      }
     });
+    db.flushSQLite();
 
     console.log(`[Students] Created "${fullNameAr}" → ${studentCode}`);
     return res.status(201).json({ success: true, message: `تم تسجيل الطالب بنجاح. كود الطالب: ${studentCode}`, studentId, studentCode });
@@ -463,16 +732,45 @@ const updateStudent = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   const { id } = req.params;
   const {
-    fullNameAr, fullNameEn, birthDate, birthPlace,
+    fullNameAr: rawFullNameAr, fullNameEn, birthDate, birthPlace,
     nationalityId, nationalId, gender, religion,
     guardianName, guardianRelation, guardianNationalId, guardianPhone, guardianPhone2, guardianJob,
-    motherName, motherNationalityId, motherNationalId,
+    motherName: rawMotherName, motherNationalityId, motherNationalId,
     address, studentPhone, secondLanguage, secondaryTrack, secondaryElective,
     isMerged, mergedGradeId, mergeType, mergeDecisionNumber, mergeDecisionDate, mergeNotes, status, specialCases,
-    emisStudentCode
+    emisStudentCode,
+    isReturnedFromAbroad, countryFrom, is_returned_from_abroad, country_from,
+    parentStaffId, siblingStudentIds, twinStudentId, isTalented, talentDescription,
+    transferredFromSchool, transferredFromDirectorate, transferredFromGovernorate,
+    firstName, fatherName, gFatherName, familyName,
+    motherFirstName, motherSecondName, motherThirdName, motherForthName,
+    birthGovernorateId, fatherNationalityId, studyTypeId, registrationStatusId,
+    divisionId, specializationId, languageId1, languageId2, disabilityId
   } = req.body;
 
+  let fullNameAr = (rawFullNameAr || '').trim();
+  const fName = (firstName || '').trim();
+  const faName = (fatherName || '').trim();
+  const gfName = (gFatherName || '').trim();
+  const famName = (familyName || '').trim();
+
+  if (!fullNameAr && (fName || faName)) {
+    fullNameAr = [fName, faName, gfName, famName].filter(Boolean).join(' ');
+  }
+
+  let motherName = (rawMotherName || '').trim();
+  const m1 = (motherFirstName || '').trim();
+  const m2 = (motherSecondName || '').trim();
+  const m3 = (motherThirdName || '').trim();
+  const m4 = (motherForthName || '').trim();
+
+  if (!motherName && (m1 || m2)) {
+    motherName = [m1, m2, m3, m4].filter(Boolean).join(' ');
+  }
+
   const mapped = mapStudentStatus(status);
+  const returnedAbroadVal = (isReturnedFromAbroad || is_returned_from_abroad) ? 1 : 0;
+  const countryFromVal = countryFrom || country_from || null;
 
   try {
     const sqliteDb = db.getSQLiteDb();
@@ -487,7 +785,14 @@ const updateStudent = async (req, res) => {
           address=?, student_phone=?, second_language=?, secondary_track=?, secondary_elective=?,
           is_merged=?, merged_grade_id=?, merge_type=?, merge_decision_number=?, merge_decision_date=?, merge_notes=?,
           status=?, enrollment_status=?, is_excluded=?,
-          emis_student_code=?
+          emis_student_code=?,
+          is_returned_from_abroad=?, country_from=?,
+          parent_staff_id=?, sibling_student_ids=?, twin_student_id=?, is_talented=?, talent_description=?,
+          transferred_from_school=?, transferred_from_directorate=?, transferred_from_governorate=?,
+          first_name=?, father_name=?, grandfather_name=?, family_name=?,
+          mother_first_name=?, mother_second_name=?, mother_third_name=?, mother_fourth_name=?,
+          birth_governorate_id=?, father_nationality_id=?, study_type_id=?, registration_status_id=?,
+          division_id=?, specialization_id=?, language_id_1=?, language_id_2=?, disability_id=?
         WHERE id=?
       `, [
         fullNameAr, fullNameEn||null, birthDate||null, birthPlace||null,
@@ -499,6 +804,13 @@ const updateStudent = async (req, res) => {
         isMerged ? 1 : 0, mergedGradeId||null, mergeType||null, mergeDecisionNumber||null, mergeDecisionDate||null, mergeNotes||null,
         mapped.status, mapped.enrollment, mapped.is_excluded,
         emisStudentCode||null,
+        returnedAbroadVal, countryFromVal,
+        parentStaffId||null, siblingStudentIds||null, twinStudentId||null, isTalented ? 1 : 0, talentDescription||null,
+        transferredFromSchool||null, transferredFromDirectorate||null, transferredFromGovernorate||null,
+        fName||null, faName||null, gfName||null, famName||null,
+        m1||null, m2||null, m3||null, m4||null,
+        birthGovernorateId||null, fatherNationalityId||null, studyTypeId||null, registrationStatusId||null,
+        divisionId||null, specializationId||null, languageId1||null, languageId2||null, disabilityId||null,
         id
       ]);
       if (specialCases !== undefined) {
@@ -509,71 +821,8 @@ const updateStudent = async (req, res) => {
         }
       }
     });
+    db.flushSQLite();
     return res.json({ success: true, message: 'تم تحديث بيانات الطالب بنجاح.' });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-// ─── POST /api/students/:id/transfers ────────────────────────
-const createTransfer = async (req, res) => {
-  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
-  const { id } = req.params;
-  const {
-    transferType, fromSchool, fromDirectorate,
-    toSchool, toDirectorate, reason, transferDate,
-    academicYearId, notes
-  } = req.body;
-
-  if (!transferType || !academicYearId || !reason) {
-    return res.status(400).json({ success: false, error: 'نوع التحويل والعام الدراسي والسبب مطلوبة.' });
-  }
-
-  try {
-    const sqliteDb = db.getSQLiteDb();
-    const student  = _get(sqliteDb, 'SELECT id, status FROM students WHERE id = ?', [id]);
-    if (!student) return res.status(404).json({ success: false, error: 'الطالب غير موجود.' });
-
-    db.runTransaction(() => {
-      sqliteDb.run(`
-        INSERT INTO student_transfers
-          (student_id, academic_year_id, transfer_type,
-           from_school, from_directorate, to_school, to_directorate,
-           reason, transfer_date, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-      `, [
-        id, academicYearId, transferType,
-        fromSchool||null, fromDirectorate||null,
-        toSchool||null, toDirectorate||null,
-        reason, transferDate || new Date().toISOString().split('T')[0], notes||null
-      ]);
-
-      // If outgoing transfer: mark student as suspended (no longer active)
-      if (transferType === 'out') {
-        sqliteDb.run("UPDATE students SET status = 'suspended' WHERE id = ?", [id]);
-      }
-    });
-
-    return res.status(201).json({ success: true, message: 'تم تسجيل التحويل بنجاح.' });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-};
-
-// ─── PUT /api/students/:id/transfers/:tid/complete ────────────
-const completeTransfer = async (req, res) => {
-  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
-  const { id, tid } = req.params;
-  try {
-    const sqliteDb = db.getSQLiteDb();
-    db.runTransaction(() => {
-      sqliteDb.run(`
-        UPDATE student_transfers
-        SET is_completed = 1, completed_date = date('now')
-        WHERE id = ? AND student_id = ?
-      `, [tid, id]);
-    });
-    return res.json({ success: true, message: 'تم إتمام التحويل.' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -625,6 +874,12 @@ const calculateAgeOnOct1st = (birthDateStr, yearLabel) => {
 
 const exportExcelTemplate = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  if (req.query.type === 'general-census' || req.query.report === 'general-census') {
+    return exportGeneralCensusExcel(req, res);
+  }
+  if (req.query.type === 'enrollment-status-census' || req.query.report === 'enrollment-status-census') {
+    return exportEnrollmentStatusCensusExcel(req, res);
+  }
   try {
     const sqliteDb = db.getSQLiteDb();
     const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, isMerged, isOrphan, isForeign, isTwin, genderOrder, templateName } = req.query;
@@ -690,7 +945,7 @@ const exportExcelTemplate = async (req, res) => {
       ORDER BY ${orderClause}
     `, params);
 
-    const school = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const school = getSchoolMasterInfo(sqliteDb);
     const grade = gradeId ? _get(sqliteDb, 'SELECT grade_name_ar FROM grades_lookup WHERE id = ?', [gradeId]) : null;
     const year = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
 
@@ -762,7 +1017,7 @@ const exportFullClassListExcel = async (req, res) => {
       ORDER BY ${genderSortClause}
     `, params);
 
-    const school = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const school = getSchoolMasterInfo(sqliteDb);
     const classroom = classId ? _get(sqliteDb, 'SELECT class_name FROM classes WHERE id = ?', [classId]) : null;
     const year = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
 
@@ -797,17 +1052,18 @@ const exportClassListExcel = async (req, res) => {
     // Parse query params
     const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, mode, includePdf, format, preview, religion } = req.query;
 
-    const school = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const school = getSchoolMasterInfo(sqliteDb);
     const yearObj = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
     const yearLabel = yearObj?.year_label || '';
 
     // If batch mode is requested or classId === 'all', query all classes
     let targetClasses = [];
     const _getClsQuery = `
-      SELECT c.id, c.class_name, g.grade_number, s.stage_name
+      SELECT c.id, c.class_name, c.class_number, g.grade_number, s.stage_name, sec.type AS section_type
       FROM classes c
       LEFT JOIN grades_lookup g ON g.id = c.grade_id
       LEFT JOIN stages_lookup s ON s.id = g.stage_id
+      LEFT JOIN sections sec ON sec.id = s.section_id
     `;
     if (classId && classId !== 'all') {
       const cls = _get(sqliteDb, `${_getClsQuery} WHERE c.id = ?`, [classId]);
@@ -817,7 +1073,7 @@ const exportClassListExcel = async (req, res) => {
       let clsQuery = `${_getClsQuery} WHERE 1=1`;
       const clsParams = [];
       if (gradeId) { clsQuery += ' AND c.grade_id = ?'; clsParams.push(gradeId); }
-      clsQuery += ' ORDER BY g.grade_number ASC, c.class_name ASC';
+      clsQuery += ' ORDER BY g.grade_number ASC, COALESCE(c.class_number, CAST(c.class_name AS INTEGER), c.id) ASC';
       targetClasses = _all(sqliteDb, clsQuery, clsParams);
       if (targetClasses.length === 0) {
         targetClasses.push({ id: null, class_name: 'جميع_الطلاب' });
@@ -1013,7 +1269,7 @@ const downloadImportTemplate = async (req, res) => {
       religion: 'مسلم',
       section_name: 'القسم العربي',
       stage_name: 'ابتدائي',
-      grade_name: 'الصف الأول الابتدائي',
+      grade_name: 'الصف الأول',
       academic_year: '2024-2025',
       guardian_name: 'أحمد علي محمد',
       guardian_relation: 'أب',
@@ -1143,7 +1399,21 @@ const importPreview = async (req, res) => {
     // AUTO_MAP: ordered from MOST SPECIFIC to LEAST SPECIFIC (longer patterns first)
     // This prevents "الرقم القومي" from matching "الرقم القومي لولي الأمر"
     const AUTO_MAP = [
-      // Most specific patterns first
+      // Tool & Ministry exact headers for 100% automatic zero-click matching
+      { pattern: 'الرقم القومى*',                field: 'national_id'           },
+      { pattern: 'الرقم القومى',                 field: 'national_id'           },
+      { pattern: 'الرقم القومي',                 field: 'national_id'           },
+      { pattern: 'كود الطالب*',                 field: 'emis_student_code'     },
+      { pattern: 'كود الطالب',                  field: 'emis_student_code'     },
+      { pattern: 'كود التلميذ*',                 field: 'emis_student_code'     },
+      { pattern: 'كود التلميذ',                  field: 'emis_student_code'     },
+      { pattern: 'الكود*',                      field: 'emis_student_code'     },
+      { pattern: 'الكود',                       field: 'emis_student_code'     },
+      { pattern: 'كود',                         field: 'emis_student_code'     },
+      { pattern: 'الكود الوزاري',                field: 'emis_student_code'     },
+      { pattern: 'الكود الوزارى',                field: 'emis_student_code'     },
+      { pattern: 'رقم كود الطالب',               field: 'emis_student_code'     },
+      { pattern: 'كود_الطالب',                  field: 'emis_student_code'     },
       { pattern: 'كود الطالب على الحكومة الإلكترونية', field: 'emis_student_code' },
       { pattern: 'كود الطالب على الحكومة الالكترونية', field: 'emis_student_code' },
       { pattern: 'كود الحكومة الإلكترونية',    field: 'emis_student_code'     },
@@ -1153,31 +1423,56 @@ const importPreview = async (req, res) => {
       { pattern: 'كود إميس',                    field: 'emis_student_code'     },
       { pattern: 'الرقم القومي لولي الأمر',    field: 'guardian_national_id' },
       { pattern: 'رقم هاتف ولي الأمر',          field: 'guardian_phone'        },
+      { pattern: 'الاسم بالكامل',               field: 'full_name_ar'          },
       { pattern: 'اسم الطالب بالعربي',           field: 'full_name_ar'          },
+      { pattern: 'الاسم الأول*',                field: 'first_name'            },
+      { pattern: 'الاسم الأول',                 field: 'first_name'            },
+      { pattern: 'اسم الوالد*',                 field: 'father_name'           },
+      { pattern: 'اسم الوالد',                  field: 'father_name'           },
+      { pattern: 'اسم الجد*',                  field: 'gfather_name'          },
+      { pattern: 'اسم الجد',                   field: 'gfather_name'          },
+      { pattern: 'اللقب / العائله*',            field: 'family_name'           },
+      { pattern: 'اللقب / العائله',             field: 'family_name'           },
+      { pattern: 'اللقب',                       field: 'family_name'           },
+      { pattern: 'اسم الام الأول*',             field: 'mother_first_name'     },
+      { pattern: 'اسم الام الأول',              field: 'mother_first_name'     },
+      { pattern: 'اسم الوالد للام*',            field: 'mother_second_name'    },
+      { pattern: 'اسم الوالد للام',             field: 'mother_second_name'    },
+      { pattern: 'اسم الجد للام*',             field: 'mother_third_name'     },
+      { pattern: 'اسم الجد للام',              field: 'mother_third_name'     },
+      { pattern: 'اللقب / العائله للام',        field: 'mother_forth_name'     },
       { pattern: 'اسم الطالب بالانجليزية',       field: 'full_name_en'          },
       { pattern: 'اسم الطالب بالإنجليزية',       field: 'full_name_en'          },
       { pattern: 'اللغة الأجنبية الثانية',       field: 'second_language'       },
       { pattern: 'صفة ولي الأمر',                field: 'guardian_relation'     },
       { pattern: 'اسم ولي الأمر',               field: 'guardian_name'         },
       { pattern: 'رقم هاتف الطالب',             field: 'student_phone'         },
+      { pattern: 'yyyy-mm-dd',                  field: 'birth_date'            },
+      { pattern: 'تاريخ الميلاد*',               field: 'birth_date'            },
       { pattern: 'تاريخ الميلاد',               field: 'birth_date'            },
+      { pattern: 'محل الميلاد*',                 field: 'birth_place'           },
       { pattern: 'محل الميلاد',                  field: 'birth_place'           },
       { pattern: 'تاريخ القيد',                  field: 'enrollment_date'       },
       { pattern: 'العام الدراسي',               field: 'academic_year'         },
-      { pattern: 'اسم الفصل',                   field: 'classroom_name'        },
+      { pattern: 'الصف*',                       field: 'grade_name'            },
+      { pattern: 'الصف',                        field: 'grade_name'            },
+      { pattern: 'الفصل*',                      field: 'classroom_name'        },
       { pattern: 'الفصل',                       field: 'classroom_name'        },
+      { pattern: 'نظام التعليم*',               field: 'section_name'          },
+      { pattern: 'نظام التعليم',                field: 'section_name'          },
       { pattern: 'اسم القسم',                   field: 'section_name'          },
-
       { pattern: 'اسم المرحلة',                 field: 'stage_name'            },
       { pattern: 'اسم الصف',                    field: 'grade_name'            },
-      { pattern: 'الرقم القومي',                field: 'national_id'           },
+      { pattern: 'الجنسية*',                     field: 'nationality'           },
       { pattern: 'الجنسية',                      field: 'nationality'           },
+      { pattern: 'الديانة*',                     field: 'religion'              },
       { pattern: 'الديانة',                      field: 'religion'              },
       { pattern: 'الوظيفة',                      field: 'guardian_job'          },
       { pattern: 'اسم الأم',                    field: 'mother_name'           },
       { pattern: 'العنوان',                       field: 'address'               },
+      { pattern: 'النوع*',                       field: 'gender'                },
+      { pattern: 'النوع',                        field: 'gender'                },
       { pattern: 'الجنس',                        field: 'gender'                },
-      // Update-mode specific
       { pattern: 'كود الطالب',                  field: 'student_code'          },
       { pattern: 'حالة القيد',                  field: 'status'                },
       { pattern: 'الحالة',                       field: 'status'                },
@@ -1263,7 +1558,8 @@ const importPreview = async (req, res) => {
       const academicYear  = getVal(row, 'academic_year');
       const nationalId    = getVal(row, 'national_id');
       const nationality   = getVal(row, 'nationality');
-      const studentCode   = getVal(row, 'student_code');
+      const emisStudentCode = getVal(row, 'emis_student_code') || getVal(row, 'student_code') || '';
+      const studentCode   = emisStudentCode;
       const statusRaw     = getVal(row, 'status');
       const classroomName = getVal(row, 'classroom_name');
 
@@ -1360,40 +1656,131 @@ const importPreview = async (req, res) => {
       if (!fullNameAr) errors.push('اسم الطالب بالعربي مطلوب');
       if (!gender) errors.push('الجنس مطلوب');
       else if (!['ذكر', 'أنثى'].includes(gender)) errors.push(`الجنس غير صحيح: "${gender}" (يجب ذكر أو أنثى)`);
-      if (!sectionName) errors.push('اسم القسم مطلوب');
-      if (!stageName) errors.push('اسم المرحلة مطلوب');
-      if (!gradeName) errors.push('اسم الصف مطلوب');
-      if (!academicYear) errors.push('العام الدراسي مطلوب');
+
+      // Default missing Academic Year to active DB academic year
+      const defaultActiveYear = _get(sqliteDb, 'SELECT id, year_label FROM academic_years WHERE is_current = 1 LIMIT 1') || years[0];
+      const resolvedAcademicYear = academicYear || defaultActiveYear?.year_label || '2025/2026';
 
       // Lookup resolution
       let sectionId = null, stageId = null, gradeId = null, academicYearId = null, nationalityId = null, classId = null;
 
+      // ── 1. Section Matching (عربي / لغات / دولي) ──
       if (sectionName) {
-        sectionId = secMap[sectionName];
-        if (!sectionId) errors.push(`القسم "${sectionName}" غير موجود في النظام`);
+        const cleanSec = sectionName.trim();
+        sectionId = secMap[cleanSec];
+        if (!sectionId) {
+          if (cleanSec.includes('دول')) sectionId = Object.entries(secMap).find(([k]) => k.includes('دول'))?.[1];
+          else if (cleanSec.includes('لغ') || cleanSec.includes('مكثف')) sectionId = secMap['لغات'];
+          else if (cleanSec.includes('عرب') || cleanSec.includes('حكوم') || cleanSec.includes('عام')) sectionId = secMap['عربي'] || secMap['عربي '];
+        }
       }
-      if (stageName && sectionId) {
-        stageId = stageMap[`${sectionId}||${stageName}`];
-        if (!stageId) errors.push(`المرحلة "${stageName}" غير موجودة ضمن هذا القسم`);
+
+      // ── 2. Stage Matching (مطابقة دقيقة لمنع الاختيار الخاطئ) ──
+      const searchStageStr = (stageName || gradeName || '').trim();
+      if (searchStageStr) {
+        let matchedStage = null;
+        if (sectionId) {
+          matchedStage = stages.find(s => s.section_id === sectionId && s.stage_name.trim() === searchStageStr);
+        }
+        if (!matchedStage) {
+          matchedStage = stages.find(s => {
+            if (sectionId && s.section_id !== sectionId) return false;
+            const dbName = s.stage_name.trim();
+            if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
+            if ((searchStageStr.includes('اعداد') || searchStageStr.includes('إعداد')) && !searchStageStr.includes('دول') && (dbName.includes('اعداد') || dbName.includes('إعداد')) && !dbName.includes('دول')) return true;
+            if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
+            if (searchStageStr.includes('ثانو') && dbName.includes('ثانو')) return true;
+            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل')) && (dbStage.includes('روض') || dbStage.includes('طفل'))) return true;
+            return false;
+          });
+        }
+        if (!matchedStage) {
+          matchedStage = stages.find(s => {
+            const dbName = s.stage_name.trim();
+            if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
+            if ((searchStageStr.includes('اعداد') || searchStageStr.includes('إعداد')) && !searchStageStr.includes('دول') && (dbName.includes('اعداد') || dbName.includes('إعداد')) && !dbName.includes('دول')) return true;
+            if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
+            if (searchStageStr.includes('ثانو') && dbName.includes('ثانو')) return true;
+            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل')) && (dbName.includes('روض') || dbName.includes('طفل'))) return true;
+            return false;
+          });
+        }
+        if (matchedStage) {
+          stageId = matchedStage.id;
+          sectionId = matchedStage.section_id;
+        }
       }
+
+      if (!sectionId) sectionId = Object.values(secMap)[0] || 1;
+      if (!stageId) {
+        const nationalStage = stages.find(s => !s.stage_name.includes('دول'));
+        stageId = nationalStage?.id || stages[0]?.id || null;
+      }
+
+      // ── 3. Grade Matching (مطابقة مسميات الصفوف كـ "الصف الأول" بصفوف نبراس الثابتة) ──
       if (gradeName && stageId) {
-        gradeId = gradeMap[`${stageId}||${gradeName}`];
-        if (!gradeId) errors.push(`الصف "${gradeName}" غير موجود ضمن هذه المرحلة`);
+        const cleanGrade = gradeName.trim();
+        gradeId = gradeMap[`${stageId}||${cleanGrade}`];
+        if (!gradeId) {
+          const getGradeNum = (str) => {
+            if (str.includes('أول') || str.includes('اول') || str.includes('1')) return 1;
+            if (str.includes('ثان') || str.includes('ثان') || str.includes('2')) return 2;
+            if (str.includes('ثالث') || str.includes('3')) return 3;
+            if (str.includes('رابع') || str.includes('4')) return 4;
+            if (str.includes('خامس') || str.includes('5')) return 5;
+            if (str.includes('سادس') || str.includes('6')) return 6;
+            return 0;
+          };
+          const targetNum = getGradeNum(cleanGrade);
+          const matchedGradeKey = Object.keys(gradeMap).find(key => {
+            if (!key.startsWith(`${stageId}||`)) return false;
+            const dbGrade = key.split('||')[1];
+            if (targetNum > 0 && getGradeNum(dbGrade) === targetNum) return true;
+            const normClean = cleanGrade.replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/\s+/g, '');
+            const normDb = dbGrade.replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/\s+/g, '');
+            return normDb.includes(normClean) || normClean.includes(normDb);
+          });
+          if (matchedGradeKey) gradeId = gradeMap[matchedGradeKey];
+        }
       }
-      if (academicYear) {
-        academicYearId = yearMap[academicYear];
-        if (!academicYearId) errors.push(`العام الدراسي "${academicYear}" غير موجود في النظام`);
-      }
+
+      if (!stageId) errors.push(`المرحلة "${stageName || 'غير المحددة'}" لم تطابق مسميات المنظومة`);
+      if (!gradeId) errors.push(`الصف "${gradeName || 'غير المحدد'}" لم يطابق مسميات المنظومة`);
+
+      academicYearId = yearMap[academicYear] || defaultActiveYear?.id || 1;
+
       if (nationality) {
         nationalityId = natMap[nationality];
-        // Not an error if nationality not found — just warning
       }
+
+      // ── Flexible Classroom Matching & Auto-Creation ──
       if (classroomName && gradeId && academicYearId) {
-        const cls = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND class_name = ?', [gradeId, academicYearId, classroomName.trim()]);
+        const cleanCls = classroomName.trim();
+        let cls = _get(sqliteDb, `
+          SELECT id FROM classes
+          WHERE grade_id = ? AND academic_year_id = ?
+            AND (class_name = ? OR class_name = ? OR class_name = ? OR class_name = ?)
+        `, [gradeId, academicYearId, cleanCls, `فصل ${cleanCls}`, `فصل (${cleanCls})`, `${cleanCls}/1`]);
+
+        if (!cls) {
+          const allCls = _all(sqliteDb, 'SELECT id, class_name FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
+          cls = allCls.find(c => {
+            const cn = c.class_name.trim();
+            return cn.includes(cleanCls) || cleanCls.includes(cn);
+          });
+        }
+
+        if (!cls) {
+          // Auto-create classroom in DB so student is assigned cleanly!
+          try {
+            sqliteDb.run('INSERT INTO classes (class_name, grade_id, academic_year_id) VALUES (?, ?, ?)', [cleanCls, gradeId, academicYearId]);
+            db.flushSQLite();
+            cls = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND class_name = ?', [gradeId, academicYearId, cleanCls]);
+          } catch (_) {}
+        }
+
         if (cls) {
           classId = cls.id;
-        } else {
-          warnings.push(`الفصل "${classroomName}" غير موجود في هذا الصف لنفس العام الدراسي وسيتم تركه فارغاً.`);
         }
       }
 
@@ -1412,6 +1799,7 @@ const importPreview = async (req, res) => {
           birthDate:           birthDateVal || null,
           birthPlace:          birthPlaceVal || null,
           nationalId,
+          emisStudentCode:     emisStudentCode || null,
           nationality,
           religion:            normalizeReligion(getVal(row, 'religion')),
           sectionName,
@@ -1525,23 +1913,41 @@ const importExecute = async (req, res) => {
         try {
           const studentCode = _generateCode(sqliteDb, parseInt(sectionId), parseInt(stageId));
 
+          const sParts = (fullNameAr || '').trim().split(/\s+/);
+          const fn  = row.firstName   || sParts[0] || null;
+          const fa  = row.fatherName  || sParts[1] || null;
+          const gf  = row.gFatherName || sParts[2] || null;
+          const fam = row.familyName  || sParts.slice(3).join(' ') || null;
+
+          const mParts = (motherName || '').trim().split(/\s+/);
+          const mFn  = row.motherFirstName  || mParts[0] || null;
+          const mSn  = row.motherSecondName || mParts[1] || null;
+          const mTn  = row.motherThirdName  || mParts[2] || null;
+          const mFn4 = row.motherForthName  || mParts.slice(3).join(' ') || null;
+
+          const finalGuardianName = guardianName || [fa, gf, fam].filter(Boolean).join(' ') || null;
+
           sqliteDb.run(`
             INSERT INTO students (
               section_id, stage_id, grade_id, academic_year_id, student_code,
-              full_name_ar, full_name_en, birth_date, birth_place,
+              full_name_ar, full_name_en, first_name, father_name, gfather_name, family_name,
+              birth_date, birth_place,
               nationality_id, national_id, gender, religion,
               guardian_name, guardian_relation, guardian_national_id,
               guardian_phone, guardian_job,
-              mother_name, address, student_phone, second_language,
+              mother_name, mother_first_name, mother_second_name, mother_third_name, mother_forth_name,
+              address, student_phone, second_language,
               enrollment_date, status, emis_student_code
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           `, [
             sectionId, stageId, gradeId, academicYearId, studentCode,
-            fullNameAr, fullNameEn||null, birthDate||null, birthPlace||null,
-            nationalityId||null, nationalId||null, gender, normalizeReligion(religion)||null,
-            guardianName||null, guardianRelation||'أب', guardianNationalId||null,
+            fullNameAr, fullNameEn||null, fn, fa, gf, fam,
+            birthDate||null, birthPlace||null,
+            nationalityId || 1, nationalId||null, gender || 'ذكر', normalizeReligion(religion) || 'مسلم',
+            finalGuardianName, guardianRelation||'أب', guardianNationalId||null,
             guardianPhone||null, guardianJob||null,
-            motherName||null, address||null, studentPhone||null, secondLanguage||null,
+            motherName||null, mFn, mSn, mTn, mFn4,
+            address||null, studentPhone||null, secondLanguage||null,
             enrollmentDate || new Date().toISOString().split('T')[0],
             'promoted',
             emisStudentCode||null
@@ -1725,66 +2131,66 @@ const _emisColumnMap = (row) => {
   const g = (keys) => {
     for (const k of keys) {
       const v = row[k];
-      if (v && String(v).trim()) return String(v).trim();
+      if (v !== undefined && v !== null && String(v).trim()) return String(v).trim();
     }
     return '';
   };
 
-  // بناء الاسم الكامل — قد يأتي مدموجاً أو موزعاً
-  let fullNameAr = g(['الاسم بالكامل']);
+  // 4-part student name
+  const firstName  = g(['firstName', 'الاسم الأول*', 'الاسم الأول', 'الاسم الاول*', 'الاسم الاول', 'txt_fn', 'txtFirstName']);
+  const fatherName = g(['fatherName', 'اسم الوالد*', 'اسم الوالد', 'اسم الأب*', 'اسم الأب', 'اسم الاب*', 'اسم الاب', 'الاسم الثاني*', 'الاسم الثاني', 'txt_sn', 'txtFatherName']);
+  const gFatherName= g(['gFatherName', 'اسم الجد*', 'اسم الجد', 'الاسم الثالث*', 'الاسم الثالث', 'txt_tn', 'txtGFatherName']);
+  const familyName = g(['familyName', 'اللقب / العائله*', 'اللقب / العائلة*', 'اللقب / العائله', 'اللقب / العائلة', 'اللقب*', 'اللقب', 'العائلة', 'العائله', 'اسم العائلة', 'اسم العائله', 'الاسم الرابع*', 'الاسم الرابع', 'txt_l4', 'txtFamilyName']);
+
+  let fullNameAr = g(['الاسم بالكامل', 'fullNameAr', 'اسم الطالب', 'اسم التلميذ']);
   if (!fullNameAr) {
-    const parts = [
-      g(['الاسم الأول*', 'الاسم الأول']),
-      g(['اسم الوالد*', 'اسم الوالد']),
-      g(['اسم الجد*', 'اسم الجد']),
-      g(['اللقب / العائله*', 'اللقب / العائله', 'اللقب']),
-    ].filter(Boolean);
-    fullNameAr = parts.join(' ');
+    const parts = [firstName, fatherName, gFatherName, familyName].filter(Boolean);
+    if (parts.length > 0) fullNameAr = parts.join(' ');
   }
 
-  // اسم الأم
-  let motherName = g(['اسم الأم', 'اسم الام']);
+  // 4-part mother name
+  const motherFirstName  = g(['motherFirstName', 'اسم الام الأول*', 'اسم الام الأول', 'اسم الأم الأول*', 'اسم الأم الأول']);
+  const motherSecondName = g(['motherSecondName', 'اسم الوالد للام*', 'اسم الوالد للام', 'اسم والد الأم']);
+  const motherThirdName  = g(['motherThirdName', 'اسم الجد للام*', 'اسم الجد للام', 'اسم جد الأم']);
+  const motherForthName  = g(['motherForthName', 'اللقب / العائله للام', 'اللقب / العائلة للام', 'اللقب للام', 'لقب الأم', 'لقب الام']);
+
+  let motherName = g(['اسم الأم', 'اسم الام', 'motherName']);
   if (!motherName) {
-    const mParts = [
-      g(['اسم الام الأول*', 'اسم الام الأول']),
-      g(['اسم الوالد للام*', 'اسم الوالد للام']),
-      g(['اسم الجد للام*', 'اسم الجد للام']),
-      g(['اللقب / العائله للام', 'اللقب للام']),
-    ].filter(Boolean);
-    motherName = mParts.join(' ');
+    const mParts = [motherFirstName, motherSecondName, motherThirdName, motherForthName].filter(Boolean);
+    if (mParts.length > 0) motherName = mParts.join(' ');
   }
 
   // الجنس
-  const genderRaw = g(['النوع*', 'النوع', 'الجنس']);
-  const genderMap = { 'ذكر': 'ذكر', 'أنثى': 'أنثى', 'انثى': 'أنثى', 'male': 'ذكر', 'female': 'أنثى', '1': 'ذكر', '2': 'أنثى' };
+  const genderRaw = g(['sexId', 'النوع*', 'النوع', 'الجنس']);
+  const genderMap = { '1': 'ذكر', '2': 'أنثى', 'ذكر': 'ذكر', 'أنثى': 'أنثى', 'انثى': 'أنثى', 'male': 'ذكر', 'female': 'أنثى' };
   const gender = genderMap[genderRaw] || genderRaw;
 
   // حالة القيد
-  const statusRaw = g(['حالة قيد الطالب*', 'حالة القيد', 'الحالة']);
-  const statusMap = {
-    'منقول': 'promoted', 'مرقى': 'promoted', 'ناجح': 'promoted',
-    'راسب': 'retained', 'باق للإعادة': 'retained', 'يكمل': 'retained',
-    'موقوف': 'suspended', 'موقوف قيده': 'suspended', 'محذوف': 'suspended',
-  };
-  const status = statusMap[statusRaw] || null;
+  const statusRaw = g(['registrationId', 'registrationStatusId', 'حالة قيد الطالب*', 'حالة قيد الطالب', 'حالة القيد*', 'حالة القيد', 'الحالة', 'حالة الطالب', 'موقف القيد', 'الموقف', 'موقف الطالب']);
+  const mappedStatus = mapStudentStatus(statusRaw);
+  const status = mappedStatus.status;
+  const enrollmentStatus = mappedStatus.enrollment;
 
   // الديانة
-  const religionRaw = g(['الديانه*', 'الديانة']);
-  const religionMap = { 'مسلم': 'مسلم', 'مسلمة': 'مسلم', 'مسيحي': 'مسيحي', 'مسيحية': 'مسيحي', 'مسيحى': 'مسيحي' };
-  const religion = religionMap[religionRaw] || religionRaw;
+  const religionRaw = g(['religionId', 'الديانه*', 'الديانة', 'الديانه', 'ديانة الطالب', 'ديانة التلميذ', 'الديانة / المذهب', 'ديانة']);
+  const religion = normalizeReligion(religionRaw);
 
   // اللغة الثانية
-  const lang2Raw = g(['اللغه الاجنبية الثانية*', 'اللغة الثانية', 'اللغه الثانيه']);
-  const lang2Map = { 'فرنسي': 'فرنسي', 'فرنسية': 'فرنسي', 'ألماني': 'ألماني', 'إيطالي': 'إيطالي', 'لا يوجد': null };
+  const lang2Raw = g(['languageId2', 'اللغه الاجنبية الثانية*', 'اللغة الثانية', 'اللغه الثانيه']);
+  const lang2Map = { '1': 'إنجليزية', '2': 'فرنسي', '3': 'ألماني', '4': 'إيطالي', '5': 'إسباني', '6': 'صيني', '7': 'معفي', '8': 'روسي', 'فرنسي': 'فرنسي', 'فرنسية': 'فرنسي', 'ألماني': 'ألماني', 'إيطالي': 'إيطالي', 'لا يوجد': null };
   const secondLanguage = lang2Map[lang2Raw] !== undefined ? lang2Map[lang2Raw] : lang2Raw;
 
   // الموقف من الدمج
-  const mergeTypeRaw = g(['الموقف من الدمج*', 'الموقف من الدمج', 'نوع الدمج']);
-  const mergeMap = { 'مدمج': 'مدمج', 'غير مدمج': 'غير مدمج', 'لا يوجد': null };
+  const mergeTypeRaw = g(['disabilityId', 'الموقف من الدمج*', 'الموقف من الدمج', 'نوع الدمج']);
+  const mergeMap = {
+    '0': null, '1': 'إعاقة بصرية', '2': 'إعاقة سمعية', '3': 'إعاقة ذهنية', '4': 'شلل دماغي',
+    '5': 'توحد', '6': 'متلازمة داون', '7': 'إعاقة حركية', '8': 'بطء التعلم',
+    'مدمج': 'مدمج', 'غير مدمج': 'غير مدمج', 'لا يوجد': null
+  };
   const mergeType = mergeMap[mergeTypeRaw] !== undefined ? mergeMap[mergeTypeRaw] : mergeTypeRaw;
 
   // القسم — من نظام التعليم
-  const sectionRaw = g(['نظام التعليم*', 'نظام التعليم', 'القسم', 'الشعبه*', 'الشعبة']);
+  const sectionRaw = g(['studyTypeId', 'نظام التعليم*', 'نظام التعليم', 'القسم', 'الشعبه*', 'الشعبة']);
   const sectionMap = {
     'عربي': 'عربي', 'حكومي': 'عربي', 'عام': 'عربي',
     'لغات': 'لغات', 'مكثف': 'لغات',
@@ -1792,113 +2198,452 @@ const _emisColumnMap = (row) => {
   };
   const sectionName = sectionMap[sectionRaw] || sectionRaw;
 
+  let emisStudentCode = g([
+    'code', 'كود التلميذ', 'الكود', 'كود الطالب', 'كود التلميذ*', 'كود الطالب*',
+    'كود الطالب على الحكومة الإلكترونية', 'كود الطالب على الحكومة الالكترونية',
+    'كود التلميذ على الحكومة الإلكترونية', 'كود التلميذ على الحكومة الالكترونية',
+    'كود الحكومة الإلكترونية', 'كود الحكومة الالكترونية', 'كود الوزارة', 'كود إميس', 'كود EMIS',
+    'الكود الوزاري', 'الكود الوزارى', 'رقم كود الطالب', 'كود_الطالب', 'emis_student_code',
+    'emisStudentCode', 'txtCode', 'StudentCode', 'txt_code', 'st_code', 'الرقم المسلسل'
+  ]) || null;
+
+  if (!emisStudentCode) {
+    for (const [k, val] of Object.entries(row)) {
+      if (typeof val === 'string' || typeof val === 'number') {
+        const strVal = String(val).trim();
+        if (/^\d{6,11}$/.test(strVal)) {
+          emisStudentCode = strVal;
+          break;
+        }
+      }
+    }
+  }
+
   return {
     fullNameAr:       fullNameAr || null,
-    nationalId:       g(['الرقم القومى*', 'الرقم القومى', 'الرقم القومي']) || null,
-    emisStudentCode:  g(['كود التلميذ', 'الكود', 'كود الطالب']) || null,
+    firstName:        firstName || null,
+    fatherName:       fatherName || null,
+    gFatherName:      gFatherName || null,
+    familyName:       familyName || null,
+    nationalId:       g(['nationalId', 'الرقم القومى*', 'الرقم القومى', 'الرقم القومي', 'الرقم القومي للتلميذ', 'الرقم القومى للطفل', 'رقم الهوية']) || null,
+    emisStudentCode:  emisStudentCode || null,
     gender:           gender || null,
-    birthDate:        g(['yyyy-mm-dd', 'تاريخ الميلاد*', 'تاريخ الميلاد']) || null,
-    birthPlace:       g(['محافظة الميلاد*', 'محافظة الميلاد', 'مكان الميلاد']) || null,
-    nationality:      g(['الجنسيه*', 'الجنسية']) || null,
+    birthDate:        g(['birthDateObj', 'yyyy-mm-dd', 'تاريخ الميلاد*', 'تاريخ الميلاد']) || null,
+    birthPlace:       g(['placeOfBirth', 'محافظة الميلاد*', 'محافظة الميلاد', 'مكان الميلاد']) || null,
+    nationality:      g(['nationality', 'الجنسيه*', 'الجنسية']) || null,
     religion:         religion || null,
     motherName:       motherName || null,
-    address:          g(['العنوان']) || null,
-    gradeName:        g(['الصف*', 'الصف', 'الفرقة']) || null,
+    motherFirstName:  motherFirstName || null,
+    motherSecondName: motherSecondName || null,
+    motherThirdName:  motherThirdName || null,
+    motherForthName:  motherForthName || null,
+    address:          g(['address', 'العنوان']) || null,
+    gradeName:        g(['levelId', 'الصف*', 'الصف', 'الفرقة']) || null,
     sectionName:      sectionName || null,
-    classroomName:    g(['الفصل*', 'الفصل']) || null,
+    classroomName: (() => {
+      let raw = g([
+        'classId', 'الفصل*', 'الفصل', 'فصل', 'اسم الفصل', 'رقم الفصل',
+        'classroomName', 'classroom', 'class_name', 'class', 'className',
+        'فصل الطالب', 'فصل التلميذ', 'الفصل المقيد به', 'الفصل/الصف', 'الصف/الفصل',
+        'ddlClass', 'ddl_class', 'ddlClassRoom', 'txtClass'
+      ]);
+      if (!raw) return null;
+      raw = raw.trim();
+      if (['اختر', 'اختيار', 'الكل', '-- اختر --', '0', '-- اختر الفصل --', '--اختر--', 'لا يوجد', 'null', 'undefined', 'undefined/1'].includes(raw)) {
+        return null;
+      }
+      return raw;
+    })(),
     secondLanguage:   secondLanguage || null,
     mergeType:        mergeType || null,
-    guardianPhone:    g(['رقم التليفون', 'رقم المحمول', 'تليفون']) || null,
-    status:           status || null,
+    guardianPhone:    g(['phoneNumber', 'mobileNumber', 'رقم التليفون', 'رقم المحمول', 'تليفون']) || null,
+    fatherNationalId: g(['fatherNationalId', 'الرقم القومي للوالد*', 'الرقم القومي للوالد']) || null,
+    motherNationalId: g(['motherNationalId', 'الرقم القومى للأم*', 'الرقم القومى للأم']) || null,
+    status:           status || 'promoted',
+    enrollmentStatus: enrollmentStatus || 'منقول',
+    isExcluded:       mappedStatus.is_excluded || 0,
     statusRaw:        statusRaw || null,
   };
 };
 
+// ─── Helper: Link/Create Classroom & Enrollment ─────────────────────────────
+const _syncStudentClassroom = (sqliteDb, studentId, gradeId, academicYearId, rawClassroomName) => {
+  if (!studentId || !gradeId || !academicYearId || !rawClassroomName) return null;
+  let cleanCls = String(rawClassroomName).trim();
+  if (!cleanCls || ['اختر', 'اختيار', 'الكل', '-- اختر --', '0', '-- اختر الفصل --', '--اختر--', 'لا يوجد', 'null', 'undefined'].includes(cleanCls)) return null;
+
+  // Clean prefix if "فصل" is present
+  cleanCls = cleanCls.replace(/^فصل\s+/i, '').trim() || cleanCls;
+
+  let cls = _get(sqliteDb, `
+    SELECT id FROM classes
+    WHERE grade_id = ? AND academic_year_id = ?
+      AND (class_name = ? OR class_name = ? OR class_name = ? OR class_name = ? OR class_name = ?)
+  `, [gradeId, academicYearId, cleanCls, `فصل ${cleanCls}`, `فصل (${cleanCls})`, `${cleanCls}/1`, `1/${cleanCls}`]);
+
+  if (!cls) {
+    const allCls = _all(sqliteDb, 'SELECT id, class_name FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
+    cls = allCls.find(c => {
+      const cn = c.class_name.trim();
+      return cn === cleanCls || cn.includes(cleanCls) || cleanCls.includes(cn);
+    });
+  }
+
+  if (!cls) {
+    try {
+      sqliteDb.run('INSERT INTO classes (class_name, grade_id, academic_year_id) VALUES (?, ?, ?)', [cleanCls, gradeId, academicYearId]);
+      db.flushSQLite();
+      cls = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND class_name = ?', [gradeId, academicYearId, cleanCls]);
+    } catch (_) {}
+  }
+
+  if (cls) {
+    try {
+      sqliteDb.run('DELETE FROM class_enrollments WHERE student_id = ? AND academic_year_id = ?', [studentId, academicYearId]);
+      sqliteDb.run(
+        'INSERT INTO class_enrollments (class_id, student_id, academic_year_id) VALUES (?, ?, ?)',
+        [cls.id, studentId, academicYearId]
+      );
+    } catch (_) {}
+    return cls.id;
+  }
+  return null;
+};
+
+const _ensureEmisSyncLogTable = (sqliteDb) => {
+  try {
+    // Drop shadow log table completely
+    sqliteDb.run('DROP TABLE IF EXISTS emis_sync_log;');
+
+    // Auto-repair missing nationality, section, stage, academic_year for existing students
+    try {
+      sqliteDb.run("UPDATE students SET nationality_id = 1 WHERE nationality_id IS NULL OR nationality_id = '' OR nationality_id = 0");
+      sqliteDb.run("UPDATE students SET section_id = 1 WHERE section_id IS NULL OR section_id = 0");
+      sqliteDb.run("UPDATE students SET stage_id = 1 WHERE stage_id IS NULL OR stage_id = 0");
+      sqliteDb.run("UPDATE students SET academic_year_id = (SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1) WHERE academic_year_id IS NULL OR academic_year_id = 0");
+      db.flushSQLite();
+    } catch (_) {}
+  } catch (e) {
+    console.error('[DB] Cleanup error:', e.message);
+  }
+};
+
 // ─── POST /api/students/emis/sync ────────────────────────────────────────────
+// Saves collected EMIS student data 100% DIRECTLY into main official students table (Zero Shadow Logs)
 const emisSync = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
-  const { students = [], source = 'extension' } = req.body;
+  const { students = [] } = req.body;
   if (!Array.isArray(students) || students.length === 0) {
     return res.status(400).json({ success: false, error: 'لا توجد بيانات طلاب.' });
   }
 
   try {
     const sqliteDb = db.getSQLiteDb();
-    const results = { matched: 0, new: 0, conflict: 0, skipped: 0 };
+    _ensureEmisSyncLogTable(sqliteDb);
+    const results = { matched: 0, new: 0, updated: 0, skipped: 0 };
+
+    const activeYear = _get(sqliteDb, 'SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1') || _get(sqliteDb, 'SELECT id FROM academic_years LIMIT 1');
+    const defaultAcademicYearId = activeYear?.id || 1;
 
     for (const rawRow of students) {
       try {
         const mapped = _emisColumnMap(rawRow);
-        const { nationalId, emisStudentCode, fullNameAr, gradeName, sectionName } = mapped;
+        let { nationalId, emisStudentCode, fullNameAr, gradeName, sectionName, classroomName } = mapped;
 
-        if (!nationalId && !emisStudentCode) {
+        if (!nationalId && emisStudentCode) {
+          const m = String(emisStudentCode).match(/\b\d{14}\b/);
+          if (m) {
+            nationalId = m[0];
+            mapped.nationalId = nationalId;
+          }
+        }
+
+        if (!nationalId && !emisStudentCode && !fullNameAr) {
           results.skipped++;
           continue;
         }
 
-        // البحث في قاعدة البيانات بالرقم القومي أولاً ثم كود EMIS
+        // البحث في جدول الطلاب الرئيسي مباشرة بالرقم القومي أولاً ثم كود الوزارة
         let existing = null;
-        if (nationalId) {
-          const stmt = sqliteDb.prepare('SELECT id, full_name_ar, national_id, gender, birth_date, emis_student_code FROM students WHERE national_id = ? AND is_deleted = 0 LIMIT 1');
+        if (nationalId && nationalId.length === 14) {
+          const stmt = sqliteDb.prepare('SELECT id, full_name_ar, emis_student_code, grade_id, academic_year_id, section_id, stage_id FROM students WHERE national_id = ? AND (is_deleted IS NULL OR is_deleted = 0) LIMIT 1');
           stmt.bind([nationalId]);
           existing = stmt.step() ? stmt.getAsObject() : null;
           stmt.free();
         }
         if (!existing && emisStudentCode) {
-          const stmt2 = sqliteDb.prepare('SELECT id, full_name_ar, national_id, gender, birth_date, emis_student_code FROM students WHERE emis_student_code = ? AND is_deleted = 0 LIMIT 1');
+          const stmt2 = sqliteDb.prepare('SELECT id, full_name_ar, emis_student_code, grade_id, academic_year_id, section_id, stage_id FROM students WHERE emis_student_code = ? AND (is_deleted IS NULL OR is_deleted = 0) LIMIT 1');
           stmt2.bind([emisStudentCode]);
           existing = stmt2.step() ? stmt2.getAsObject() : null;
           stmt2.free();
         }
 
-        // التحقق من وجود سجل في emis_sync_log لهذا الطالب
-        const logKey = nationalId || emisStudentCode;
-        const existingLog = sqliteDb.prepare('SELECT id FROM emis_sync_log WHERE (national_id = ? OR emis_code = ?) LIMIT 1');
-        existingLog.bind([logKey, logKey]);
-        const logExists = existingLog.step();
-        existingLog.free();
-        if (logExists) { results.skipped++; continue; }
-
-        let syncStatus = 'new';
-        let conflictFields = null;
-        let neprasStudentId = null;
-
-        if (existing) {
-          neprasStudentId = existing.id;
-          // مقارنة الحقول الأساسية
-          const conflicts = [];
-          if (fullNameAr && existing.full_name_ar && fullNameAr !== existing.full_name_ar) conflicts.push('الاسم');
-          if (mapped.gender && existing.gender && mapped.gender !== existing.gender) conflicts.push('الجنس');
-          if (mapped.birthDate && existing.birth_date && mapped.birthDate !== existing.birth_date) conflicts.push('تاريخ الميلاد');
-
-          if (conflicts.length > 0) {
-            syncStatus = 'conflict';
-            conflictFields = JSON.stringify(conflicts);
-            results.conflict++;
-          } else {
-            syncStatus = 'matched';
-            results.matched++;
-            // تحديث كود EMIS إذا لم يكن محفوظاً
-            if (emisStudentCode && !existing.emis_student_code) {
-              sqliteDb.run('UPDATE students SET emis_student_code = ? WHERE id = ?', [emisStudentCode, existing.id]);
-              db.flushSQLite();
-            }
+        // تحديد المرحلة والصف للربط الدقيق
+        let sectionId = existing?.section_id || 1, stageId = existing?.stage_id || 1, gradeId = existing?.grade_id || 1;
+        const searchStageStr = (gradeName || sectionName || '').trim();
+        if (searchStageStr) {
+          const stagesList = _all(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup');
+          const matchedStage = stagesList.find(s => {
+            const dbName = s.stage_name.trim();
+            if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
+            if ((searchStageStr.includes('اعداد') || searchStageStr.includes('إعداد')) && !searchStageStr.includes('دول') && (dbName.includes('اعداد') || dbName.includes('إعداد')) && !dbName.includes('دول')) return true;
+            if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
+            if (searchStageStr.includes('ثانو') && dbName.includes('ثانو')) return true;
+            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل')) && (dbName.includes('روض') || dbName.includes('طفل'))) return true;
+            return false;
+          });
+          if (matchedStage) {
+            stageId = matchedStage.id;
+            sectionId = matchedStage.section_id;
           }
-        } else {
-          syncStatus = 'new';
-          results.new++;
         }
 
-        // حفظ في سجل المزامنة
-        sqliteDb.run(`
-          INSERT INTO emis_sync_log (emis_code, national_id, full_name_ar, grade_name, section_name, sync_status, conflict_fields, raw_data, nepras_student_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          emisStudentCode, nationalId, fullNameAr, gradeName, sectionName,
-          syncStatus, conflictFields, JSON.stringify(mapped), neprasStudentId
-        ]);
-        db.flushSQLite();
+        if (gradeName) {
+          const getGradeNum = (str) => {
+            if (str.includes('أول') || str.includes('اول') || str.includes('1')) return 1;
+            if (str.includes('ثان') || str.includes('ثان') || str.includes('2')) return 2;
+            if (str.includes('ثالث') || str.includes('3')) return 3;
+            if (str.includes('رابع') || str.includes('4')) return 4;
+            if (str.includes('خامس') || str.includes('5')) return 5;
+            if (str.includes('سادس') || str.includes('6')) return 6;
+            return 0;
+          };
+          const targetNum = getGradeNum(gradeName);
+          const gradesInStage = _all(sqliteDb, 'SELECT id, grade_name_ar FROM grades_lookup WHERE stage_id = ?', [stageId]);
+          const matchedGrade = gradesInStage.find(g => {
+            if (targetNum > 0 && getGradeNum(g.grade_name_ar) === targetNum) return true;
+            return g.grade_name_ar.includes(gradeName) || gradeName.includes(g.grade_name_ar);
+          });
+          if (matchedGrade) gradeId = matchedGrade.id;
+          else if (gradesInStage.length > 0) gradeId = gradesInStage[0].id;
+        }
 
+          const sParts = (fullNameAr || '').trim().split(/\s+/);
+          const fn  = mapped.firstName   || sParts[0] || null;
+          const fa  = mapped.fatherName  || sParts[1] || null;
+          const gf  = mapped.gFatherName || sParts[2] || null;
+          const fam = mapped.familyName  || (sParts.length > 3 ? sParts.slice(3).join(' ') : null);
+
+          // اسم ولي الأمر / الأب بالكامل (الوالد + الجد + اللقب / العائلة)
+          let guardianName = [fa, gf, fam].filter(Boolean).join(' ');
+          if (!guardianName && sParts.length > 1) {
+            guardianName = sParts.slice(1).join(' ');
+          }
+
+          let genderVal = null;
+          if (mapped.gender) {
+            const gClean = String(mapped.gender).trim().toLowerCase();
+            if (
+              gClean.includes('انث') ||
+              gClean.includes('أنث') ||
+              gClean.includes('بنت') ||
+              gClean.includes('بنات') ||
+              gClean.includes('اناث') ||
+              gClean.includes('إناث') ||
+              gClean.includes('female') ||
+              gClean === 'f' ||
+              gClean === '2'
+            ) {
+              genderVal = 'أنثى';
+            } else if (
+              gClean.includes('ذكر') ||
+              gClean.includes('ولد') ||
+              gClean.includes('بنين') ||
+              gClean.includes('ذكور') ||
+              gClean.includes('male') ||
+              gClean === 'm' ||
+              gClean === '1'
+            ) {
+              genderVal = 'ذكر';
+            }
+          }
+          if (!genderVal && nationalId && nationalId.length === 14) {
+            const ext = parseNationalId(nationalId);
+            if (ext && ext.gender) genderVal = ext.gender;
+          }
+
+          if (existing) {
+            results.matched++;
+            results.updated++;
+            const targetAcademicYearId = existing.academic_year_id || defaultAcademicYearId;
+            const targetGradeId = existing.grade_id || gradeId;
+
+            const mParts = (mapped.motherName || '').trim().split(/\s+/);
+            const mFn  = mapped.motherFirstName  || mParts[0] || null;
+            const mSn  = mapped.motherSecondName || mParts[1] || null;
+            const mTn  = mapped.motherThirdName  || mParts[2] || null;
+            const mFn4 = mapped.motherForthName  || (mParts.length > 3 ? mParts.slice(3).join(' ') : null);
+
+            // تحديث السجل بجدول الطلاب الرئيسي مباشرة بالرمز الوزاري والاسم واللقب واسم ولي الأمر وأي بيان جديد وارد
+            sqliteDb.run(
+              `UPDATE students SET 
+                emis_student_code = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE emis_student_code END,
+                full_name_ar = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE full_name_ar END,
+                first_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE first_name END,
+                father_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE father_name END,
+                gfather_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE gfather_name END,
+                grandfather_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE grandfather_name END,
+                family_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE family_name END,
+                guardian_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE guardian_name END,
+                grade_id = CASE WHEN ? IS NOT NULL THEN ? ELSE grade_id END,
+                stage_id = CASE WHEN ? IS NOT NULL THEN ? ELSE stage_id END,
+                section_id = CASE WHEN ? IS NOT NULL THEN ? ELSE section_id END,
+                religion = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE religion END,
+                second_language = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE second_language END,
+                is_merged = CASE WHEN ? IS NOT NULL THEN ? ELSE is_merged END,
+                merge_type = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE merge_type END,
+                guardian_phone = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE guardian_phone END,
+                student_phone = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE student_phone END,
+                address = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE address END,
+                gender = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE gender END,
+                birth_date = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE birth_date END,
+                birth_place = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE birth_place END,
+                mother_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE mother_name END,
+                mother_first_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE mother_first_name END,
+                mother_second_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE mother_second_name END,
+                mother_third_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE mother_third_name END,
+                mother_fourth_name = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE mother_fourth_name END,
+                status = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE status END,
+                enrollment_status = CASE WHEN ? IS NOT NULL AND ? != '' THEN ? ELSE enrollment_status END,
+                is_excluded = CASE WHEN ? IS NOT NULL THEN ? ELSE is_excluded END
+               WHERE id = ?`,
+              [
+                emisStudentCode || null, emisStudentCode || null, emisStudentCode || null,
+                fullNameAr || null, fullNameAr || null, fullNameAr || null,
+                fn, fn, fn,
+                fa, fa, fa,
+                gf, gf, gf,
+                gf, gf, gf,
+                fam, fam, fam,
+                guardianName || null, guardianName || null, guardianName || null,
+                targetGradeId, targetGradeId,
+                stageId, stageId,
+                sectionId, sectionId,
+                mapped.religion || null, mapped.religion || null, mapped.religion || null,
+                mapped.secondLanguage || null, mapped.secondLanguage || null, mapped.secondLanguage || null,
+                mapped.mergeType ? 1 : (mapped.isMerged !== undefined ? (mapped.isMerged ? 1 : 0) : null), mapped.mergeType ? 1 : (mapped.isMerged !== undefined ? (mapped.isMerged ? 1 : 0) : null),
+                mapped.mergeType || null, mapped.mergeType || null, mapped.mergeType || null,
+                mapped.guardianPhone || null, mapped.guardianPhone || null, mapped.guardianPhone || null,
+                mapped.guardianPhone || null, mapped.guardianPhone || null, mapped.guardianPhone || null,
+                mapped.address || null, mapped.address || null, mapped.address || null,
+                genderVal || null, genderVal || null, genderVal || null,
+                mapped.birthDate || null, mapped.birthDate || null, mapped.birthDate || null,
+                mapped.birthPlace || null, mapped.birthPlace || null, mapped.birthPlace || null,
+                mapped.motherName || null, mapped.motherName || null, mapped.motherName || null,
+                mFn, mFn, mFn,
+                mSn, mSn, mSn,
+                mTn, mTn, mTn,
+                mFn4, mFn4, mFn4,
+                mapped.status || null, mapped.status || null, mapped.status || null,
+                mapped.enrollmentStatus || null, mapped.enrollmentStatus || null, mapped.enrollmentStatus || null,
+                mapped.isExcluded !== undefined ? mapped.isExcluded : null, mapped.isExcluded !== undefined ? mapped.isExcluded : null,
+                existing.id
+              ]
+            );
+
+            // مزامنة وتسجيل الفصل للطالب الحالي
+            if (classroomName) {
+              _syncStudentClassroom(sqliteDb, existing.id, targetGradeId, targetAcademicYearId, classroomName);
+            }
+          } else {
+            results.new++;
+            // إضافة الطالب مباشرة بجدول الطلاب الرئيسي بنفس اللحظة بأعلى دقة
+            try {
+              const academicYearId = defaultAcademicYearId;
+
+              let nationalityId = 1;
+              const natObj = _get(sqliteDb, 'SELECT id FROM nationalities WHERE name LIKE "%مصري%" LIMIT 1') || _get(sqliteDb, 'SELECT id FROM nationalities LIMIT 1');
+              if (natObj) nationalityId = natObj.id;
+
+              const studentCode = _generateCode(sqliteDb, sectionId, stageId);
+
+              let genderVal = 'ذكر';
+              if (mapped.gender) {
+                const gClean = String(mapped.gender)
+                  .trim()
+                  .toLowerCase()
+                  .replace(/[\u064B-\u0652]/g, '')
+                  .replace(/\u0640/g, '')
+                  .replace(/[أإآ]/g, 'ا')
+                  .replace(/[ىي]/g, 'ي')
+                  .replace(/ة/g, 'ه');
+
+                if (
+                  gClean.includes('انث') ||
+                  gClean.includes('بنت') ||
+                  gClean.includes('بنات') ||
+                  gClean.includes('فتاه') ||
+                  gClean.includes('طالبه') ||
+                  gClean.includes('تلميذه') ||
+                  gClean.includes('اناث') ||
+                  gClean.includes('female') ||
+                  gClean === 'f'
+                ) {
+                  genderVal = 'أنثى';
+                } else if (
+                  gClean.includes('ولد') ||
+                  gClean.includes('بنين') ||
+                  gClean.includes('ذكر') ||
+                  gClean.includes('ذكور') ||
+                  gClean.includes('male') ||
+                  gClean === 'm'
+                ) {
+                  genderVal = 'ذكر';
+                }
+              }
+              let birthDateVal = mapped.birthDate;
+              if (nationalId && nationalId.length === 14) {
+                const ext = parseNationalId(nationalId);
+                if (ext) {
+                  if (!mapped.gender && ext.gender) genderVal = ext.gender;
+                  if (!birthDateVal) birthDateVal = ext.birthDate;
+                }
+              }
+
+              const mParts = (mapped.motherName || '').trim().split(/\s+/);
+              const mFn  = mapped.motherFirstName  || mParts[0] || null;
+              const mSn  = mapped.motherSecondName || mParts[1] || null;
+              const mTn  = mapped.motherThirdName  || mParts[2] || null;
+              const mFn4 = mapped.motherForthName  || (mParts.length > 3 ? mParts.slice(3).join(' ') : null);
+
+              sqliteDb.run(`
+                INSERT INTO students (
+                  section_id, stage_id, grade_id, academic_year_id, student_code,
+                  full_name_ar, first_name, father_name, gfather_name, grandfather_name, family_name,
+                  national_id, emis_student_code, gender, birth_date,
+                  address, religion, nationality_id, guardian_name, guardian_phone,
+                  mother_name, mother_first_name, mother_second_name, mother_third_name, mother_forth_name, mother_fourth_name,
+                  second_language, status, enrollment_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `, [
+                sectionId, stageId, gradeId, academicYearId, studentCode,
+                fullNameAr || 'طالب جديد من الوزارة', fn, fa, gf, gf, fam,
+                nationalId || null,
+                emisStudentCode || null,
+                genderVal || 'ذكر',
+                birthDateVal || null,
+                mapped.address || null,
+                normalizeReligion(mapped.religion) || null,
+                nationalityId,
+                guardianName || null,
+                mapped.guardianPhone || null,
+                mapped.motherName || null, mFn, mSn, mTn, mFn4, mFn4,
+                mapped.secondLanguage || null,
+                'promoted',
+                new Date().toISOString().split('T')[0]
+              ]);
+
+              const newStudentId = _lastId(sqliteDb);
+
+              // تسجيل الفصل مباشرة للطالب الجديد
+              if (classroomName && newStudentId) {
+                _syncStudentClassroom(sqliteDb, newStudentId, gradeId, academicYearId, classroomName);
+              }
+            } catch (insertErr) {
+              console.error('[EMIS Sync Auto-Insert Error]:', insertErr.message);
+            }
+          }
+        db.flushSQLite();
       } catch (rowErr) {
         console.error('[EMIS Sync] Row error:', rowErr.message);
         results.skipped++;
@@ -1917,6 +2662,7 @@ const emisStatus = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
+    _ensureEmisSyncLogTable(sqliteDb);
     const countRow = (status) => {
       const s = sqliteDb.prepare('SELECT COUNT(*) as cnt FROM emis_sync_log WHERE sync_status = ?');
       s.bind([status]);
@@ -2092,26 +2838,118 @@ const emisClearSession = async (req, res) => {
   }
 };
 
-// ─── GET /api/students/transfers/list ────────────────────────────────────────
-const getTransfersList = async (req, res) => {
+// ─── Ensure dedicated EMIS collector settings table ──────────────────────────
+const _ensureEmisSettingsTable = (sqliteDb) => {
+  try {
+    sqliteDb.run(`
+      CREATE TABLE IF NOT EXISTS emis_collector_settings (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        setting_key  TEXT UNIQUE NOT NULL,
+        setting_value TEXT,
+        updated_at   TEXT DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (e) {
+    console.error('[DB] _ensureEmisSettingsTable error:', e.message);
+  }
+};
+
+// ─── GET /api/students/emis/config ─────────────────────────────────────────
+const getEmisConfig = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
-    const stmt = sqliteDb.prepare(`
-      SELECT t.*, s.full_name_ar, s.student_code, s.national_id, g.grade_name_ar
-      FROM student_transfers t
-      JOIN students s ON s.id = t.student_id
-      LEFT JOIN grades_lookup g ON g.id = s.grade_id
-      ORDER BY t.id DESC
-    `);
-    
-    const transfers = [];
-    while (stmt.step()) {
-      transfers.push(stmt.getAsObject());
+    _ensureEmisSettingsTable(sqliteDb);
+    const stmt = sqliteDb.prepare("SELECT setting_value FROM emis_collector_settings WHERE setting_key = 'emis_collector_config' LIMIT 1");
+    let config = {
+      delayMs: 1200,
+      batchSize: 50,
+      autoSync: true,
+      matchBy: 'national_id',
+      incrementalOnly: true,
+      defaultSectionId: '',
+      defaultStageId: '',
+      defaultGradeId: '',
+      defaultAcademicYearId: ''
+    };
+    if (stmt.step()) {
+      try { config = { ...config, ...JSON.parse(stmt.getAsObject().setting_value || '{}') }; } catch {}
     }
     stmt.free();
+    return res.json({ success: true, config });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
 
-    return res.json({ success: true, transfers });
+// ─── POST /api/students/emis/config ────────────────────────────────────────
+const updateEmisConfig = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const config = req.body || {};
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    _ensureEmisSettingsTable(sqliteDb);
+
+    const stmt = sqliteDb.prepare("SELECT id FROM emis_collector_settings WHERE setting_key = 'emis_collector_config' LIMIT 1");
+    const exists = stmt.step();
+    stmt.free();
+
+    if (exists) {
+      sqliteDb.run("UPDATE emis_collector_settings SET setting_value = ?, updated_at = datetime('now') WHERE setting_key = 'emis_collector_config'", [JSON.stringify(config)]);
+    } else {
+      sqliteDb.run("INSERT INTO emis_collector_settings (setting_key, setting_value) VALUES ('emis_collector_config', ?)", [JSON.stringify(config)]);
+    }
+    db.flushSQLite();
+    return res.json({ success: true, message: 'تم حفظ إعدادات أداة جامع البيانات بنجاح.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── POST /api/students/emis/diff ───────────────────────────────────────────
+const getEmisDiff = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const { ministryList } = req.body || {};
+  if (!Array.isArray(ministryList)) {
+    return res.status(400).json({ success: false, error: 'قائمة الطلاب غير صالحة.' });
+  }
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    
+    // Fetch all existing national IDs & emis codes from Nepras students DB
+    const existingNatStmt = sqliteDb.prepare("SELECT national_id, emis_student_code FROM students WHERE status != 'excluded'");
+    const existingNatSet = new Set();
+    const existingEmisSet = new Set();
+    while (existingNatStmt.step()) {
+      const row = existingNatStmt.getAsObject();
+      if (row.national_id) existingNatSet.add(String(row.national_id).trim());
+      if (row.emis_student_code) existingEmisSet.add(String(row.emis_student_code).trim());
+    }
+    existingNatStmt.free();
+
+    const missingList = [];
+    const existingList = [];
+
+    for (const item of ministryList) {
+      const nat = item.nationalId ? String(item.nationalId).trim() : '';
+      const code = item.emisCode ? String(item.emisCode).trim() : '';
+      
+      const isExisting = (nat && existingNatSet.has(nat)) || (code && existingEmisSet.has(code));
+      if (isExisting) {
+        existingList.push(item);
+      } else {
+        missingList.push(item);
+      }
+    }
+
+    return res.json({
+      success: true,
+      totalMinistryCount: ministryList.length,
+      existingCount: existingList.length,
+      missingCount: missingList.length,
+      missingList,
+      existingList
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -2299,15 +3137,20 @@ const bulkDeletePermanently = async (req, res) => {
   }
 };
 
-// ─── Student Absence Warnings (إنذارات الغياب القانونية) ─────────────────────
+// ─── Student Absence Warnings & Management (إنذارات الغياب والرصد الأسبوعي) ──────
 const getAbsenceWarnings = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   try {
     const sqliteDb = db.getSQLiteDb();
     const warnings = _all(sqliteDb, `
-      SELECT w.*, s.full_name_ar, s.national_id, s.emis_student_code
+      SELECT w.*, s.full_name_ar, s.national_id, s.emis_student_code, s.student_code,
+             s.guardian_name, s.guardian_phone, s.guardian_phone_2, s.address,
+             c.class_name, g.grade_name_ar
       FROM student_absence_warnings w
       JOIN students s ON w.student_id = s.id
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id
+      LEFT JOIN classes c ON c.id = ce.class_id
+      LEFT JOIN grades_lookup g ON g.id = s.grade_id
       ORDER BY w.id DESC
     `);
     return res.json({ success: true, warnings });
@@ -2339,22 +3182,206 @@ const recordStudentAbsence = async (req, res) => {
 
     let warningGenerated = null;
     if (totalAbsent >= 15) {
-      warningGenerated = 'إنذار فصل وتنبيه (15 يوماً متصلة أو 30 يوماً منفصلة)';
+      warningGenerated = 'إنذار نهائي وفصل (15 يوماً متصلة أو 30 يوماً منفصلة)';
     } else if (totalAbsent >= 12) {
-      warningGenerated = 'إنذار ثاني (12 يوماً غياب)';
+      warningGenerated = 'إنذار ثانٍ (12 يوماً غياب بدون عذر)';
     } else if (totalAbsent >= 7) {
-      warningGenerated = 'إنذار أول (7 أيام غياب)';
+      warningGenerated = 'إنذار أول (7 أيام غياب بدون عذر)';
     }
 
     if (warningGenerated) {
-      _run(sqliteDb, `
-        INSERT INTO student_absence_warnings (student_id, warning_type, total_absent_days, notes)
-        VALUES (?, ?, ?, ?)
-      `, [student_id, warningGenerated, totalAbsent, `تم التوليد التلقائي لبلوع الغياب ${totalAbsent} يوماً`]);
+      const existing = _get(sqliteDb, 'SELECT id FROM student_absence_warnings WHERE student_id = ? AND warning_type = ?', [student_id, warningGenerated]);
+      if (!existing) {
+        _run(sqliteDb, `
+          INSERT INTO student_absence_warnings (student_id, warning_type, total_absent_days, issue_date, notes)
+          VALUES (?, ?, ?, DATE('now'), ?)
+        `, [student_id, warningGenerated, totalAbsent, `تم التوليد التلقائي لبلوغ الغياب ${totalAbsent} يوماً`]);
+      }
     }
 
     db.flushSQLite();
     return res.json({ success: true, message: 'تم تسجيل غياب الطالب بنجاح.', totalAbsent, warningGenerated });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── GET /api/students/absence/weekly-class ───────────────────────────────
+const getWeeklyClassAbsence = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { classId, gradeId, dates } = req.query;
+    
+    if (!classId && !gradeId) {
+      return res.status(400).json({ success: false, error: 'يرجى تحديد الفصل أو الصف.' });
+    }
+
+    const dateList = dates ? dates.split(',').map(d => d.trim()).filter(Boolean) : [];
+
+    let studentsSql = `
+      SELECT s.id, s.full_name_ar, s.national_id, s.student_code, s.gender, s.religion, s.is_merged,
+             c.class_name, g.grade_name_ar
+      FROM students s
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id
+      LEFT JOIN classes c ON c.id = ce.class_id
+      LEFT JOIN grades_lookup g ON g.id = s.grade_id
+      WHERE (s.is_deleted IS NULL OR s.is_deleted = 0)
+        AND (s.status NOT IN ('excluded', 'disconnected', 'suspended', 'مستبعد', 'منقطع', 'موقوف قيده') AND (s.enrollment_status NOT IN ('مستبعد', 'منقطع', 'موقوف قيده') OR s.enrollment_status IS NULL))
+    `;
+    const params = [];
+    if (classId) {
+      studentsSql += ' AND ce.class_id = ?';
+      params.push(classId);
+    } else if (gradeId) {
+      studentsSql += ' AND s.grade_id = ?';
+      params.push(gradeId);
+    }
+    studentsSql += ' ORDER BY s.full_name_ar ASC';
+
+    const students = _all(sqliteDb, studentsSql, params);
+
+    const studentIds = students.map(s => s.id);
+    let absences = [];
+    if (studentIds.length > 0 && dateList.length > 0) {
+      const placeholders = studentIds.map(() => '?').join(',');
+      const datePlaceholders = dateList.map(() => '?').join(',');
+      absences = _all(sqliteDb, `
+        SELECT student_id, absence_date, absence_type, notes
+        FROM student_absence_records
+        WHERE student_id IN (${placeholders}) AND absence_date IN (${datePlaceholders})
+      `, [...studentIds, ...dateList]);
+    }
+
+    return res.json({ success: true, students, absences });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── POST /api/students/absence/weekly-bulk ──────────────────────────────
+const recordBulkWeeklyAbsence = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { dates, records } = req.body;
+    
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ success: false, error: 'لا توجد بيانات غياب للحفظ.' });
+    }
+
+    const dateList = Array.isArray(dates) ? dates : (dates ? dates.split(',') : []);
+    const studentIds = [...new Set(records.map(r => r.student_id))];
+
+    if (studentIds.length > 0 && dateList.length > 0) {
+      const placeholders = studentIds.map(() => '?').join(',');
+      const datePlaceholders = dateList.map(() => '?').join(',');
+      _run(sqliteDb, `
+        DELETE FROM student_absence_records
+        WHERE student_id IN (${placeholders}) AND absence_date IN (${datePlaceholders})
+      `, [...studentIds, ...dateList]);
+    }
+
+    let insertedCount = 0;
+    const warningsGenerated = [];
+
+    records.forEach(r => {
+      if (r.status === 'absent_unexcused' || r.status === 'absent_excused' || r.status === 'غ' || r.status === 'ع') {
+        const absenceType = (r.status === 'absent_excused' || r.status === 'ع') ? 'بعذر' : 'بدون عذر';
+        _run(sqliteDb, `
+          INSERT INTO student_absence_records (student_id, absence_date, absence_type, notes)
+          VALUES (?, ?, ?, ?)
+        `, [r.student_id, r.date, absenceType, r.notes || null]);
+        insertedCount++;
+      }
+    });
+
+    studentIds.forEach(sid => {
+      const totalAbsentObj = _get(sqliteDb, `
+        SELECT COUNT(*) AS total FROM student_absence_records
+        WHERE student_id = ? AND absence_type = 'بدون عذر'
+      `, [sid]);
+      const totalAbsent = totalAbsentObj ? totalAbsentObj.total : 0;
+
+      let warningType = null;
+      if (totalAbsent >= 15) {
+        warningType = 'إنذار نهائي وفصل (15 يوماً متصلة أو 30 يوماً منفصلة)';
+      } else if (totalAbsent >= 12) {
+        warningType = 'إنذار ثانٍ (12 يوماً غياب بدون عذر)';
+      } else if (totalAbsent >= 7) {
+        warningType = 'إنذار أول (7 أيام غياب بدون عذر)';
+      }
+
+      if (warningType) {
+        const existing = _get(sqliteDb, `
+          SELECT id FROM student_absence_warnings
+          WHERE student_id = ? AND warning_type = ?
+        `, [sid, warningType]);
+
+        if (!existing) {
+          _run(sqliteDb, `
+            INSERT INTO student_absence_warnings (student_id, warning_type, total_absent_days, issue_date, notes)
+            VALUES (?, ?, ?, DATE('now'), ?)
+          `, [sid, warningType, totalAbsent, `تم التوليد التلقائي لبلوغ الغياب ${totalAbsent} يوماً`]);
+
+          const sInfo = _get(sqliteDb, 'SELECT full_name_ar FROM students WHERE id = ?', [sid]);
+          warningsGenerated.push({ studentName: sInfo?.full_name_ar, warningType, totalAbsent });
+        }
+      }
+    });
+
+    db.flushSQLite();
+    return res.json({
+      success: true,
+      message: `تم حفظ سجلات الغياب بنجاح (${insertedCount} حالة غياب).`,
+      warningsGenerated
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── PUT /api/students/:id/merge-info ──────────────────────────────────────
+const updateStudentMergeInfo = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { id } = req.params;
+    const {
+      is_merged,
+      merge_type,
+      disability_id,
+      merge_decision_number,
+      merge_decision_date,
+      merge_notes
+    } = req.body;
+
+    const student = _get(sqliteDb, 'SELECT id FROM students WHERE id = ?', [id]);
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'الطالب غير موجود.' });
+    }
+
+    _run(sqliteDb, `
+      UPDATE students
+      SET is_merged = ?,
+          merge_type = ?,
+          disability_id = ?,
+          merge_decision_number = ?,
+          merge_decision_date = ?,
+          merge_notes = ?
+      WHERE id = ?
+    `, [
+      is_merged ? 1 : 0,
+      is_merged ? (merge_type || 'دمج تعليمي') : null,
+      is_merged ? (disability_id !== undefined && disability_id !== null ? Number(disability_id) : null) : null,
+      is_merged ? (merge_decision_number || null) : null,
+      is_merged ? (merge_decision_date || null) : null,
+      merge_notes || null,
+      id
+    ]);
+
+    db.flushSQLite();
+    return res.json({ success: true, message: 'تم حفظ وتحديث بيانات الدمج بنجاح.' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -2423,10 +3450,11 @@ const getClassesForExport = (req, res) => {
     const sqliteDb = db.getSQLiteDb();
     const { gradeId, stageId, sectionId, academicYearId } = req.query;
     let query = `
-      SELECT DISTINCT c.id, c.class_name, g.grade_name_ar, g.grade_number, g.id AS grade_id, s.stage_name
+      SELECT DISTINCT c.id, c.class_name, c.class_number, g.grade_name_ar, g.grade_number, g.id AS grade_id, g.stage_id, s.stage_name, sec.type AS section_type
       FROM classes c
       JOIN grades_lookup g ON g.id = c.grade_id
       JOIN stages_lookup s ON s.id = g.stage_id
+      LEFT JOIN sections sec ON sec.id = s.section_id
       WHERE 1=1
     `;
     const params = [];
@@ -2434,21 +3462,19 @@ const getClassesForExport = (req, res) => {
     if (stageId) { query += ' AND g.stage_id = ?'; params.push(stageId); }
     if (sectionId) { query += ' AND s.section_id = ?'; params.push(sectionId); }
     if (academicYearId) { query += ' AND (c.academic_year_id = ? OR c.academic_year_id IS NULL OR c.academic_year_id = 0)'; params.push(academicYearId); }
-    query += ' ORDER BY g.grade_number ASC, c.class_name ASC';
+    query += ' ORDER BY g.grade_number ASC, COALESCE(c.class_number, CAST(c.class_name AS INTEGER), c.id) ASC';
     let classes = _all(sqliteDb, query, params);
 
-    // Group by grade_id to generate 1-1 ع, 1-2 ع sequential names
-    const gradeCounters = {};
     classes = classes.map(c => {
-      const gId = c.grade_id || 0;
-      gradeCounters[gId] = (gradeCounters[gId] || 0) + 1;
-      const subNum = gradeCounters[gId];
-      const stageSuffix = c.stage_name?.includes('إعداد') ? 'ع'
-        : c.stage_name?.includes('ثانو') ? 'ث'
-        : c.stage_name?.includes('ابتدائ') ? 'ب'
-        : c.stage_name?.includes('رياض') ? 'ك' : 'ع';
-      const formattedName = `${c.grade_number || 1}-${subNum} ${stageSuffix}`;
-      return { ...c, class_name: formattedName };
+      const formattedName = formatClassroomLabel({
+        classNumber: c.class_number,
+        className: c.class_name,
+        gradeNumber: c.grade_number,
+        stageCode: c.stage_id,
+        stageName: c.stage_name,
+        sectionType: c.section_type
+      });
+      return { ...c, class_name: formattedName, formatted_name: formattedName };
     });
 
     return res.json({ success: true, classes });
@@ -2470,7 +3496,7 @@ const exportReportPdf = async (req, res) => {
 
     const { classId, gradeId, stageId, academicYearId, mode } = req.query;
 
-    const school   = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const school = getSchoolMasterInfo(sqliteDb);
     const yearObj  = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
     const yearLabel = yearObj?.year_label || '';
     const classObj  = classId ? _get(sqliteDb, 'SELECT class_name FROM classes WHERE id = ?', [classId]) : null;
@@ -2547,7 +3573,7 @@ const openInExcel = async (req, res) => {
 
     const { classId, gradeId, stageId, academicYearId, mode } = req.query;
 
-    const school   = _get(sqliteDb, 'SELECT school_name, governorate, directorate FROM institution_config LIMIT 1') || {};
+    const school = getSchoolMasterInfo(sqliteDb);
     const yearObj  = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
     const yearLabel = yearObj?.year_label || '';
     const classObj  = classId ? _get(sqliteDb, 'SELECT class_name FROM classes WHERE id = ?', [classId]) : null;
@@ -2607,17 +3633,1110 @@ const openInExcel = async (req, res) => {
   }
 };
 
+// ─── GET /api/students/emis/registered-codes ────────────────────────────────
+// Returns all registered emis_student_codes and national_ids in Nepras DB for fast one-click comparison
+const getRegisteredEmisCodes = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const rows = _all(sqliteDb, `
+      SELECT id, student_code, national_id, emis_student_code, full_name_ar
+      FROM students
+      WHERE (is_deleted IS NULL OR is_deleted = 0)
+    `);
+
+    const emisCodes = [];
+    const nationalIds = [];
+    const allIdentifiers = new Set();
+
+    for (const r of rows) {
+      if (r.emis_student_code && String(r.emis_student_code).trim()) {
+        const code = String(r.emis_student_code).trim();
+        emisCodes.push(code);
+        allIdentifiers.add(code);
+      }
+      if (r.national_id && String(r.national_id).trim()) {
+        const nid = String(r.national_id).trim();
+        nationalIds.push(nid);
+        allIdentifiers.add(nid);
+      }
+      if (r.student_code && String(r.student_code).trim()) {
+        allIdentifiers.add(String(r.student_code).trim());
+      }
+    }
+
+    return res.json({
+      success: true,
+      count: rows.length,
+      emisCodes,
+      nationalIds,
+      allIdentifiers: Array.from(allIdentifiers),
+    });
+  } catch (err) {
+    console.error('getRegisteredEmisCodes error:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── GET /api/students/export/general-census ─────────────────────────────────
+const exportGeneralCensusExcel = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const ExcelJS = require('exceljs');
+    const sqliteDb = db.getSQLiteDb();
+    const { academicYearId, sectionId, stageId, gradeId } = req.query;
+
+    const school = getSchoolMasterInfo(sqliteDb);
+    const yearObj = academicYearId 
+      ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) 
+      : _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE is_current = 1 LIMIT 1');
+    const yearLabel = yearObj?.year_label || 'العام الحالي';
+
+    let q = `
+      SELECT 
+        s.id, s.full_name_ar AS name, s.gender, s.religion, s.nationality_id, s.is_returned_from_abroad,
+        nl.name_ar AS nationality_name,
+        stg.id AS stage_id, stg.stage_name,
+        g.id AS grade_id, g.grade_name_ar, g.grade_number,
+        c.id AS classroom_id, c.class_name AS classroom_name
+      FROM students s
+      LEFT JOIN grades_lookup g          ON g.id = s.grade_id
+      LEFT JOIN stages_lookup stg        ON stg.id = s.stage_id
+      LEFT JOIN nationalities_lookup nl  ON nl.id = s.nationality_id
+      LEFT JOIN class_enrollments ce     ON ce.student_id = s.id AND (s.academic_year_id IS NULL OR ce.academic_year_id = s.academic_year_id)
+      LEFT JOIN classes c                ON c.id = ce.class_id
+      WHERE (s.is_deleted IS NULL OR s.is_deleted = 0)
+        AND s.status NOT IN ('excluded', 'disconnected', 'suspended', 'مستبعد', 'منقطع', 'موقوف قيده')
+    `;
+    const params = [];
+    if (academicYearId) {
+      q += ' AND s.academic_year_id = ?';
+      params.push(academicYearId);
+    }
+    if (sectionId) {
+      q += ' AND s.section_id = ?';
+      params.push(sectionId);
+    }
+    if (stageId) {
+      q += ' AND g.stage_id = ?';
+      params.push(stageId);
+    }
+    if (gradeId) {
+      q += ' AND s.grade_id = ?';
+      params.push(gradeId);
+    }
+
+    q += ' ORDER BY stg.id ASC, g.grade_number ASC, s.full_name_ar ASC';
+    const students = _all(sqliteDb, q, params);
+
+    const stagesMap = new Map();
+    students.forEach(s => {
+      const stageName = (s.stage_name || 'المرحلة الدراسية').trim();
+      const stageIdKey = s.stage_id || stageName;
+      const gradeName = (s.grade_name_ar || 'الصف').trim();
+      const gradeIdKey = s.grade_id || gradeName;
+
+      if (!stagesMap.has(stageIdKey)) {
+        stagesMap.set(stageIdKey, {
+          stageId: stageIdKey,
+          stageName: stageName.startsWith('اجمالى') || stageName.startsWith('إجمالي') ? stageName : `اجمالى مرحلة ${stageName.replace(/المرحلة/g, '').trim()}`,
+          gradesMap: new Map()
+        });
+      }
+
+      const stageObj = stagesMap.get(stageIdKey);
+      if (!stageObj.gradesMap.has(gradeIdKey)) {
+        stageObj.gradesMap.set(gradeIdKey, {
+          gradeId: gradeIdKey,
+          gradeName,
+          students: []
+        });
+      }
+
+      stageObj.gradesMap.get(gradeIdKey).students.push(s);
+    });
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('إحصاء عام المقيدين', {
+      views: [{ rtl: true, showGridLines: true }],
+      pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+    });
+
+    ws.columns = [
+      { width: 28 }, // A: الصف
+      { width: 12 }, // B: عدد الفصول
+      { width: 10 }, // C: مقيدون بنون
+      { width: 10 }, // D: مقيدون بنات
+      { width: 10 }, // E: مسلم بنون
+      { width: 10 }, // F: مسلم بنات
+      { width: 12 }, // G: إجمالي مسلم
+      { width: 10 }, // H: مسيحي بنون
+      { width: 10 }, // I: مسيحي بنات
+      { width: 12 }, // J: إجمالي مسيحي
+      { width: 14 }, // K: الإجمالي
+      { width: 10 }, // L: وافد
+      { width: 12 }, // M: فوق الكثافة
+    ];
+
+    const thinBorder = {
+      top: { style: 'thin' },
+      bottom: { style: 'thin' },
+      left: { style: 'thin' },
+      right: { style: 'thin' }
+    };
+    const mediumBorder = {
+      top: { style: 'medium' },
+      bottom: { style: 'medium' },
+      left: { style: 'medium' },
+      right: { style: 'medium' }
+    };
+
+    // Header Rows
+    ws.mergeCells('A1:C1');
+    ws.getCell('A1').value = `محافظة: ${school.governorate || '...............'}\nإدارة: ${school.directorate ? `${school.directorate} التعليمية` : '...............'}\nمدرسة: ${school.school_name || '...............'}`;
+    ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'right', wrapText: true };
+    ws.getCell('A1').font = { name: 'Arial', size: 10, bold: true };
+    ws.getRow(1).height = 42;
+
+    ws.mergeCells('D1:K1');
+    ws.getCell('D1').value = `إحصاء عام بعدد التلاميذ المقيدين\nللعام الدراسي: ${yearLabel}`;
+    ws.getCell('D1').alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    ws.getCell('D1').font = { name: 'Arial', size: 14, bold: true, underline: true };
+
+    ws.mergeCells('L1:M1');
+    ws.getCell('L1').value = new Date().toLocaleDateString('ar-EG');
+    ws.getCell('L1').alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getCell('L1').font = { name: 'Arial', size: 9 };
+
+    ws.addRow([]);
+
+    // Table Header (Rows 3 & 4)
+    ws.mergeCells('A3:A4'); ws.getCell('A3').value = 'الصف';
+    ws.mergeCells('B3:B4'); ws.getCell('B3').value = 'عدد\nالفصول';
+    ws.mergeCells('C3:D3'); ws.getCell('C3').value = 'مقيدون';
+    ws.getCell('C4').value = 'بنون'; ws.getCell('D4').value = 'بنات';
+    ws.mergeCells('E3:F3'); ws.getCell('E3').value = 'مسلم';
+    ws.getCell('E4').value = 'بنون'; ws.getCell('F4').value = 'بنات';
+    ws.mergeCells('G3:G4'); ws.getCell('G3').value = 'اجمالى\nمسلم';
+    ws.mergeCells('H3:I3'); ws.getCell('H3').value = 'مسيحى';
+    ws.getCell('H4').value = 'بنون'; ws.getCell('I4').value = 'بنات';
+    ws.mergeCells('J3:J4'); ws.getCell('J3').value = 'إجمالى\nمسيحى';
+    ws.mergeCells('K3:K4'); ws.getCell('K3').value = 'الإجمالى';
+    ws.mergeCells('L3:L4'); ws.getCell('L3').value = 'وافد';
+    ws.mergeCells('M3:M4'); ws.getCell('M3').value = 'فوق\nالكثافة';
+
+    for (let r = 3; r <= 4; r++) {
+      ws.getRow(r).height = 24;
+      for (let c = 1; c <= 13; c++) {
+        const cell = ws.getCell(r, c);
+        cell.font = { name: 'Arial', size: 10, bold: true };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        cell.border = thinBorder;
+      }
+    }
+
+    let grandTotal = { classes: 0, boys: 0, girls: 0, mBoys: 0, mGirls: 0, mTot: 0, cBoys: 0, cGirls: 0, cTot: 0, total: 0, foreign: 0, over: 0 };
+
+    stagesMap.forEach(stg => {
+      let stageSubtotal = { classes: 0, boys: 0, girls: 0, mBoys: 0, mGirls: 0, mTot: 0, cBoys: 0, cGirls: 0, cTot: 0, total: 0, foreign: 0, over: 0 };
+
+      stg.gradesMap.forEach(grd => {
+        const gradeStudents = grd.students;
+        const distinctClasses = new Set(gradeStudents.map(s => s.classroom_name || s.classroom_id).filter(Boolean));
+        const classesCount = distinctClasses.size || (gradeStudents.length > 0 ? Math.ceil(gradeStudents.length / 35) : 0);
+
+        let boys = 0, girls = 0, mBoys = 0, mGirls = 0, cBoys = 0, cGirls = 0, foreign = 0, over = 0;
+        gradeStudents.forEach(s => {
+          const isBoy = (s.gender || '').trim() === 'ذكر' || (s.gender || '').trim() === 'بنين';
+          const isMuslim = (s.religion || '').trim().includes('مسلم');
+          const isChristian = (s.religion || '').trim().includes('مسيح');
+          const isForeign = (s.nationality_id && s.nationality_id !== 1 && !(s.nationality_name || '').includes('مصر')) ||
+                            (s.nationality_name && !s.nationality_name.includes('مصر') && s.nationality_name !== 'مصري');
+          const isOver = s.is_over_capacity === 1 || s.is_over_capacity === true;
+
+          if (isBoy) {
+            boys++;
+            if (isMuslim) mBoys++; else if (isChristian) cBoys++; else mBoys++;
+          } else {
+            girls++;
+            if (isMuslim) mGirls++; else if (isChristian) cGirls++; else mGirls++;
+          }
+          if (isForeign) foreign++;
+          if (isOver) over++;
+        });
+
+        const mTot = mBoys + mGirls;
+        const cTot = cBoys + cGirls;
+        const total = boys + girls;
+
+        stageSubtotal.classes += classesCount;
+        stageSubtotal.boys += boys; stageSubtotal.girls += girls;
+        stageSubtotal.mBoys += mBoys; stageSubtotal.mGirls += mGirls; stageSubtotal.mTot += mTot;
+        stageSubtotal.cBoys += cBoys; stageSubtotal.cGirls += cGirls; stageSubtotal.cTot += cTot;
+        stageSubtotal.total += total; stageSubtotal.foreign += foreign; stageSubtotal.over += over;
+
+        const row = ws.addRow([
+          grd.gradeName, classesCount, boys, girls, mBoys, mGirls, mTot, cBoys, cGirls, cTot, total, foreign, over
+        ]);
+        row.height = 20;
+        row.eachCell((cell, colNum) => {
+          cell.font = { name: 'Arial', size: 10, bold: colNum === 1 || colNum === 7 || colNum === 10 || colNum === 11 };
+          cell.alignment = { vertical: 'middle', horizontal: colNum === 1 ? 'right' : 'center' };
+          cell.border = thinBorder;
+        });
+      });
+
+      grandTotal.classes += stageSubtotal.classes;
+      grandTotal.boys += stageSubtotal.boys; grandTotal.girls += stageSubtotal.girls;
+      grandTotal.mBoys += stageSubtotal.mBoys; grandTotal.mGirls += stageSubtotal.mGirls; grandTotal.mTot += stageSubtotal.mTot;
+      grandTotal.cBoys += stageSubtotal.cBoys; grandTotal.cGirls += stageSubtotal.cGirls; grandTotal.cTot += stageSubtotal.cTot;
+      grandTotal.total += stageSubtotal.total; grandTotal.foreign += stageSubtotal.foreign; grandTotal.over += stageSubtotal.over;
+
+      const subRow = ws.addRow([
+        stg.stageName, stageSubtotal.classes, stageSubtotal.boys, stageSubtotal.girls,
+        stageSubtotal.mBoys, stageSubtotal.mGirls, stageSubtotal.mTot,
+        stageSubtotal.cBoys, stageSubtotal.cGirls, stageSubtotal.cTot,
+        stageSubtotal.total, stageSubtotal.foreign, stageSubtotal.over
+      ]);
+      subRow.height = 22;
+      subRow.eachCell((cell, colNum) => {
+        cell.font = { name: 'Arial', size: 10.5, bold: true };
+        cell.alignment = { vertical: 'middle', horizontal: colNum === 1 ? 'right' : 'center' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCFFAFE' } };
+        cell.border = thinBorder;
+      });
+    });
+
+    const grandRow = ws.addRow([
+      'الإجمالى العام', grandTotal.classes, grandTotal.boys, grandTotal.girls,
+      grandTotal.mBoys, grandTotal.mGirls, grandTotal.mTot,
+      grandTotal.cBoys, grandTotal.cGirls, grandTotal.cTot,
+      grandTotal.total, grandTotal.foreign, grandTotal.over
+    ]);
+    grandRow.height = 25;
+    grandRow.eachCell((cell, colNum) => {
+      cell.font = { name: 'Arial', size: 11, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF93C5FD' } };
+      cell.border = mediumBorder;
+    });
+
+    ws.addRow([]);
+    const sigRow1 = ws.addRow(['سكرتير المدرسة :', '', '', '', '', '', '', '', '', '', 'يعتمده: مدير المدرسة', '', '']);
+    sigRow1.font = { name: 'Arial', size: 10.5, bold: true };
+    const sigRow2 = ws.addRow(['وكيل شئون الطلبة :', '', '', '', '', '', '', '', '', '', '', '', '']);
+    sigRow2.font = { name: 'Arial', size: 10.5, bold: true };
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const encodedFileName = encodeURIComponent('إحصاء_عام_بعدد_التلاميذ_المقيدين.xlsx');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}`);
+    return res.send(buffer);
+
+  } catch (err) {
+    console.error('[exportGeneralCensusExcel error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const exportEnrollmentStatusCensusExcel = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const ExcelJS = require('exceljs');
+    const sqliteDb = db.getSQLiteDb();
+    const { academicYearId, sectionId, stageId, gradeId } = req.query;
+
+    const school = getSchoolMasterInfo(sqliteDb);
+    const yearObj = academicYearId 
+      ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) 
+      : _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE is_current = 1 LIMIT 1');
+    const yearLabel = yearObj?.year_label || 'العام الحالي';
+
+    let q = `
+      SELECT 
+        s.id, s.full_name_ar AS name, s.gender, s.religion, s.nationality_id, s.is_returned_from_abroad,
+        s.country_from, s.status, s.registration_status_id, s.enrollment_status,
+        nl.name_ar AS nationality_name,
+        stg.id AS stage_id, stg.stage_name,
+        g.id AS grade_id, g.grade_name_ar, g.grade_number,
+        c.id AS classroom_id, c.class_name AS classroom_name
+      FROM students s
+      LEFT JOIN grades_lookup g          ON g.id = s.grade_id
+      LEFT JOIN stages_lookup stg        ON stg.id = s.stage_id
+      LEFT JOIN nationalities_lookup nl  ON nl.id = s.nationality_id
+      LEFT JOIN class_enrollments ce     ON ce.student_id = s.id AND (s.academic_year_id IS NULL OR ce.academic_year_id = s.academic_year_id)
+      LEFT JOIN classes c                ON c.id = ce.class_id
+      WHERE (s.is_deleted IS NULL OR s.is_deleted = 0)
+        AND s.status NOT IN ('excluded', 'suspended', 'مستبعد', 'موقوف قيده')
+    `;
+    const params = [];
+    if (academicYearId) {
+      q += ' AND s.academic_year_id = ?';
+      params.push(academicYearId);
+    }
+    if (sectionId) {
+      q += ' AND s.section_id = ?';
+      params.push(sectionId);
+    }
+    if (stageId) {
+      q += ' AND g.stage_id = ?';
+      params.push(stageId);
+    }
+    if (gradeId) {
+      q += ' AND s.grade_id = ?';
+      params.push(gradeId);
+    }
+
+    q += ' ORDER BY stg.id ASC, g.grade_number ASC, s.full_name_ar ASC';
+    const students = _all(sqliteDb, q, params);
+
+    const stagesMap = new Map();
+    students.forEach(s => {
+      const stageName = s.stage_name || 'المرحلة التعليمية';
+      const sId = s.stage_id || 1;
+      const gradeName = s.grade_name_ar || 'الصف';
+      const gId = s.grade_id || 1;
+
+      if (!stagesMap.has(sId)) {
+        stagesMap.set(sId, { stageId: sId, stageName, gradesMap: new Map() });
+      }
+      const stg = stagesMap.get(sId);
+      if (!stg.gradesMap.has(gId)) {
+        stg.gradesMap.set(gId, { gradeId: gId, gradeName, students: [] });
+      }
+      stg.gradesMap.get(gId).students.push(s);
+    });
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'NeprasPro ERP';
+    wb.created = new Date();
+    const ws = wb.addWorksheet('إحصاء حالات القيد', {
+      views: [{ rtl: true, showGridLines: true }],
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+    });
+
+    // Column Widths (13 columns)
+    ws.columns = [
+      { key: 'grade',        width: 26 },
+      { key: 'classesCount', width: 11 },
+      { key: 'total',        width: 13 },
+      { key: 'boys',         width: 10 },
+      { key: 'girls',        width: 10 },
+      { key: 'muslim',       width: 11 },
+      { key: 'christian',    width: 11 },
+      { key: 'new',          width: 11 },
+      { key: 'transferred',  width: 11 },
+      { key: 'repeater',     width: 11 },
+      { key: 'disconnected', width: 11 },
+      { key: 'foreign',      width: 10 },
+      { key: 'returned',     width: 10 },
+    ];
+
+    // Header Meta
+    ws.mergeCells('A1:C1');
+    ws.getCell('A1').value = `محافظة: ${school.governorate || '................'}\nإدارة: ${school.directorate || '................'}\nمدرسة: ${school.school_name || '................'}`;
+    ws.getCell('A1').alignment = { vertical: 'middle', horizontal: 'right', wrapText: true };
+    ws.getCell('A1').font = { name: 'Arial', size: 10, bold: true };
+    ws.getRow(1).height = 42;
+
+    ws.mergeCells('D1:K1');
+    ws.getCell('D1').value = `إحصاء حالات القيد والتسجيل للتلاميذ\nللعام الدراسي: ${yearLabel} م`;
+    ws.getCell('D1').alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    ws.getCell('D1').font = { name: 'Arial', size: 14, bold: true, underline: true };
+
+    ws.mergeCells('L1:M1');
+    ws.getCell('L1').value = new Date().toLocaleDateString('ar-EG');
+    ws.getCell('L1').alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getCell('L1').font = { name: 'Arial', size: 9 };
+
+    ws.addRow([]);
+
+    // Table Header (Row 3)
+    const headerRow = ws.addRow([
+      'الصف', 'عدد\nالفصول', 'إجمالى\nالمقيدون', 'بنون', 'بنات', 'مسلم', 'مسيحى', 'مستجد', 'منقول', 'باق', 'منقطع', 'وافد', 'عائد'
+    ]);
+    headerRow.height = 28;
+    headerRow.eachCell((cell, colNum) => {
+      cell.font = { name: 'Arial', size: 11, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'medium' }, left: { style: 'thin' }, bottom: { style: 'medium' }, right: { style: 'thin' }
+      };
+      if (colNum === 3) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBFDBFE' } }; // Blue accent
+      } else if (colNum === 8) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } }; // Green accent
+      } else if (colNum === 9) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF9C3' } }; // Yellow accent
+      } else if (colNum === 10) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; // Red accent
+      } else {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+      }
+    });
+
+    const grandTotal = {
+      classes: 0, total: 0, boys: 0, girls: 0, muslim: 0, christian: 0,
+      newly: 0, trans: 0, rep: 0, disc: 0, foreign: 0, returned: 0
+    };
+
+    stagesMap.forEach(stg => {
+      const stageSubtotal = {
+        classes: 0, total: 0, boys: 0, girls: 0, muslim: 0, christian: 0,
+        newly: 0, trans: 0, rep: 0, disc: 0, foreign: 0, returned: 0
+      };
+
+      stg.gradesMap.forEach(grd => {
+        const gradeStudents = grd.students;
+        const distinctClasses = new Set(gradeStudents.map(s => s.classroom_name || s.classroom_id).filter(Boolean));
+        const classesCount = distinctClasses.size || (gradeStudents.length > 0 ? Math.ceil(gradeStudents.length / 35) : 0);
+
+        let boys = 0, girls = 0, muslim = 0, christian = 0;
+        let newly = 0, trans = 0, rep = 0, disc = 0, foreign = 0, returned = 0;
+
+        gradeStudents.forEach(s => {
+          const isBoy = (s.gender || '').trim() === 'ذكر' || (s.gender || '').trim() === 'بنين';
+          const isMuslim = (s.religion || '').trim().includes('مسلم');
+          const isChristian = (s.religion || '').trim().includes('مسيح');
+          const isForeign = (s.nationality_id && s.nationality_id !== 1 && !(s.nationality_name || '').includes('مصر')) ||
+                            (s.nationality_name && !s.nationality_name.includes('مصر') && s.nationality_name !== 'مصري');
+          const isReturned = s.is_returned_from_abroad === 1 || Boolean(s.country_from);
+
+          const rawStatus = (s.status || '').trim().toLowerCase();
+          const regStatus = (s.enrollment_status || '').trim().toLowerCase();
+          const regId = Number(s.registration_status_id);
+
+          let isDisc = false, isRep = false, isNew = false;
+
+          if (regId === 5 || rawStatus === 'disconnected' || rawStatus === 'absent' || regStatus.includes('منقطع')) {
+            isDisc = true;
+          } else if (regId === 3 || rawStatus === 'retained' || rawStatus === 'repeater' || regStatus.includes('باق')) {
+            isRep = true;
+          } else if (regId === 1 || rawStatus === 'new' || regStatus.includes('مستجد')) {
+            isNew = true;
+          }
+
+          if (isBoy) boys++; else girls++;
+          if (isMuslim) muslim++; else if (isChristian) christian++; else muslim++;
+
+          if (isDisc) disc++;
+          else if (isRep) rep++;
+          else if (isNew) newly++;
+          else trans++;
+
+          if (isForeign) foreign++;
+          if (isReturned) returned++;
+        });
+
+        const total = boys + girls;
+
+        stageSubtotal.classes += classesCount;
+        stageSubtotal.total += total;
+        stageSubtotal.boys += boys; stageSubtotal.girls += girls;
+        stageSubtotal.muslim += muslim; stageSubtotal.christian += christian;
+        stageSubtotal.newly += newly; stageSubtotal.trans += trans;
+        stageSubtotal.rep += rep; stageSubtotal.disc += disc;
+        stageSubtotal.foreign += foreign; stageSubtotal.returned += returned;
+
+        const row = ws.addRow([
+          grd.gradeName, classesCount, total, boys, girls, muslim, christian, newly, trans, rep, disc, foreign, returned
+        ]);
+        row.height = 20;
+        row.eachCell((cell, colNum) => {
+          cell.font = { name: 'Arial', size: 10, bold: colNum === 1 || colNum === 3 };
+          cell.alignment = { vertical: 'middle', horizontal: colNum === 1 ? 'right' : 'center' };
+          cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+          if (colNum === 3) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+        });
+      });
+
+      // Stage Subtotal Row
+      grandTotal.classes += stageSubtotal.classes;
+      grandTotal.total += stageSubtotal.total;
+      grandTotal.boys += stageSubtotal.boys; grandTotal.girls += stageSubtotal.girls;
+      grandTotal.muslim += stageSubtotal.muslim; grandTotal.christian += stageSubtotal.christian;
+      grandTotal.newly += stageSubtotal.newly; grandTotal.trans += stageSubtotal.trans;
+      grandTotal.rep += stageSubtotal.rep; grandTotal.disc += stageSubtotal.disc;
+      grandTotal.foreign += stageSubtotal.foreign; grandTotal.returned += stageSubtotal.returned;
+
+      const subRow = ws.addRow([
+        stg.stageName, stageSubtotal.classes, stageSubtotal.total, stageSubtotal.boys, stageSubtotal.girls,
+        stageSubtotal.muslim, stageSubtotal.christian, stageSubtotal.newly, stageSubtotal.trans,
+        stageSubtotal.rep, stageSubtotal.disc, stageSubtotal.foreign, stageSubtotal.returned
+      ]);
+      subRow.height = 22;
+      subRow.eachCell((cell, colNum) => {
+        cell.font = { name: 'Arial', size: 10.5, bold: true };
+        cell.alignment = { vertical: 'middle', horizontal: colNum === 1 ? 'right' : 'center' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colNum === 3 ? 'FFBAE6FD' : 'FFCFFAFE' } };
+        cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      });
+    });
+
+    // Grand Total Row
+    const grandRow = ws.addRow([
+      'الإجمالى العام', grandTotal.classes, grandTotal.total, grandTotal.boys, grandTotal.girls,
+      grandTotal.muslim, grandTotal.christian, grandTotal.newly, grandTotal.trans,
+      grandTotal.rep, grandTotal.disc, grandTotal.foreign, grandTotal.returned
+    ]);
+    grandRow.height = 24;
+    grandRow.eachCell((cell, colNum) => {
+      cell.font = { name: 'Arial', size: 11, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colNum === 3 ? 'FF60A5FA' : 'FF93C5FD' } };
+      cell.border = { top: { style: 'medium' }, left: { style: 'thin' }, bottom: { style: 'medium' }, right: { style: 'thin' } };
+    });
+
+    ws.addRow([]);
+    ws.addRow([]);
+
+    // Signatures
+    const sigRow = ws.addRow([
+      'سكرتير المدرسة', '', '', 'وكيل شئون الطلبة', '', '', '', '', '', 'مدير المدرسة', '', '', ''
+    ]);
+    sigRow.height = 24;
+    sigRow.eachCell(cell => {
+      cell.font = { name: 'Arial', size: 11, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const encodedFileName = encodeURIComponent('إحصاء_حالات_القيد.xlsx');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}`);
+    return res.send(buffer);
+
+  } catch (err) {
+    console.error('[exportEnrollmentStatusCensusExcel error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════════
+// ── STUDENT TRANSFERS (طلبات النقل وسجل المحولين) ─────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+
+// ─── POST /api/students/:id/transfers ─────────────────────────────────────
+const createTransfer = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const studentId = parseInt(req.params.id, 10);
+  const {
+    transferType = 'out',
+    toSchool, toDirectorate, toGradeId,
+    fromSchool, fromDirectorate, fromGradeId,
+    reason, transferDate, academicYearId, notes,
+    feesStatus, booksStatus, durationInGrade,
+    guardianName, guardianNationalId, guardianJob, guardianPhone, address
+  } = req.body;
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+
+    // Verify student exists
+    const stRows = sqliteDb.exec('SELECT id, full_name_ar, academic_year_id FROM students WHERE id = ?', [studentId]);
+    if (!stRows.length || !stRows[0].values.length) {
+      return res.status(404).json({ success: false, error: 'لم يتم العثور على بيانات الطالب.' });
+    }
+
+    const effectiveAyId = academicYearId ? parseInt(academicYearId, 10) : stRows[0].values[0][2];
+    const effDate = transferDate || new Date().toISOString().split('T')[0];
+
+    db.runTransaction(() => {
+      // 1. Insert into student_transfers table
+      sqliteDb.run(`
+        INSERT INTO student_transfers (
+          student_id, academic_year_id, transfer_type,
+          from_school, from_directorate, from_grade_id,
+          to_school, to_directorate, to_grade_id,
+          reason, transfer_date, is_completed, notes,
+          fees_status, books_status, duration_in_grade
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+      `, [
+        studentId, effectiveAyId, transferType,
+        fromSchool || null, fromDirectorate || null, fromGradeId ? parseInt(fromGradeId, 10) : null,
+        toSchool || null, toDirectorate || null, toGradeId ? parseInt(toGradeId, 10) : null,
+        reason || null, effDate, notes || null,
+        feesStatus || 'سدد', booksStatus || 'استلم', durationInGrade || 'سنة أولى (مستجد)'
+      ]);
+
+      // 2. Optionally update guardian and address information if provided
+      if (guardianName || guardianNationalId || guardianPhone || address) {
+        sqliteDb.run(`
+          UPDATE students SET
+            guardian_name = COALESCE(?, guardian_name),
+            guardian_national_id = COALESCE(?, guardian_national_id),
+            guardian_job = COALESCE(?, guardian_job),
+            guardian_phone = COALESCE(?, guardian_phone),
+            address = COALESCE(?, address)
+          WHERE id = ?
+        `, [
+          guardianName || null,
+          guardianNationalId || null,
+          guardianJob || null,
+          guardianPhone || null,
+          address || null,
+          studentId
+        ]);
+      }
+    });
+
+    db.flushSQLite();
+    console.log(`[Transfers] Created transfer request for student ID ${studentId} -> ${toSchool}`);
+    return res.status(201).json({ success: true, message: 'تم تسجيل طلب التحويل بنجاح.' });
+  } catch (err) {
+    console.error('[createTransfer error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── GET /api/students/transfers/list ─────────────────────────────────────
+const getTransfersList = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const sql = `
+      SELECT 
+        t.id, t.student_id, t.transfer_type,
+        t.from_school, t.from_directorate, t.from_grade_id,
+        t.to_school, t.to_directorate, t.to_grade_id,
+        t.reason, t.transfer_date, t.is_completed, t.completed_date, t.notes, t.created_at,
+        t.fees_status, t.books_status, t.duration_in_grade,
+        s.full_name_ar, s.student_code, s.national_id, s.birth_date, s.gender, s.religion,
+        COALESCE(NULLIF(s.guardian_name, ''), (CASE WHEN s.full_name_ar LIKE '% %' THEN SUBSTR(s.full_name_ar, INSTR(s.full_name_ar, ' ') + 1) ELSE 'ولي الأمر' END)) AS guardian_name,
+        s.guardian_relation, s.guardian_national_id, s.guardian_job, s.guardian_phone, s.guardian_phone_2,
+        s.address, s.status AS student_status, s.enrollment_status, s.class_id, s.student_serial_in_class,
+        g.grade_name_ar, g.grade_number,
+        c.class_name, c.class_number,
+        ay.year_label
+      FROM student_transfers t
+      JOIN students s ON s.id = t.student_id
+      LEFT JOIN grades_lookup g ON g.id = s.grade_id
+      LEFT JOIN classes c ON c.id = s.class_id
+      LEFT JOIN academic_years ay ON ay.id = t.academic_year_id
+      ORDER BY t.id DESC
+    `;
+
+    const rows = sqliteDb.exec(sql);
+    if (!rows.length || !rows[0].values.length) {
+      return res.json({ success: true, transfers: [] });
+    }
+
+    const cols = rows[0].columns;
+    const transfers = rows[0].values.map(vals => {
+      const obj = {};
+      cols.forEach((col, idx) => {
+        obj[col] = vals[idx];
+      });
+      return obj;
+    });
+
+    // Also get current institution settings from institution_config
+    let inst = {};
+    try {
+      const instRows = sqliteDb.exec('SELECT school_name, governorate, directorate, logo_url FROM institution_config LIMIT 1');
+      if (instRows.length && instRows[0].values.length) {
+        inst = {
+          schoolName: instRows[0].values[0][0],
+          school_name: instRows[0].values[0][0],
+          governorate: instRows[0].values[0][1],
+          directorate: instRows[0].values[0][2],
+          logoUrl: instRows[0].values[0][3]
+        };
+      }
+    } catch (e) {}
+
+    return res.json({ success: true, transfers, institution: inst });
+  } catch (err) {
+    console.error('[getTransfersList error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── PUT /api/students/transfers/:tid/complete ────────────────────────────
+// تأكيد التحويل ونقل الطالب من سجل القيد (ترحيل)
+const completeTransfer = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const tid = parseInt(req.params.tid || req.params.id, 10);
+  const nowStr = new Date().toISOString().split('T')[0];
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const tRows = sqliteDb.exec('SELECT student_id, to_school, transfer_type FROM student_transfers WHERE id = ?', [tid]);
+    if (!tRows.length || !tRows[0].values.length) {
+      return res.status(404).json({ success: false, error: 'طلب التحويل غير موجود.' });
+    }
+
+    const [studentId, toSchool, transferType] = tRows[0].values[0];
+
+    db.runTransaction(() => {
+      // 1. Mark transfer as completed
+      sqliteDb.run(`
+        UPDATE student_transfers SET
+          is_completed = 1,
+          completed_date = ?
+        WHERE id = ?
+      `, [nowStr, tid]);
+
+      // 2. Transfer student out of active registry
+      if (transferType === 'out') {
+        sqliteDb.run(`
+          UPDATE students SET
+            status = 'transferred',
+            enrollment_status = 'محول',
+            is_excluded = 1,
+            class_id = NULL
+          WHERE id = ?
+        `, [studentId]);
+      } else if (transferType === 'in') {
+        sqliteDb.run(`
+          UPDATE students SET
+            status = 'active',
+            enrollment_status = 'مقيد',
+            is_excluded = 0
+          WHERE id = ?
+        `, [studentId]);
+      }
+    });
+
+    db.flushSQLite();
+    console.log(`[Transfers] Completed transfer #${tid} for student #${studentId}`);
+    return res.json({ success: true, message: 'تم تأكيد التحويل ونقل الطالب من سجل القيد بنجاح.' });
+  } catch (err) {
+    console.error('[completeTransfer error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── PUT /api/students/transfers/:tid/cancel ──────────────────────────────
+// إلغاء التحويل وإعادة الطالب لسجل القيد مرة أخرى
+const cancelTransfer = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const tid = parseInt(req.params.tid || req.params.id, 10);
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const tRows = sqliteDb.exec('SELECT student_id, transfer_type FROM student_transfers WHERE id = ?', [tid]);
+    if (!tRows.length || !tRows[0].values.length) {
+      return res.status(404).json({ success: false, error: 'طلب التحويل غير موجود.' });
+    }
+
+    const [studentId, transferType] = tRows[0].values[0];
+
+    db.runTransaction(() => {
+      // 1. Mark transfer as pending / not completed
+      sqliteDb.run(`
+        UPDATE student_transfers SET
+          is_completed = 0,
+          completed_date = NULL
+        WHERE id = ?
+      `, [tid]);
+
+      // 2. Restore student to active registry
+      sqliteDb.run(`
+        UPDATE students SET
+          status = 'active',
+          enrollment_status = 'مقيد',
+          is_excluded = 0
+        WHERE id = ?
+      `, [studentId]);
+    });
+
+    db.flushSQLite();
+    console.log(`[Transfers] Cancelled transfer #${tid}, restored student #${studentId} to active registry`);
+    return res.json({ success: true, message: 'تم إلغاء التحويل وإعادة الطالب لسجل القيد بنجاح.' });
+  } catch (err) {
+    console.error('[cancelTransfer error]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ─── DELETE /api/students/transfers/:tid ──────────────────────────────────
+const deleteTransfer = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  const tid = parseInt(req.params.tid || req.params.id, 10);
+
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    sqliteDb.run('DELETE FROM student_transfers WHERE id = ?', [tid]);
+    db.flushSQLite();
+    return res.json({ success: true, message: 'تم حذف سجل التحويل بنجاح.' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const getDocumentTypes = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    _run(sqliteDb, `
+      CREATE TABLE IF NOT EXISTS document_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS student_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL,
+        doc_type_id INTEGER,
+        file_name TEXT,
+        file_path TEXT,
+        notes TEXT,
+        uploaded_at TEXT DEFAULT (datetime('now')),
+        verified_at TEXT
+      );
+    `);
+    const types = _all(sqliteDb, `SELECT * FROM document_types ORDER BY id ASC`);
+    return res.json({ success: true, types });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const addStudentDocument = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const studentId = Number(req.params.id);
+    const { doc_type_id, doc_type_name, notes, file_name } = req.body;
+    
+    let docTypeId = doc_type_id;
+    if (!docTypeId && doc_type_name) {
+      const existing = _get(sqliteDb, `SELECT id FROM document_types WHERE name = ?`, [doc_type_name.trim()]);
+      if (existing) {
+        docTypeId = existing.id;
+      } else {
+        _run(sqliteDb, `INSERT INTO document_types (name) VALUES (?)`, [doc_type_name.trim()]);
+        const created = _get(sqliteDb, `SELECT last_insert_rowid() as id`);
+        docTypeId = created?.id;
+      }
+    }
+
+    _run(sqliteDb, `
+      INSERT INTO student_documents (student_id, doc_type_id, file_name, notes, uploaded_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `, [studentId, docTypeId || null, file_name || null, notes || null]);
+
+    const docs = _all(sqliteDb, `
+      SELECT sd.*, dt.name AS doc_type_name
+      FROM student_documents sd
+      LEFT JOIN document_types dt ON dt.id = sd.doc_type_id
+      WHERE sd.student_id = ?
+      ORDER BY sd.id DESC`, [studentId]);
+
+    return res.json({ success: true, message: 'تم حفظ الوثيقة بنجاح.', documents: docs });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const deleteStudentDocument = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const studentId = Number(req.params.id);
+    const docId = Number(req.params.docId);
+    _run(sqliteDb, `DELETE FROM student_documents WHERE id = ? AND student_id = ?`, [docId, studentId]);
+
+    const docs = _all(sqliteDb, `
+      SELECT sd.*, dt.name AS doc_type_name
+      FROM student_documents sd
+      LEFT JOIN document_types dt ON dt.id = sd.doc_type_id
+      WHERE sd.student_id = ?
+      ORDER BY sd.id DESC`, [studentId]);
+
+    return res.json({ success: true, message: 'تم حذف الوثيقة بنجاح.', documents: docs });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const getRegister41Data = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { gradeId, academicYearId } = req.query;
+
+    let whereClause = "WHERE s.deleted_at IS NULL";
+    const params = [];
+
+    if (academicYearId) {
+      whereClause += " AND s.academic_year_id = ?";
+      params.push(Number(academicYearId));
+    }
+    if (gradeId) {
+      whereClause += " AND s.grade_id = ?";
+      params.push(Number(gradeId));
+    } else {
+      whereClause += " AND g.grade_number = 1";
+    }
+
+    whereClause += ` AND (s.enrollment_status IN ('new', 'promoted', 'مستجد', 'منقول')
+      OR s.status IN ('new', 'promoted', 'مستجد', 'منقول', 'نشط', 'active')
+      OR s.enrollment_status IS NULL
+      OR s.enrollment_status = '')
+      AND (s.enrollment_status NOT IN ('retained', 'باق', 'باق للإعادة', 'disconnected', 'منقطع', 'excluded', 'مستبعد')
+      AND s.status NOT IN ('retained', 'باق', 'باق للإعادة', 'disconnected', 'منقطع', 'excluded', 'مستبعد'))`;
+
+    const students = _all(sqliteDb, `
+      SELECT
+        s.id, s.student_code, s.full_name_ar, s.national_id, s.birth_date,
+        s.gender, s.religion, s.enrollment_date, s.enrollment_status,
+        s.guardian_name, s.guardian_relation, s.guardian_job, s.guardian_phone,
+        s.guardian_national_id, s.address, s.is_merged, s.merge_type,
+        g.grade_name_ar, g.grade_number,
+        st.stage_name,
+        c.class_name,
+        ay.year_label AS academic_year
+      FROM students s
+      LEFT JOIN grades_lookup  g   ON g.id = s.grade_id
+      LEFT JOIN stages_lookup  st  ON st.id = s.stage_id
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+      LEFT JOIN classes        c   ON c.id = ce.class_id
+      LEFT JOIN academic_years ay  ON ay.id = s.academic_year_id
+      ${whereClause}
+      ORDER BY s.full_name_ar ASC`, params);
+
+    const enriched = students.map((stu, idx) => {
+      let ageYears = 0, ageMonths = 0, ageDays = 0;
+      if (stu.birth_date) {
+        const bd = new Date(stu.birth_date);
+        const currentYear = parseInt(stu.academic_year?.split('/')[0]) || new Date().getFullYear();
+        const oct1 = new Date(currentYear, 9, 1);
+        
+        let years = oct1.getFullYear() - bd.getFullYear();
+        let months = oct1.getMonth() - bd.getMonth();
+        let days = oct1.getDate() - bd.getDate();
+
+        if (days < 0) {
+          months -= 1;
+          days += 30;
+        }
+        if (months < 0) {
+          years -= 1;
+          months += 12;
+        }
+        ageYears = Math.max(0, years);
+        ageMonths = Math.max(0, months);
+        ageDays = Math.max(0, days);
+      }
+
+      return {
+        serial: idx + 1,
+        ...stu,
+        age_oct_years: ageYears,
+        age_oct_months: ageMonths,
+        age_oct_days: ageDays,
+        fees_status: ''
+      };
+    });
+
+    const school = getSchoolMasterInfo(sqliteDb);
+    return res.json({ success: true, students: enriched, count: enriched.length, school });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const getOctoberCensusData = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { academicYearId } = req.query;
+
+    let yearId = academicYearId;
+    if (!yearId) {
+      const curYear = _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE is_current = 1 LIMIT 1`);
+      yearId = curYear?.id || 1;
+    }
+
+    const currentYearInfo = _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE id = ?`, [yearId]);
+
+    // 1. Detailed Class Rows
+    const rows = _all(sqliteDb, `
+      SELECT
+        st.stage_name,
+        g.id AS grade_id,
+        g.grade_name_ar,
+        g.grade_number,
+        c.id AS class_id,
+        c.class_name,
+        COUNT(s.id) AS total_students,
+        SUM(CASE WHEN s.gender = 'ذكر' OR s.gender = 'بنين' THEN 1 ELSE 0 END) AS boys_count,
+        SUM(CASE WHEN s.gender = 'أنثى' OR s.gender = 'بنات' THEN 1 ELSE 0 END) AS girls_count,
+        SUM(CASE WHEN s.religion LIKE '%مسلم%' OR s.religion = '1' THEN 1 ELSE 0 END) AS muslims_count,
+        SUM(CASE WHEN s.religion LIKE '%مسيح%' OR s.religion = '2' THEN 1 ELSE 0 END) AS christians_count,
+        SUM(CASE WHEN n.name = 'مصري' OR s.nationality_id = 1 OR s.nationality_id IS NULL THEN 1 ELSE 0 END) AS egyptian_count,
+        SUM(CASE WHEN n.name IS NOT NULL AND n.name != 'مصري' AND s.nationality_id > 1 THEN 1 ELSE 0 END) AS foreign_count,
+        SUM(CASE WHEN s.enrollment_status = 'new' OR s.status = 'مستجد' OR s.registration_status_id = 1 THEN 1 ELSE 0 END) AS new_count,
+        SUM(CASE WHEN s.enrollment_status IN ('promoted', 'منقول', 'مقيد') OR s.status IN ('promoted', 'منقول', 'مقيد', 'نشط') OR s.registration_status_id = 2 OR (s.enrollment_status IS NULL AND (s.status IS NULL OR s.status = '')) THEN 1 ELSE 0 END) AS promoted_count,
+        SUM(CASE WHEN s.enrollment_status IN ('retained', 'باق', 'باق للإعادة') OR s.status IN ('retained', 'باق', 'باق للإعادة') OR s.registration_status_id = 3 THEN 1 ELSE 0 END) AS retained_count,
+        SUM(CASE WHEN s.enrollment_status IN ('disconnected', 'منقطع') OR s.status IN ('disconnected', 'منقطع') OR s.registration_status_id = 5 THEN 1 ELSE 0 END) AS disconnected_count,
+        SUM(CASE WHEN s.is_merged = 1 THEN 1 ELSE 0 END) AS merged_count
+      FROM students s
+      JOIN grades_lookup g ON g.id = s.grade_id
+      LEFT JOIN stages_lookup st ON st.id = s.stage_id
+      LEFT JOIN nationalities n ON n.id = s.nationality_id
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+      LEFT JOIN classes c ON c.id = ce.class_id
+      WHERE s.deleted_at IS NULL AND (s.academic_year_id = ? OR ? IS NULL)
+      GROUP BY g.id, c.id
+      ORDER BY g.grade_number ASC, c.class_number ASC
+    `, [yearId, yearId]);
+
+    // 2. Grade & Stage Summary Rows
+    const gradeSummaries = _all(sqliteDb, `
+      SELECT
+        st.stage_name,
+        g.id AS grade_id,
+        g.grade_name_ar,
+        g.grade_number,
+        COUNT(DISTINCT c.id) AS classes_count,
+        COUNT(s.id) AS total_students,
+        SUM(CASE WHEN s.gender = 'ذكر' OR s.gender = 'بنين' THEN 1 ELSE 0 END) AS boys_count,
+        SUM(CASE WHEN s.gender = 'أنثى' OR s.gender = 'بنات' THEN 1 ELSE 0 END) AS girls_count,
+        SUM(CASE WHEN s.religion LIKE '%مسلم%' OR s.religion = '1' THEN 1 ELSE 0 END) AS muslims_count,
+        SUM(CASE WHEN s.religion LIKE '%مسيح%' OR s.religion = '2' THEN 1 ELSE 0 END) AS christians_count,
+        SUM(CASE WHEN n.name = 'مصري' OR s.nationality_id = 1 OR s.nationality_id IS NULL THEN 1 ELSE 0 END) AS egyptian_count,
+        SUM(CASE WHEN n.name IS NOT NULL AND n.name != 'مصري' AND s.nationality_id > 1 THEN 1 ELSE 0 END) AS foreign_count,
+        SUM(CASE WHEN s.enrollment_status = 'new' OR s.status = 'مستجد' OR s.registration_status_id = 1 THEN 1 ELSE 0 END) AS new_count,
+        SUM(CASE WHEN s.enrollment_status IN ('promoted', 'منقول', 'مقيد') OR s.status IN ('promoted', 'منقول', 'مقيد', 'نشط') OR s.registration_status_id = 2 OR (s.enrollment_status IS NULL AND (s.status IS NULL OR s.status = '')) THEN 1 ELSE 0 END) AS promoted_count,
+        SUM(CASE WHEN s.enrollment_status IN ('retained', 'باق', 'باق للإعادة') OR s.status IN ('retained', 'باق', 'باق للإعادة') OR s.registration_status_id = 3 THEN 1 ELSE 0 END) AS retained_count,
+        SUM(CASE WHEN s.enrollment_status IN ('disconnected', 'منقطع') OR s.status IN ('disconnected', 'منقطع') OR s.registration_status_id = 5 THEN 1 ELSE 0 END) AS disconnected_count,
+        SUM(CASE WHEN s.is_merged = 1 THEN 1 ELSE 0 END) AS merged_count
+      FROM students s
+      JOIN grades_lookup g ON g.id = s.grade_id
+      LEFT JOIN stages_lookup st ON st.id = s.stage_id
+      LEFT JOIN nationalities n ON n.id = s.nationality_id
+      LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
+      LEFT JOIN classes c ON c.id = ce.class_id
+      WHERE s.deleted_at IS NULL AND (s.academic_year_id = ? OR ? IS NULL)
+      GROUP BY g.id
+      ORDER BY g.grade_number ASC
+    `, [yearId, yearId]);
+
+    const school = getSchoolMasterInfo(sqliteDb);
+    return res.json({ success: true, rows, gradeSummaries, academicYear: currentYearInfo?.year_label || '', school });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
-  getFormOptions,
-  getStats,
-  getStudents,
-  getStudent,
   createStudent,
   updateStudent,
+  getStudent,
+  getStudents,
+  getFormOptions,
+  getStats,
   createTransfer,
   completeTransfer,
+  cancelTransfer,
+  deleteTransfer,
   getTransfersList,
   exportExcelTemplate,
+  exportGeneralCensusExcel,
+  exportEnrollmentStatusCensusExcel,
   exportClassListExcel,
   exportFullClassListExcel,
   exportTransfersExcel,
@@ -2631,17 +4750,29 @@ module.exports = {
   purgeAllStudents,
   deleteStudentPermanently,
   bulkDeletePermanently,
+  getRegisteredEmisCodes,
   emisSync,
   emisStatus,
   emisApprove,
   emisApproveAll,
   emisClearSession,
+  getEmisConfig,
+  updateEmisConfig,
+  getEmisDiff,
   getAbsenceWarnings,
   recordStudentAbsence,
+  getWeeklyClassAbsence,
+  recordBulkWeeklyAbsence,
+  updateStudentMergeInfo,
   generateSeatingNumbers,
   getSeatingLists,
   getDuplicateStudents,
   getClassesForExport,
   exportReportPdf,
   openInExcel,
+  getDocumentTypes,
+  addStudentDocument,
+  deleteStudentDocument,
+  getRegister41Data,
+  getOctoberCensusData,
 };

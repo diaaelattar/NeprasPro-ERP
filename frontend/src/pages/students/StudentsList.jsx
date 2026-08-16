@@ -4,30 +4,37 @@ import {
   GraduationCap, CheckCircle, ArrowLeftRight, RefreshCw,
   FileSpreadsheet, Eye, RotateCcw, Edit3, Layers,
   AlertTriangle, CheckSquare, Square, X, Save, UserX, Trash2,
-  Grid, ChevronsUpDown, ChevronUp, ChevronDown, SlidersHorizontal
+  Grid, ChevronsUpDown, ChevronUp, ChevronDown, SlidersHorizontal, Download, FileText
 } from 'lucide-react';
 import API_BASE_URL from '../../config/api';
+import MergeStudentModal from './MergeStudentModal';
+import Register41PrintModal from './Register41PrintModal';
+import OctoberCensusPrintModal from './OctoberCensusPrintModal';
+import {
+  ENROLLMENT_STATUS_OPTIONS,
+  RELIGIONS,
+  GENDERS,
+  FOREIGN_LANGUAGES,
+  DISABILITY_TYPES,
+  SECONDARY_SPECIALIZATIONS,
+  GUARDIAN_RELATIONS,
+  formatClassNumeric
+} from '../../constants/lookupOptions';
 
 const API = API_BASE_URL;
 
 const STATUS_LABELS = {
-  new:          { label: 'مستجد',        color: '#3b82f6' },
-  promoted:     { label: 'منقول',        color: '#10b981' },
-  retained:     { label: 'باقٍ للإعادة', color: '#f59e0b' },
-  suspended:    { label: 'موقوف قيده',   color: '#ef4444' },
-  disconnected: { label: 'منقطع',        color: '#8b5cf6' },
-  excluded:     { label: 'مستبعد',       color: '#6b7280' },
+  new:          { label: 'مستجد',     color: '#3b82f6' },
+  promoted:     { label: 'منقول',      color: '#10b981' },
+  retained:     { label: 'باق',        color: '#f59e0b' },
+  suspended:    { label: 'موقوف قيده', color: '#ef4444' },
+  disconnected: { label: 'منقطع',      color: '#8b5cf6' },
+  excluded:     { label: 'مستبعد',     color: '#6b7280' },
 };
 
-const TRACK_LABELS = {
-  medicine_life: 'طب وعلوم حياة', engineering_cs: 'هندسة وحاسب',
-  business: 'أعمال', arts_humanities: 'آداب وفنون',
-  science_bio: 'علمي علوم', science_math: 'علمي رياضيات', literary: 'أدبي',
-};
-
-const SECOND_LANGS  = ['فرنسي', 'ألماني', 'إيطالي', 'إسباني', 'لا يوجد'];
-const RELIGION_OPTS = ['مسلم', 'مسيحي'];
-const GENDER_OPTS   = ['ذكر', 'أنثى'];
+const SECOND_LANGS  = FOREIGN_LANGUAGES.filter(fl => fl.name !== 'عربي').map(fl => fl.name);
+const RELIGION_OPTS = RELIGIONS.map(r => r.name);
+const GENDER_OPTS   = GENDERS.map(g => g.name);
 
 /* ── SortTh: clickable sortable column header ────────────────── */
 function SortTh({ label, field, sortBy, sortDir, onSort, style = {} }) {
@@ -235,6 +242,23 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [duplicatesData, setDuplicatesData] = useState(null);
   const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [selectedMergeStudent, setSelectedMergeStudent] = useState(null);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [showRegister41, setShowRegister41] = useState(false);
+  const [showOctoberCensus, setShowOctoberCensus] = useState(false);
+  const [reportsMenuOpen, setReportsMenuOpen] = useState(false);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('.page-header-actions')) {
+        setReportsMenuOpen(false);
+        setToolsMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, []);
 
   const handleCheckDuplicates = () => {
     setCheckingDuplicates(true);
@@ -335,10 +359,10 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
   useEffect(() => { loadStudents(); }, [loadStudents]);
   useEffect(() => { if (success) { const t = setTimeout(() => setSuccess(''), 4000); return () => clearTimeout(t); } }, [success]);
 
-  const filteredStages = formOpts.stages?.filter(s => !filters.sectionId || String(s.section_id) === filters.sectionId) || [];
-  const filteredGrades = formOpts.grades?.filter(g => !filters.stageId  || String(g.stage_id)   === filters.stageId)   || [];
+  const filteredStages = formOpts.stages || [];
+  const filteredGrades = filters.stageId ? (formOpts.grades?.filter(g => String(g.stage_id) === String(filters.stageId)) || []) : [];
   const totalPages = Math.ceil(total / limit);
-  const isSecondary = formOpts.stages?.find(s => String(s.id) === filters.stageId)?.stage_name === 'ثانوي';
+  const isSecondary = formOpts.stages?.find(s => String(s.id) === filters.stageId)?.stage_name_ar?.includes('ثانوي') || formOpts.stages?.find(s => String(s.id) === filters.stageId)?.stage_code === 'secondary';
 
   const handleSort = (field, dir) => { setSortBy(field); setSortDir(dir); };
   const advCount = [filters.gender, filters.religion, filters.isMerged, filters.nationalityId].filter(Boolean).length;
@@ -487,84 +511,187 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
             <p className="page-sub">إدارة بيانات الطلاب وملفاتهم الأكاديمية</p>
           </div>
         </div>
-        <div className="page-header-actions" style={{ position: 'relative' }}>
-          <button className="btn-add-student" onClick={onAdd}><UserPlus size={16} /> <span>تسجيل جديد</span></button>
-          <button className="btn-import-excel" onClick={onImport}><FileSpreadsheet size={15} /> <span>استيراد Excel</span></button>
+        <div className="page-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
+          {/* الزر الرئيسي لإضافة طالب */}
+          <button className="btn-add-student" onClick={onAdd} style={{ padding: '8px 18px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <UserPlus size={16} /> <span>تسجيل جديد</span>
+          </button>
 
+          {/* قائمة السجلات والتقارير المجمعة */}
           <div style={{ position: 'relative' }}>
             <button
-              type="button"
               className="btn-import-excel"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMoreOps(prev => !prev);
+              onClick={() => {
+                setReportsMenuOpen(!reportsMenuOpen);
+                setToolsMenuOpen(false);
               }}
-              style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: 'pointer' }}
+              style={{
+                background: reportsMenuOpen ? '#e0f2fe' : '#f8fafc',
+                color: '#0369a1',
+                borderColor: '#bae6fd',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
             >
-              <span>إجراءات إضافية {showMoreOps ? '▲' : '▼'}</span>
+              <FileText size={15} /> <span>السجلات والتقارير</span> <ChevronDown size={14} />
             </button>
 
-            {showMoreOps && (
-              <>
-                <div
-                  style={{ position: 'fixed', inset: 0, zIndex: 99998 }}
-                  onClick={() => setShowMoreOps(false)}
-                />
-                <div
-                  className="more-ops-dropdown-menu"
-                  style={{
-                    position: 'absolute',
-                    top: 'calc(100% + 6px)',
-                    right: 0,
-                    left: 'auto',
-                    zIndex: 99999,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                    padding: 8,
-                    minWidth: 220,
-                    background: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: 12,
-                    boxShadow: '0 10px 25px rgba(15, 23, 42, 0.18)'
-                  }}
+            {reportsMenuOpen && (
+              <div style={{
+                position: 'absolute', top: '115%', left: 0, minWidth: 230,
+                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.18)', zIndex: 1000,
+                padding: '6px 0', direction: 'rtl'
+              }}>
+                <button
+                  onClick={() => { setShowRegister41(true); setReportsMenuOpen(false); }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
                 >
-                  {onQuickEdit && (
-                    <button className="more-ops-menu-item" onClick={() => { onQuickEdit(); setShowMoreOps(false); }}>
-                      <Edit3 size={14} style={{ marginLeft: 8 }} /> <span>تعديل سريع</span>
+                  <FileSpreadsheet size={15} color="#0284c7" /> <span>سجل 41 مستجدين</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowOctoberCensus(true); setReportsMenuOpen(false); }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <Layers size={15} color="#059669" /> <span>استمارة 1 إحصاء الاستقرار</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSelectedMergeStudent(null);
+                    setIsMergeModalOpen(true);
+                    setReportsMenuOpen(false);
+                  }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <span style={{ fontSize: 14 }}>♿</span> <span>تسجيل دمج وطباعة</span>
+                </button>
+
+                <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+
+                <button
+                  onClick={async () => {
+                    setReportsMenuOpen(false);
+                    try {
+                      const q = new URLSearchParams();
+                      if (filters.sectionId)     q.set('sectionId',     filters.sectionId);
+                      if (filters.stageId)       q.set('stageId',       filters.stageId);
+                      if (filters.gradeId)       q.set('gradeId',       filters.gradeId);
+                      if (filters.classId)       q.set('classId',       filters.classId);
+                      if (filters.status)        q.set('status',        filters.status);
+                      if (filters.gender)        q.set('gender',        filters.gender);
+                      if (filters.academicYearId)q.set('academicYearId',filters.academicYearId);
+                      const res = await fetch(`${API}/students/export/excel?${q.toString()}`);
+                      if (!res.ok) throw new Error('فشل تصدير البيانات');
+                      const blob = await res.blob();
+                      const url  = URL.createObjectURL(blob);
+                      const a    = document.createElement('a');
+                      a.href     = url;
+                      a.download = `students_export_${new Date().toISOString().slice(0,10)}.xlsx`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      alert('خطأ في التصدير: ' + err.message);
+                    }
+                  }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#16a34a', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f0fdf4'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <Download size={15} color="#16a34a" /> <span>تصدير قائمة الطلاب (Excel)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* قائمة أدوات وإجراءات الطلاب المجمعة */}
+          <div style={{ position: 'relative' }}>
+            <button
+              className="btn-import-excel"
+              onClick={() => {
+                setToolsMenuOpen(!toolsMenuOpen);
+                setReportsMenuOpen(false);
+              }}
+              style={{
+                background: toolsMenuOpen ? '#f1f5f9' : '#f8fafc',
+                color: '#334155',
+                borderColor: '#cbd5e1',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <SlidersHorizontal size={15} /> <span>أدوات وإجراءات</span> <ChevronDown size={14} />
+            </button>
+
+            {toolsMenuOpen && (
+              <div style={{
+                position: 'absolute', top: '115%', left: 0, minWidth: 230,
+                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.18)', zIndex: 1000,
+                padding: '6px 0', direction: 'rtl'
+              }}>
+                <button
+                  onClick={() => { onImport(); setToolsMenuOpen(false); }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <FileSpreadsheet size={15} color="#0284c7" /> <span>استيراد Excel</span>
+                </button>
+
+                <button
+                  onClick={() => { onDistribute(); setToolsMenuOpen(false); }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <Layers size={15} color="#16a34a" /> <span>تسكين وتوزيع الفصول</span>
+                </button>
+
+                <button
+                  onClick={() => { handleExtractNationalId(); setToolsMenuOpen(false); }}
+                  disabled={actionLoading}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <RefreshCw size={15} color="#d97706" className={actionLoading ? 'spin' : ''} /> <span>تحديث الهويات وتواريخ الميلاد</span>
+                </button>
+
+                <button
+                  onClick={() => { handleCheckDuplicates(); setToolsMenuOpen(false); }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <Search size={15} color="#0284c7" /> <span>فحص الأرقام القومية المكررة</span>
+                </button>
+
+                {isSuperAdmin && (
+                  <>
+                    <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+                    <button
+                      onClick={() => { setShowPurgeModal(true); setToolsMenuOpen(false); }}
+                      style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#dc2626', cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#fee2e2'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      <Trash2 size={15} color="#dc2626" /> <span>حذف/تصفير جميع الطلاب</span>
                     </button>
-                  )}
-                  {onTransfers && (
-                    <button className="more-ops-menu-item" onClick={() => { onTransfers(); setShowMoreOps(false); }}>
-                      <ArrowLeftRight size={14} style={{ marginLeft: 8 }} /> <span>التحويلات</span>
-                    </button>
-                  )}
-                  {onAbsence && (
-                    <button className="more-ops-menu-item" onClick={() => { onAbsence(); setShowMoreOps(false); }}>
-                      <AlertTriangle size={14} style={{ marginLeft: 8, color: '#f59e0b' }} /> <span>إنذارات الغياب والقيد</span>
-                    </button>
-                  )}
-                  {onDistribute && (
-                    <button className="more-ops-menu-item" onClick={() => { onDistribute(); setShowMoreOps(false); }}>
-                      <Grid size={14} style={{ marginLeft: 8 }} /> <span>توزيع الفصول</span>
-                    </button>
-                  )}
-                  <button className="more-ops-menu-item" onClick={() => { handleExtractNationalId(); setShowMoreOps(false); }} disabled={actionLoading}>
-                    <RefreshCw size={14} style={{ marginLeft: 8 }} className={actionLoading ? 'spin' : ''} /> <span>تحديث الهويات</span>
-                  </button>
-                  <button className="more-ops-menu-item" onClick={() => { handleCheckDuplicates(); setShowMoreOps(false); }}>
-                    <Search size={14} style={{ marginLeft: 8, color: '#0284c7' }} /> <span>فحص التكرار والأرقام القومية</span>
-                  </button>
-                  {isSuperAdmin && (
-                    <>
-                      <div style={{ borderTop: '1px solid #e2e8f0', margin: '4px 0' }} />
-                      <button className="more-ops-menu-item" onClick={() => { setShowPurgeModal(true); setShowMoreOps(false); }} style={{ color: '#ef4444' }}>
-                        <Trash2 size={14} style={{ marginLeft: 8, color: '#ef4444' }} /> <span>حذف جميع الطلاب</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              </>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -593,7 +720,7 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
               </div>
             </div>
           </div>
-          <div className="stat-chip transferred"><div className="stat-icon"><ArrowLeftRight size={20} /></div><div><div className="stat-val">{stats.retained}</div><div className="stat-lbl">باقون للإعادة</div></div></div>
+          <div className="stat-chip transferred" style={{ cursor: 'pointer' }} onClick={onTransfers} title="عرض سجل التحويلات"><div className="stat-icon"><ArrowLeftRight size={20} /></div><div><div className="stat-val">{stats.transfers ?? 0}</div><div className="stat-lbl">التحويلات وطلبات النقل</div></div></div>
           {stats.disconnected > 0 && (
             <div className="stat-chip warning" style={{ cursor: 'pointer' }} onClick={() => setViewMode('disconnected')}>
               <div className="stat-icon">⚠️</div>
@@ -621,6 +748,15 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
               </div>
             </div>
           )}
+          {stats.merged > 0 && (
+            <div className="stat-chip" style={{ cursor: 'pointer', background: 'rgba(2, 132, 199, 0.1)', borderColor: 'rgba(2, 132, 199, 0.3)' }} onClick={() => setViewMode('merged')}>
+              <div className="stat-icon">♿</div>
+              <div>
+                <div className="stat-val" style={{ color: '#0284c7' }}>{stats.merged}</div>
+                <div className="stat-lbl" style={{ color: '#0369a1' }}>طلاب دمج</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -633,6 +769,10 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
         >
           📋 سجل القيد الرئيسي ({stats.total})
         </button>
+        <button className="form-tab" onClick={onTransfers} style={{ background: '#f0f9ff', borderColor: '#38bdf8', color: '#0369a1', fontWeight: 800 }}>
+          🔄 التحويلات وطلبات النقل
+        </button>
+        <button className={`form-tab ${viewMode === 'merged' ? 'active' : ''}`} onClick={() => setViewMode('merged')} style={viewMode === 'merged' ? { background: '#e0f2fe', borderColor: '#0284c7', color: '#0369a1', fontWeight: 800 } : {}}>♿ سجل طلاب الدمج ({stats.merged || 0})</button>
         <button className={`form-tab ${viewMode === 'disconnected' ? 'active' : ''}`} onClick={() => setViewMode('disconnected')} style={viewMode === 'disconnected' ? { background: '#fef3c7', borderColor: '#d97706', color: '#92400e', fontWeight: 800 } : {}}>⚠️ سجل المنقطعين ({stats.disconnected || 0})</button>
         <button className={`form-tab ${viewMode === 'suspended' ? 'active' : ''}`} onClick={() => setViewMode('suspended')} style={viewMode === 'suspended' ? { background: '#ffedd5', borderColor: '#c2410c', color: '#9a3412', fontWeight: 800 } : {}}>🛑 سجل الموقوف قيدهم ({stats.suspended || 0})</button>
         <button className={`form-tab ${viewMode === 'excluded' ? 'active' : ''}`} onClick={() => setViewMode('excluded')} style={viewMode === 'excluded' ? { background: '#fee2e2', borderColor: '#ef4444', color: '#991b1b', fontWeight: 800 } : {}}>🚫 سجل المستبعدين ({stats.excluded || 0})</button>
@@ -689,21 +829,29 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
             <Search size={16} className="search-icon" />
             <input type="text" placeholder="بحث بالاسم أو الكود أو الرقم القومي..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} className="search-input" />
           </div>
-          <select className="filter-select" value={filters.academicYearId} onChange={e => setFilters(f => ({ ...f, academicYearId: e.target.value }))}>
-            <option value="">كل الأعوام</option>
-            {formOpts.academicYears?.map(y => <option key={y.id} value={y.id}>{y.year_label}</option>)}
-          </select>
+          {formOpts.academicYears?.length > 1 && (
+            <select className="filter-select" value={filters.academicYearId} onChange={e => setFilters(f => ({ ...f, academicYearId: e.target.value }))}>
+              <option value="">كل الأعوام</option>
+              {formOpts.academicYears.map(y => <option key={y.id} value={y.id}>{y.year_label}</option>)}
+            </select>
+          )}
           <select className="filter-select" value={filters.sectionId} onChange={e => setFilters(f => ({ ...f, sectionId: e.target.value, stageId: '', gradeId: '' }))} disabled={activeSectionId && activeSectionId !== 'all'}>
             <option value="">كل الأقسام</option>
             {formOpts.sections?.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <select className="filter-select" value={filters.stageId} onChange={e => setFilters(f => ({ ...f, stageId: e.target.value, gradeId: '' }))}>
+          <select className="filter-select" value={filters.stageId} onChange={e => setFilters(f => ({ ...f, stageId: e.target.value, gradeId: '', classId: '' }))}>
             <option value="">كل المراحل</option>
-            {filteredStages.map(s => <option key={s.id} value={s.id}>{s.stage_name}</option>)}
+            {filteredStages.map(s => <option key={s.id} value={s.id}>{s.stage_name_ar || s.stage_name || s.name}</option>)}
           </select>
-          <select className="filter-select" value={filters.gradeId} onChange={e => setFilters(f => ({ ...f, gradeId: e.target.value, classId: '' }))}>
-            <option value="">كل الصفوف</option>
-            {filteredGrades.map(g => <option key={g.id} value={g.id}>{g.grade_name_ar}</option>)}
+          <select 
+            className="filter-select" 
+            value={filters.gradeId} 
+            onChange={e => setFilters(f => ({ ...f, gradeId: e.target.value, classId: '' }))}
+            disabled={!filters.stageId}
+            style={!filters.stageId ? { opacity: 0.65, background: 'var(--bg-secondary, #f8fafc)', cursor: 'not-allowed' } : {}}
+          >
+            <option value="">{filters.stageId ? 'كل الصفوف' : 'اختر المرحلة أولاً--'}</option>
+            {filteredGrades.map(g => <option key={g.id} value={g.id}>{g.grade_name_ar || g.name}</option>)}
           </select>
           {classrooms.length > 0 && (
             <select className="filter-select" value={filters.classId} onChange={e => setFilters(f => ({ ...f, classId: e.target.value }))}>
@@ -771,9 +919,9 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                 <span style={{ fontSize: 11, color: 'var(--text-secondary, #4b5563)', whiteSpace: 'nowrap' }}>حالة القيد:</span>
                 <div style={{ display: 'flex', gap: 5 }}>
                   <PillBtn active={filters.status === ''}         color="white" onClick={() => setFilters(f => ({ ...f, status: '' }))}>الكل</PillBtn>
+                  <PillBtn active={filters.status === 'new'}      color="blue"  onClick={() => setFilters(f => ({ ...f, status: 'new' }))}>⭐ مستجد</PillBtn>
                   <PillBtn active={filters.status === 'promoted'} color="green" onClick={() => setFilters(f => ({ ...f, status: 'promoted' }))}>✅ منقول</PillBtn>
-                  <PillBtn active={filters.status === 'retained'} color="amber" onClick={() => setFilters(f => ({ ...f, status: 'retained' }))}>🔄 باقٍ للإعادة</PillBtn>
-                  <PillBtn active={filters.status === 'suspended'} color="indigo" onClick={() => setFilters(f => ({ ...f, status: 'suspended' }))}>🔴 موقوف</PillBtn>
+                  <PillBtn active={filters.status === 'retained'} color="amber" onClick={() => setFilters(f => ({ ...f, status: 'retained' }))}>🔄 باق</PillBtn>
                 </div>
               </div>
             )}
@@ -866,7 +1014,7 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           {s.classroom_name
-                            ? <span className="tag-track" style={{ background: '#6366f122', color: '#818cf8' }}>{s.classroom_name}</span>
+                            ? <span className="tag-track" style={{ background: '#6366f122', color: '#818cf8', fontWeight: 800, fontSize: 13, minWidth: 28, display: 'inline-block' }}>{formatClassNumeric(s.class_number, s.classroom_name)}</span>
                             : <span style={{ opacity: 0.35 }}>—</span>}
                         </td>
                         {/* النوع */}
@@ -913,7 +1061,18 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                         {viewMode === 'deleted' && <td style={{ opacity: 0.7, fontSize: 12 }}>{s.deletion_reason || '—'}</td>}
                         <td>
                           <div className="row-actions" onClick={e => e.stopPropagation()}>
-                            <button className="action-btn view" onClick={() => onView(s.id)} title="عرض الملف"><Eye size={15} /></button>
+                            <button className="action-btn view" onClick={() => onView(s.id)} title="عرض وتعديل الملف"><Eye size={15} /></button>
+                            <button
+                              className="action-btn edit"
+                              style={{ borderColor: s.is_merged ? 'rgba(2, 132, 199, 0.5)' : 'rgba(148, 163, 184, 0.4)', color: s.is_merged ? '#0284c7' : '#64748b', fontSize: 13 }}
+                              onClick={() => {
+                                setSelectedMergeStudent(s);
+                                setIsMergeModalOpen(true);
+                              }}
+                              title="تسجيل / تعديل بيانات الدمج والتربية الخاصة"
+                            >
+                              ♿
+                            </button>
                             {viewMode === 'active' && (
                               <button className="action-btn view" style={{ borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
                                 onClick={() => handleSingleDeleteClick(s.id)} title="استبعاد الطالب">
@@ -967,14 +1126,31 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                   <ChevronRight size={16} /> السابق
                 </button>
                 <div className="page-numbers">
-                  {Array.from({ length: Math.min(7, totalPages || 1) }, (_, i) => {
-                    const p = Math.max(1, Math.min(page - 3 + i, Math.max(1, (totalPages || 1) - 6 + i)));
-                    return (
+                  {(() => {
+                    const totalP = totalPages || 1;
+                    let pages = [];
+                    if (totalP <= 7) {
+                      pages = Array.from({ length: totalP }, (_, i) => i + 1);
+                    } else {
+                      let start = Math.max(1, page - 2);
+                      let end = Math.min(totalP, page + 2);
+                      if (page <= 3) {
+                        start = 1;
+                        end = 5;
+                      } else if (page >= totalP - 2) {
+                        start = totalP - 4;
+                        end = totalP;
+                      }
+                      for (let i = start; i <= end; i++) {
+                        pages.push(i);
+                      }
+                    }
+                    return pages.map(p => (
                       <button key={p} className={`page-num ${p === page ? 'active' : ''}`} onClick={() => setPage(p)}>
                         {p}
                       </button>
-                    );
-                  })}
+                    ));
+                  })()}
                 </div>
                 <button className="page-btn" disabled={page >= (totalPages || 1)} onClick={() => setPage(p => p + 1)}>
                   التالي <ChevronLeft size={16} />
@@ -1052,6 +1228,34 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
       {showBulkEdit && <BulkEditModal count={selected.size} formOpts={formOpts} onApply={handleBulkUpdate} onClose={() => setShowBulkEdit(false)} />}
       {showDeleteConfirm && <DeleteConfirmModal count={selected.size} onConfirm={handleBulkDelete} onClose={() => setShowDeleteConfirm(false)} />}
       {showPurgeModal && <PurgeConfirmModal onConfirm={handlePurgeAll} onClose={() => setShowPurgeModal(false)} actionLoading={actionLoading} />}
+      
+      <MergeStudentModal
+        isOpen={isMergeModalOpen}
+        student={selectedMergeStudent}
+        allStudents={students}
+        onClose={() => {
+          setIsMergeModalOpen(false);
+          setSelectedMergeStudent(null);
+        }}
+        onSaved={() => {
+          loadStudents();
+          loadStats();
+        }}
+      />
+
+      {showRegister41 && (
+        <Register41PrintModal
+          academicYearLabel={formOpts?.academicYears?.find(y => y.id === filters.academicYearId)?.year_label}
+          onClose={() => setShowRegister41(false)}
+        />
+      )}
+
+      {showOctoberCensus && (
+        <OctoberCensusPrintModal
+          academicYearLabel={formOpts?.academicYears?.find(y => y.id === filters.academicYearId)?.year_label}
+          onClose={() => setShowOctoberCensus(false)}
+        />
+      )}
     </div>
   );
 }

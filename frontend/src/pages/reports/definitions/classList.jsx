@@ -12,7 +12,7 @@ const STATUS_LABELS = {
 
 /* ── Preview Component ─────────────────────────────────────────── */
 function ClassListPreview({ students = [], meta = {}, schoolInfo = {} }) {
-  const { selectedGrade, selectedYear, selectedClassroom } = meta;
+  const { selectedGrade, selectedYear, selectedClassroom, classroomLabel } = meta;
   const totalStudents = students.length;
   const perPage = 50;
   const half    = 25;
@@ -38,7 +38,7 @@ function ClassListPreview({ students = [], meta = {}, schoolInfo = {} }) {
                   قائمة طلاب الفصل
                 </h2>
                 <div className="report-subtitle-meta">
-                  {selectedGrade?.grade_name_ar} | فصل: {selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
+                  {selectedGrade?.grade_name_ar} | فصل: {classroomLabel || selectedClassroom?.class_name || '...'} | للعام الدراسي: {selectedYear?.year_label}
                 </div>
               </div>
 

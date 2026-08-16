@@ -5,10 +5,14 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS institution_config (
   id             SERIAL PRIMARY KEY,
   school_code    VARCHAR(50) UNIQUE NOT NULL,
-  school_name    VARCHAR(200) NOT NULL,
+  school_name    VARCHAR(150) NOT NULL,
+  school_name_en VARCHAR(150),
   governorate    VARCHAR(100) NOT NULL,
   directorate    VARCHAR(100) NOT NULL,
-  address        TEXT,
+  governorate_id    INTEGER,
+  administration_id INTEGER,
+  classification_id INTEGER,
+  education_type VARCHAR(50),
   phone          VARCHAR(20),
   email          VARCHAR(100),
   logo_url       VARCHAR(500),
@@ -21,9 +25,9 @@ CREATE TABLE IF NOT EXISTS institution_config (
 CREATE TABLE IF NOT EXISTS sections (
   id            SERIAL PRIMARY KEY,
   name          VARCHAR(100) UNIQUE NOT NULL, -- e.g. 'عربي', 'لغات'
-  type          VARCHAR(30) NOT NULL CHECK (type IN ('arabic', 'languages', 'kindergarten')),
+  type          VARCHAR(30) NOT NULL CHECK (type IN ('arabic', 'languages', 'international', 'kindergarten')),
   education_type VARCHAR(50), -- عربي / رسمي لغات / متميز لغات / خاص
-  legal_status  VARCHAR(30) CHECK (legal_status IN ('حكومي', 'خاص')),
+  legal_status  VARCHAR(20) CHECK (legal_status IN ('حكومي', 'خاص', 'دولي')),
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -58,13 +62,18 @@ CREATE TABLE IF NOT EXISTS grades_lookup (
 
 -- 6. Classes (الفصول)
 CREATE TABLE IF NOT EXISTS classes (
-  id            SERIAL PRIMARY KEY,
-  grade_id      INTEGER REFERENCES grades_lookup(id) ON DELETE CASCADE,
-  class_code    VARCHAR(20) NOT NULL, -- e.g. '1/1', 'أ'
-  max_capacity  INTEGER DEFAULT 40,
-  shift_type    VARCHAR(20) DEFAULT 'صباحي' CHECK (shift_type IN ('صباحي', 'مسائي')),
-  is_active     BOOLEAN DEFAULT true,
-  UNIQUE (grade_id, class_code)
+  id               SERIAL PRIMARY KEY,
+  section_id       INTEGER REFERENCES sections(id) ON DELETE CASCADE,
+  stage_id         INTEGER REFERENCES stages_lookup(id) ON DELETE CASCADE,
+  grade_id         INTEGER REFERENCES grades_lookup(id) ON DELETE CASCADE,
+  academic_year_id INTEGER REFERENCES academic_years(id) ON DELETE CASCADE,
+  class_name       VARCHAR(100) NOT NULL,
+  class_code       INTEGER,
+  max_capacity     INTEGER DEFAULT 40,
+  shift_type       VARCHAR(20) DEFAULT 'صباحي' CHECK (shift_type IN ('صباحي', 'مسائي')),
+  is_active        BOOLEAN DEFAULT true,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (grade_id, academic_year_id, class_name)
 );
 
 -- 7. Sequential counters for each stage/section to generate unique IDs
@@ -172,9 +181,42 @@ CREATE TABLE IF NOT EXISTS students (
   health_status      TEXT DEFAULT 'سليم',
   student_code       VARCHAR(50) UNIQUE, -- Auto generated serial
   custom_attributes  JSONB DEFAULT '{}'::jsonb,
+  class_id               INTEGER REFERENCES classes(id),
+  section_code           VARCHAR(10),
+  stage_code             VARCHAR(10),
+  grade_code             VARCHAR(10),
+  class_code             VARCHAR(10),
+  student_serial_in_class INTEGER DEFAULT 0,
+  student_serial_in_grade INTEGER DEFAULT 0,
   is_active          BOOLEAN DEFAULT true,
   created_at         TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Index for ultra-fast queries by dedicated columns & codes
+CREATE INDEX IF NOT EXISTS idx_students_dedicated_lookup ON students(section_id, stage_id, grade_id, class_id);
+CREATE INDEX IF NOT EXISTS idx_students_code_lookup ON students(section_code, stage_code, grade_code, class_code);
+
+-- 17b. Student Academic History (Movement & Progress Tracking)
+CREATE TABLE IF NOT EXISTS student_academic_history (
+  id                      SERIAL PRIMARY KEY,
+  student_id              INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  academic_year_id        INTEGER NOT NULL REFERENCES academic_years(id),
+  section_id              INTEGER NOT NULL REFERENCES sections(id),
+  stage_id                INTEGER NOT NULL REFERENCES stages_lookup(id),
+  grade_id                INTEGER NOT NULL REFERENCES grades_lookup(id),
+  class_id                INTEGER REFERENCES classes(id),
+  section_code            VARCHAR(10),
+  stage_code              VARCHAR(10),
+  grade_code              VARCHAR(10),
+  class_code              VARCHAR(10),
+  student_serial_in_class INTEGER DEFAULT 0,
+  student_serial_in_grade INTEGER DEFAULT 0,
+  enrollment_status       VARCHAR(30) DEFAULT 'promoted',
+  created_at              TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (student_id, academic_year_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_academic_history ON student_academic_history(student_id, academic_year_id);
 
 -- 18. Student Enrollment state per Year
 CREATE TABLE IF NOT EXISTS student_enrollment (

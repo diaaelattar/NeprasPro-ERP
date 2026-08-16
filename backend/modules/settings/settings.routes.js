@@ -10,8 +10,11 @@ router.get('/users',        ctrl.getUsers);
 router.post('/users',       ctrl.createUser);
 router.put('/users/:id',    ctrl.updateUser);
 router.delete('/users/:id', ctrl.deleteUser);
-router.get('/roles',        ctrl.getRoles);
-router.get('/permissions',  ctrl.getPermissions);
+router.get('/roles',                 ctrl.getRoles);
+router.post('/roles',                ctrl.createRole);
+router.delete('/roles/:id',          ctrl.deleteRole);
+router.put('/roles/:id/permissions', ctrl.updateRolePermissions);
+router.get('/permissions',           ctrl.getPermissions);
 
 // Classrooms
 router.get('/classrooms',                ctrl.getClassrooms);
@@ -26,6 +29,7 @@ router.post('/classrooms/:id/enroll',    ctrl.enrollStudent);
 // Academic Years
 router.get('/academic-years',            ctrl.getAcademicYears);
 router.post('/academic-years',           ctrl.createAcademicYear);
+router.post('/academic-years/set-single', ctrl.setSingleAcademicYear);
 router.put('/academic-years/:id',        ctrl.updateAcademicYear);
 router.delete('/academic-years/:id',     ctrl.deleteAcademicYear);
 router.post('/academic-years/:id/set-current', ctrl.setCurrentAcademicYear);
