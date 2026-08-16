@@ -77,3 +77,33 @@
   - **Ø§Ù„ØªØ«Ø¨ÙŠØª**: ØªÙ… ØªØ³Ø¬ÙŠÙ„ ÙˆØªÙˆØ«ÙŠÙ‚ Ø§Ù„Ù‚Ø§Ø¹Ø¯Ø© Ø±Ø³Ù…ÙŠØ§Ù‹ ÙÙŠ Ù…Ù„Ù Ø§Ù„Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ù‚ÙŠØ§Ø³ÙŠ (`.agents/AGENTS.md`) ÙˆÙ…Ù„Ù Ø§Ù„Ù…Ù‡Ø§Ø±Ø© (`.agents/skills/excel-macro-handler/SKILL.md`).
 
 
+
+---
+
+## ÓÌá ÇáÅÕÏÇÑÇÊ (Release History)
+
+### v1.3.0 — 2026-08-17 (ÇáÅÕÏÇÑ ÇáÍÇáí)
+**ÇáÍÇáÉ**: ? ãÑİæÚ Úáì GitHub | ? ãáİ ÇáÊËÈíÊ ÌÇåÒ | ? Vercel íÍÊÇÌ ÅÚÇÏÉ ÑÈØ
+
+**Git Commits ÇáãÑİæÚÉ:**
+- 1b78f63 fix(installer): remove unsupported NSIS language 1025 - installer builds successfully
+- 5cf21d2 chore(release): bump version to v1.3.0 in package.json & LoginGateway UI
+- caff8ce build: fix vite base URL for Vercel + add cross-env for Electron builds
+- d017306 feat(v1.3.0): lock Control/Staff/Finance modules for all users + Arabic NSIS installer branding
+
+**ãÇ Êã ÅäÌÇÒå:**
+- Şİá ÊÈæíÈÇÊ (ÇáßäÊÑæá¡ ÇáÍÓÇÈÇÊ¡ ÔÄæä ÇáÚÇãáíä) Úáì ÇáÌãíÚ ÈãÇ İíåã ÇáãÏíÑ
+- ÔÇÑÉ ĞåÈíÉ Úáì ÇáÈØÇŞÇÊ ÇáãÛáŞÉ + ãæÏÇá ÊäÈíå ÚÑÈí İÎã
+- ãÚÇáÌ ÇáÊÃÓíÓ ãÎÊÕÑ áÜ 3 ÎØæÇÊ (ÇáãÑÇÍá æÇáÕİæİ ÊõÏÇÑ ãä ÇáÅÚÏÇÏÇÊ)
+- ÊÕİíÑ ÇáäÙÇã ãÚ äÓÎ ÇÍÊíÇØí ÅáÒÇãí İí %USERPROFILE%/.nepraspro/backups/
+- ÇÊİÇŞíÉ ÊÑÎíÕ ÚÑÈíÉ İí ãáİ ÇáÊËÈíÊ (uild/license_ar.txt)
+- ÇÓã ÇáÇÎÊÕÇÑ ÇáÚÑÈí: äÈÑÃÓ ÈÑæ - äÙÇã ÅÏÇÑÉ ÇáãÏÇÑÓ
+- ãáİ ÇáÊËÈíÊ: dist/NeprasPro ERP Setup 1.3.0.exe (~191 MB)
+- Git Tag: 1.3.0 ãÑİæÚ Úáì GitHub
+- Vercel: Token ãäÊåí - íÍÊÇÌ ercel login Ëã ercel --prod
+
+### v1.2.0 — 2026-08-16
+- äÙÇã ÇáØÈÇÚÉ ÇáæÒÇÑí ÇáßÇãá (ßÔæİ ÇáÌáæÓ¡ ÓÌá 41¡ ßÔæİ ÇáÛíÇÈ)
+- ÅÖÇİÉ ÃíŞæäÉ ÑÓãíÉ ááÊØÈíŞ
+- Şİá ãÈÏÆí ááæÍÏÇÊ
+
