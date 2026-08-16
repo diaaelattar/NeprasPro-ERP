@@ -202,7 +202,10 @@ const LoginGateway = ({
               </div>
               <div>
                 <h1 className="gateway-school-name">{schoolName || 'منظومة نبراس برو التعليمية'}</h1>
-                <p className="gateway-subtitle">بوابة الدخول الموحدة لمنظومة الإدارة المدرسية المتكاملة</p>
+                <p className="gateway-subtitle">
+                  بوابة الدخول الموحدة لمنظومة الإدارة المدرسية المتكاملة 
+                  <span style={{ marginRight: 8, padding: '1px 8px', background: 'rgba(59,130,246,0.1)', color: '#2563eb', borderRadius: 10, fontSize: 11, fontWeight: 700 }}>v1.3.0</span>
+                </p>
               </div>
             </div>
 
