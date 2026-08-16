@@ -60,17 +60,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "نبرأس برو - نظام إدارة المدارس",
       "runAfterFinish": true,
-      "language": "1025",
-      "installerLanguages": [
-        "1025"
-      ],
       "license": "build/license_ar.txt",
-      "script": "build/installer.nsh",
-      "installerHeader": "electron/icon.ico",
       "installerIcon": "electron/icon.ico",
-      "uninstallerIcon": "electron/icon.ico",
-      "installerSidebar": "electron/icon.png",
-      "uninstallerSidebar": "electron/icon.png"
+      "uninstallerIcon": "electron/icon.ico"
     }
   },
   "dependencies": {
