@@ -11,6 +11,7 @@
     "react:dev": "npm run dev --prefix frontend",
     "backend:dev": "node --watch --watch-path=backend backend/server.js",
     "dev": "concurrently \"npm run react:dev\" \"npm run backend:dev\" \"wait-on http://localhost:5173 && npm run electron:dev\"",
+    "build": "npm run build --prefix frontend",
     "build:frontend": "npm run build --prefix frontend",
     "dist": "npm run build:frontend && electron-builder",
     "generate-key": "node scripts/generate_key.js"
