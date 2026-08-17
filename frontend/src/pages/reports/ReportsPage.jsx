@@ -18,12 +18,12 @@ const API = API_BASE_URL;
 /* ── Category icons ────────────────────────────────────────────── */
 const CAT_ICONS = {
   'الكل':                   <Sparkles  size={14} />,
+  'تقارير مخصصة':            <Sparkles  size={14} />,
   'سجلات القيد':             <BookOpen  size={14} />,
   'قوائم الفصول':            <List      size={14} />,
   'سجلات رصد أعمال السنة':    <Layers    size={14} />,
   'إحصائيات':                <BarChart3 size={14} />,
   'المطبوعات والنماذج':       <Printer   size={14} />,
-  'الصحة المدرسية':          <FileText  size={14} />,
 };
 
 /* ── Unique categories ─────────────────────────────────────────── */

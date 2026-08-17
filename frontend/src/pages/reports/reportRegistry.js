@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-//  Reports Registry — NeprasPro (40+ Official Ministry Reports)
+//  Reports Registry — NeprasPro (Official Ministry & Custom Reports)
 // ════════════════════════════════════════════════════════════════
 
 // ── سجلات القيد والمناداة ─────────────────────────────────────────
@@ -14,6 +14,8 @@ import excludedRegister         from './definitions/excludedRegister';
 import transfersReport          from './definitions/transfersReport';
 import foreignStudentsReport    from './definitions/foreignStudentsReport';
 import mergeStudentsReport      from './definitions/mergeStudentsReport';
+import twinsRegister            from './definitions/twinsRegister';
+import orphansRegister          from './definitions/orphansRegister';
 
 // ── قوائم وتوزيع الفصول ─────────────────────────────────────────
 import mergeClassList           from './definitions/mergeClassList';
@@ -22,10 +24,11 @@ import absenceSheet20           from './definitions/absenceSheet20';
 import booksList                from './definitions/booksList';
 import emergencyPhonesList      from './definitions/emergencyPhonesList';
 
-// ── الصحة والسلامة المدرسية ──────────────────────────────────────
-import vaccinationsSheet        from './definitions/vaccinationsSheet';
-import healthList               from './definitions/healthList';
-import medicalExemptionList     from './definitions/medicalExemptionList';
+// ── تقارير مخصصة وحالات خاصة ──────────────────────────────────────
+import guardianJobsReport       from './definitions/guardianJobsReport';
+import specialCasesFeeDiscount  from './definitions/specialCasesFeeDiscount';
+import outstandingStudentsRegister from './definitions/outstandingStudentsRegister';
+import seatingNumbersList       from './definitions/seatingNumbersList';
 
 // ── المطبوعات والنماذج الرسمية ───────────────────────────────────
 import schoolPrints             from './definitions/schoolPrints';
@@ -36,7 +39,7 @@ import guardianSummonsNotice    from './definitions/guardianSummonsNotice';
 import parentStaffAffiliation   from './definitions/parentStaffAffiliation';
 import martyrsChildren          from './definitions/martyrsChildren';
 
-// ── سجلات رصد أعمال السنة ─────────────────────────────────────────
+// ── سجلات رصد أعمال السنة (التمبلت المخصص) ──────────────────────────
 import primaryLandscapeSheet     from './definitions/primaryLandscapeSheet';
 import primaryPortraitSheet      from './definitions/primaryPortraitSheet';
 import upperPrimaryLandscapeSheet from './definitions/upperPrimaryLandscapeSheet';
@@ -50,16 +53,27 @@ import gradesSheet               from './definitions/gradesSheet';
 // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────────
 import generalEnrolledCensus     from './definitions/generalEnrolledCensus';
 import enrollmentStatusCensus    from './definitions/enrollmentStatusCensus';
+import ageStat1Oct               from './definitions/ageStat1Oct';
+import classCapacityStat         from './definitions/classCapacityStat';
+import religionGenderDistribution from './definitions/religionGenderDistribution';
 
 const REPORTS = [
+  // ── تقارير مخصصة ────────────────────────────────────────────
+  guardianJobsReport,
+  specialCasesFeeDiscount,
+  outstandingStudentsRegister,
+  seatingNumbersList,
+
   // ── سجلات القيد ─────────────────────────────────────────────
   studentRegister,
   studentRegister41,
   disconnectedRegister,
   suspendedRegister,
   mergeStudentsReport,
+  twinsRegister,
+  orphansRegister,
 
-  // ── قوائم وتوزيع الفصول ─────────────────────────────────────
+  // ── قوائم وتوزيع الفصول (بأعلى جودة مطابقة لتسكين الفصول) ───────
   fullClassList,
   classList,
   callList,
@@ -68,6 +82,7 @@ const REPORTS = [
   booksList,
   emergencyPhonesList,
 
+  // ── سجلات رصد أعمال السنة (تصدير التمبلت المخصص) ───────────────
   primaryPortraitSheet,
   primaryLandscapeSheet,
   upperPrimaryPortraitSheet,
@@ -77,11 +92,6 @@ const REPORTS = [
   secPortraitSheet,
   secLandscapeSheet,
   gradesSheet,
-
-  // ── الصحة والسلامة المدرسية ──────────────────────────────────
-  vaccinationsSheet,
-  healthList,
-  medicalExemptionList,
 
   // ── المطبوعات والنماذج الرسمية ───────────────────────────────
   schoolPrints,
@@ -98,6 +108,10 @@ const REPORTS = [
   // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────
   generalEnrolledCensus,
   enrollmentStatusCensus,
+  ageStat1Oct,
+  classCapacityStat,
+  religionGenderDistribution,
 ];
 
 export default REPORTS;
+
