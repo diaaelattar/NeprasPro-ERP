@@ -29,9 +29,9 @@
     "appId": "com.nepraspro.erp",
     "productName": "NeprasPro ERP",
     "extraMetadata": {
-      "productNameAr": "منظومة نبرأس برو التعليمية"
+      "productNameAr": "منظومة نبراس برو التعليمية"
     },
-    "copyright": "Copyright © 2026 NeprasPro ERP System. All Rights Reserved. (جميع الحقوق محفوظة لمنظومة نبرأس التعليمية)",
+    "copyright": "Copyright © 2026 NeprasPro ERP System. All Rights Reserved. (جميع الحقوق محفوظة لمنظومة نبراس التعليمية)",
     "directories": {
       "output": "dist"
     },
@@ -58,7 +58,7 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "نبرأس برو - نظام إدارة المدارس",
+      "shortcutName": "نبراس برو - نظام إدارة المدارس",
       "runAfterFinish": true,
       "unicode": true,
       "license": "build/license_ar.txt",
