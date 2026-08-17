@@ -43,9 +43,15 @@ const _openSQLite = async (dbPath) => {
   await loadSqlEngine();
   if (fs.existsSync(dbPath)) {
     const buf = fs.readFileSync(dbPath);
-    sqliteDb = new SQL.Database(buf);
-    sqliteDb.run('PRAGMA foreign_keys = ON;');
-    console.log(`[DB] SQLite loaded from file: ${dbPath} (${buf.length} bytes)`);
+    if (buf && buf.length > 0) {
+      sqliteDb = new SQL.Database(buf);
+      sqliteDb.run('PRAGMA foreign_keys = ON;');
+      console.log(`[DB] SQLite loaded from file: ${dbPath} (${buf.length} bytes)`);
+    } else {
+      sqliteDb = new SQL.Database();
+      sqliteDb.run('PRAGMA foreign_keys = ON;');
+      console.log(`[DB] SQLite 0-byte file found on disk. Initialized empty in-memory DB.`);
+    }
   } else {
     sqliteDb = new SQL.Database();
     sqliteDb.run('PRAGMA foreign_keys = ON;');
@@ -1674,11 +1680,18 @@ const _migrateSQLiteSchema = (dbInstance) => {
 };
 
 
-// ─── Startup: Restore from saved config (ONLY if config file exists) ──────────
+// ─── Startup: Restore from saved config (or auto-initialize default SQLite) ──────────
 const _restoreFromConfig = async () => {
+  const defaultDbPath = path.join(CONFIG_DIR, 'nepraspro.db');
+
   if (!fs.existsSync(CONFIG_FILE)) {
-    console.log('[DB] No saved config found. Waiting for user setup.');
-    return; // ← Leave sqliteDb = null. isConfigured() → false → user sees Step 1
+    console.log('[DB] No saved config found. Auto-initializing default SQLite database...');
+    try {
+      await initSQLiteMode();
+    } catch (e) {
+      console.error('[DB] Auto initSQLiteMode error:', e.message);
+    }
+    return;
   }
 
   try {
@@ -1686,15 +1699,15 @@ const _restoreFromConfig = async () => {
     dbMode = currentConfig.mode;
 
     if (dbMode === 'sqlite') {
-      if (currentConfig.dbPath && !fs.existsSync(currentConfig.dbPath)) {
-        console.log('[DB] Saved SQLite db file missing on disk. Resetting state for clean initial setup.');
-        sqliteDb = null;
-        dbMode = null;
-        currentConfig = null;
+      const targetDbPath = currentConfig.dbPath || defaultDbPath;
+      if (!fs.existsSync(targetDbPath) || fs.statSync(targetDbPath).size === 0) {
+        console.log('[DB] Saved SQLite db file missing or empty on disk. Initializing fresh DB...');
+        await initSQLiteMode();
         return;
       }
-      await _openSQLite(currentConfig.dbPath);
+      await _openSQLite(targetDbPath);
       _migrateSQLiteSchema(sqliteDb);
+      _flushSQLite(true);
       console.log('[DB] SQLite restored from saved config.');
     } else if (dbMode === 'postgres') {
       const { Pool } = require('pg');
@@ -1711,12 +1724,12 @@ const _restoreFromConfig = async () => {
       console.log('[DB] PostgreSQL pool restored from saved config.');
     }
   } catch (err) {
-    console.error('[DB] Failed to restore from saved config:', err.message);
-    // Reset everything — user will see Step 1 again
-    sqliteDb = null;
-    pgPool   = null;
-    dbMode   = null;
-    currentConfig = null;
+    console.error('[DB] Failed to restore from saved config, re-initializing SQLite:', err.message);
+    try {
+      await initSQLiteMode();
+    } catch (e) {
+      console.error('[DB] Fallback init error:', e.message);
+    }
   }
 };
 
@@ -1731,23 +1744,23 @@ const getPool     = ()  => pgPool;
 const initSQLiteMode = async () => {
   const dbPath = path.join(CONFIG_DIR, 'nepraspro.db');
 
-  // If the file exists from a previous (interrupted) setup, attempt to delete it so we start fresh
-  if (fs.existsSync(dbPath)) {
-    try {
-      fs.unlinkSync(dbPath);
-      console.log('[DB] Deleted existing db file for clean init.');
-    } catch (e) {
-      console.warn('[DB] Could not unlink existing db file:', e.message);
-    }
-  }
-
   await _openSQLite(dbPath);  // Creates new in-memory empty db
 
   if (!sqliteDb) throw new Error('فشل إنشاء قاعدة البيانات المدمجة.');
 
-  // Apply schema
-  const schemaPath = path.join(__dirname, '../../database/schema_sqlite.sql');
-  if (!fs.existsSync(schemaPath)) throw new Error(`Schema file not found: ${schemaPath}`);
+  // Apply schema with candidate path resolution
+  const candidateSchemaPaths = [
+    path.join(__dirname, '../../database/schema_sqlite.sql'),
+    path.join(__dirname, '../database/schema_sqlite.sql'),
+    path.join(__dirname, '../../resources/database/schema_sqlite.sql'),
+    path.join(__dirname, '../../../database/schema_sqlite.sql'),
+    path.join(process.resourcesPath || '', 'database/schema_sqlite.sql'),
+    path.join(process.resourcesPath || '', 'app/database/schema_sqlite.sql'),
+    path.join(process.cwd(), 'database/schema_sqlite.sql'),
+  ];
+  const schemaPath = candidateSchemaPaths.find(p => p && fs.existsSync(p));
+  if (!schemaPath) throw new Error('Schema file schema_sqlite.sql not found in any candidate path.');
+  
   const schemaSql = fs.readFileSync(schemaPath, 'utf8');
   sqliteDb.run(schemaSql);
   console.log('[DB] SQLite schema applied.');
@@ -1756,9 +1769,13 @@ const initSQLiteMode = async () => {
   _applySeed();
   console.log('[DB] SQLite seed data applied.');
 
-  // Persist to disk
+  // Run migrations & master lookups (governorates, administrations, stages, grades, etc.)
+  _migrateSQLiteSchema(sqliteDb);
+  console.log('[DB] Master lookup reference data seeded successfully.');
+
+  // Persist to disk immediately (immediate: true)
   currentConfig = { mode: 'sqlite', dbPath };
-  _flushSQLite();
+  _flushSQLite(true);
   console.log(`[DB] SQLite file written to disk: ${dbPath}`);
 
   // Save config file

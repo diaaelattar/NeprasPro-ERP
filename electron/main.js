@@ -76,7 +76,14 @@ function createMainWindow() {
       }, 1500);
     });
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../frontend/dist/index.html'));
+    const indexPath = path.join(__dirname, '../frontend/dist/index.html');
+    mainWindow.loadFile(indexPath).catch((err) => {
+      console.error('[Main] Failed to load index.html:', err);
+    });
+
+    mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      console.error(`[Main] Production page failed to load (${errorCode}: ${errorDescription})`);
+    });
   }
 
   // Allow F12 to toggle DevTools

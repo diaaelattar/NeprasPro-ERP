@@ -4,8 +4,8 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
-  // Use './' for Electron (file://) and '/' for web/Vercel deployment
-  base: process.env.ELECTRON_BUILD === 'true' ? './' : '/',
+  // Always use './' so that assets load properly in Electron (file://) and standalone servers
+  base: './',
   server: {
     host: '0.0.0.0',
     port: 5173,

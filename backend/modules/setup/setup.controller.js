@@ -3,7 +3,18 @@ const db = require('../../config/db');
 const { getSchoolMasterInfo } = require('../../utils/schoolHelper');
 const { generateToken } = require('../../middleware/auth.middleware');
 
+const ensureDbReady = async () => {
+  if (!db.isConfigured()) {
+    try {
+      await db.initSQLiteMode();
+    } catch (e) {
+      console.error('[ensureDbReady Error]', e.message);
+    }
+  }
+};
+
 const getStatus = async (req, res) => {
+  await ensureDbReady();
   const isDbReady = db.isConfigured();
 
   if (!isDbReady) {
@@ -74,6 +85,7 @@ const configurePostgres = async (req, res) => {
 
 // ─── Setup Wizard (Steps 2-5: School info, Sections, Language, Admin) ─────────
 const runWizard = async (req, res) => {
+  await ensureDbReady();
   if (!db.isConfigured()) {
     return res.status(400).json({ success: false, error: 'يرجى تهيئة قاعدة البيانات أولاً.' });
   }
@@ -288,6 +300,7 @@ const runWizard = async (req, res) => {
         console.log('[Wizard] Transaction complete. Committing...');
       });
 
+      db.flushSQLite(true);
       return res.json({ success: true, message: 'تم إكمال معالج التأسيس بنجاح!' });
 
     } else {
@@ -744,7 +757,8 @@ const recoverPassword = async (req, res) => {
 };
 
 // ─── GET /api/setup/governorates ─────────────────────────────────────────────
-const getGovernorates = (req, res) => {
+const getGovernorates = async (req, res) => {
+  await ensureDbReady();
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'DB not ready' });
   try {
     const sqliteDb = db.getSQLiteDb();
@@ -762,7 +776,8 @@ const getGovernorates = (req, res) => {
 };
 
 // ─── GET /api/setup/administrations?governorateId=X&governorateName=Y ────────
-const getAdministrations = (req, res) => {
+const getAdministrations = async (req, res) => {
+  await ensureDbReady();
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'DB not ready' });
   let { governorateId, governorateName } = req.query;
   try {
@@ -795,7 +810,8 @@ const getAdministrations = (req, res) => {
 };
 
 // ─── POST /api/setup/administrations ─────────────────────────────────────────
-const addAdministration = (req, res) => {
+const addAdministration = async (req, res) => {
+  await ensureDbReady();
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'DB not ready' });
   const { governorateId, name_ar } = req.body;
   if (!governorateId || !name_ar?.trim())
@@ -813,13 +829,14 @@ const addAdministration = (req, res) => {
     );
     const s2 = sqliteDb.prepare('SELECT last_insert_rowid() AS id');
     s2.step(); const newId = s2.getAsObject().id; s2.free();
-    db.flushSQLite();
+    db.flushSQLite(true);
     return res.json({ success: true, id: newId, name_ar: name_ar.trim() });
   } catch (err) { return res.status(500).json({ success: false, error: err.message }); }
 };
 
 // ─── GET /api/setup/onboarding-status ────────────────────────────────────────
-const getOnboardingStatus = (req, res) => {
+const getOnboardingStatus = async (req, res) => {
+  await ensureDbReady();
   if (!db.isConfigured()) return res.json({ success: true, complete: false, score: 0, checks: {} });
   try {
     const sqliteDb = db.getSQLiteDb();
@@ -843,7 +860,8 @@ const getOnboardingStatus = (req, res) => {
 };
 
 // ─── GET /api/setup/master-structure-lookups ─────────────────────────────────
-const getMasterStructureLookups = (req, res) => {
+const getMasterStructureLookups = async (req, res) => {
+  await ensureDbReady();
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'DB not ready' });
   try {
     const sqliteDb = db.getSQLiteDb();
