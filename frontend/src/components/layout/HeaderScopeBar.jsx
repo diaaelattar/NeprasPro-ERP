@@ -7,7 +7,7 @@ import {
 import API_BASE_URL from '../../config/api';
 import './HeaderScopeBar.css';
 
-const HeaderScopeBar = ({ onNavigate, isSuperAdmin = false }) => {
+const HeaderScopeBar = ({ onNavigate, isSuperAdmin = false, updateInfo = null, onOpenUpdateModal = () => {} }) => {
   const { activeWorkspace, setWorkspace, openSwitchboard } = useWorkspace();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [academicYear, setAcademicYear] = useState('2025/2026');
@@ -102,6 +102,20 @@ const HeaderScopeBar = ({ onNavigate, isSuperAdmin = false }) => {
         <Calendar size={13} className="scope-pill-icon" />
         <span className="scope-pill-text">العام الدراسي: <strong>{academicYear}</strong></span>
       </div>
+
+      {/* 3.1 Online Update Available Badge */}
+      {updateInfo && updateInfo.hasUpdate && (
+        <>
+          <ChevronLeft size={13} className="scope-sep" />
+          <div 
+            className="scope-update-badge" 
+            onClick={onOpenUpdateModal}
+            title={`انقر لتنزيل وتثبيت الإصدار الجديد v${updateInfo.latestVersion}`}
+          >
+            <span>🚀 يتوفر تحديث v{updateInfo.latestVersion}</span>
+          </div>
+        </>
+      )}
 
       {/* 4. Admin Quick Switch Dropdown */}
       {isSuperAdmin && (

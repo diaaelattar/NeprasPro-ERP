@@ -106,6 +106,18 @@ try {
   });
 }
 
+// System & Online Updater Routes
+try {
+  const systemRoutes = require('./modules/system/system.routes');
+  app.use('/api/system', systemRoutes);
+  console.log('System routes registered successfully.');
+} catch (err) {
+  console.error('Failed to load system routes:', err.message);
+  app.use('/api/system', (req, res) => {
+    res.status(500).json({ success: false, error: `System module load error: ${err.message}` });
+  });
+}
+
 // Basic health check route
 app.get('/api/health', (req, res) => {
   res.json({

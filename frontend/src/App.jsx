@@ -28,6 +28,7 @@ import LockedModuleView       from './components/ui/LockedModuleView';
 import WorkspaceSwitchboard from './components/workspace/WorkspaceSwitchboard';
 import HeaderScopeBar from './components/layout/HeaderScopeBar';
 import LoginGateway from './components/auth/LoginGateway';
+import UpdateModal from './components/ui/UpdateModal';
 import { useWorkspace } from './context/WorkspaceContext';
 import API_BASE_URL, { SERVER_ORIGIN } from './config/api';
 
@@ -42,6 +43,33 @@ function App() {
   const [initialized, setInitialized] = useState(false);
   const [schoolName, setSchoolName] = useState('');
   const [schoolLogo, setSchoolLogo] = useState(null);
+
+  // Online Auto-Updater state
+  const [updateInfo,      setUpdateInfo]      = useState(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+
+  // Auto-check for updates 5 seconds after app loads (non-blocking, silent on error)
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        let data;
+        if (window.electronAPI?.checkForUpdates) {
+          data = await window.electronAPI.checkForUpdates();
+        } else {
+          const res = await fetch(`${API_BASE_URL}/system/check-updates`);
+          if (!res.ok) return;
+          data = await res.json();
+        }
+        if (data?.success && data?.hasUpdate) {
+          setUpdateInfo(data);
+          setUpdateModalOpen(true);
+        }
+      } catch (_) {
+        // Silently ignore — no internet or backend not ready
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
   
   // Current active step in Setup Wizard (1: Database, 2: School info, 3: Sections/Stages, 4: Lang, 5: Admin, 6: Success)
   const [step, setStep] = useState(1);
@@ -835,7 +863,9 @@ function App() {
                 setCurrentPage(page); 
                 setSelectedStudentId(null); 
               }} 
-              isSuperAdmin={isSuperAdmin} 
+              isSuperAdmin={isSuperAdmin}
+              updateInfo={updateInfo}
+              onOpenUpdateModal={() => setUpdateModalOpen(true)}
             />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1698,6 +1728,11 @@ function App() {
           isOpen={isLicenseModalOpen}
           onClose={() => setIsLicenseModalOpen(false)}
           onLicenseUpdated={fetchAppLicense}
+        />
+        <UpdateModal
+          isOpen={updateModalOpen}
+          onClose={() => setUpdateModalOpen(false)}
+          updateInfo={updateInfo}
         />
       </div>
     </div>

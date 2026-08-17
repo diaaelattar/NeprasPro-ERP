@@ -9,6 +9,18 @@ const api = {
   getRegisteredCodes: () => ipcRenderer.invoke('emis:get-registered-codes'),
   emisSync: (students) => ipcRenderer.send('emis:sync-data', { students, source: 'extension' }),
   clearEmisSession: () => ipcRenderer.send('emis:clear-session'),
+
+  // Online Auto-Updater APIs
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: (payload) => ipcRenderer.invoke('updater:download', payload),
+  installUpdate: () => ipcRenderer.invoke('updater:install'),
+  cancelDownloadUpdate: () => ipcRenderer.send('updater:cancel'),
+  openExternalUrl: (url) => ipcRenderer.send('updater:open-url', url),
+  onUpdateProgress: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('updater:progress', handler);
+    return () => ipcRenderer.removeListener('updater:progress', handler);
+  }
 };
 
 try {
@@ -18,3 +30,4 @@ try {
 if (typeof window !== 'undefined') {
   window.electronAPI = api;
 }
+

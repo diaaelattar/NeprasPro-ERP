@@ -285,6 +285,155 @@ ipcMain.on('emis:open-folder', () => {
   }
   shell.openPath(docsFolder);
 });
+
+// ── Online Auto-Updater Handlers ─────────────────────────────────────────────
+const https = require('https');
+const http = require('http');
+const { spawn } = require('child_process');
+
+let activeDownloadReq = null;
+let downloadedInstallerPath = null;
+
+function downloadUpdateFile(url, destPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    let downloadedBytes = 0;
+    let totalBytes = 0;
+    let startTime = Date.now();
+
+    const doRequest = (targetUrl) => {
+      const parsedUrl = new URL(targetUrl);
+      const client = parsedUrl.protocol === 'https:' ? https : http;
+      
+      const req = client.get(targetUrl, {
+        headers: { 'User-Agent': 'NeprasPro-ERP-Updater/1.3' }
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return doRequest(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          file.close();
+          fs.unlink(destPath, () => {});
+          return reject(new Error(`Server returned status code ${res.statusCode}: ${res.statusMessage}`));
+        }
+
+        totalBytes = parseInt(res.headers['content-length'] || '0', 10);
+
+        res.on('data', (chunk) => {
+          downloadedBytes += chunk.length;
+          file.write(chunk);
+          const percent = totalBytes > 0 ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100)) : 0;
+          const elapsedSec = (Date.now() - startTime) / 1000;
+          const speedBytesPerSec = elapsedSec > 0 ? Math.round(downloadedBytes / elapsedSec) : 0;
+          if (onProgress) {
+            onProgress({
+              percent,
+              downloadedBytes,
+              totalBytes,
+              speedBytesPerSec
+            });
+          }
+        });
+
+        res.on('end', () => {
+          file.end();
+          resolve(destPath);
+        });
+
+        res.on('error', (err) => {
+          file.close();
+          fs.unlink(destPath, () => {});
+          reject(err);
+        });
+      });
+
+      req.on('error', (err) => {
+        file.close();
+        fs.unlink(destPath, () => {});
+        reject(err);
+      });
+
+      activeDownloadReq = req;
+    };
+
+    doRequest(url);
+  });
+}
+
+ipcMain.handle('updater:check', async () => {
+  try {
+    let res;
+    try {
+      res = await fetch('http://localhost:3001/api/system/check-updates');
+    } catch (_) {
+      res = await fetch('http://127.0.0.1:3001/api/system/check-updates');
+    }
+    if (res.ok) {
+      return await res.json();
+    }
+    return { success: false, error: 'Server returned error.' };
+  } catch (err) {
+    console.error('[Updater Check IPC Exception]:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('updater:download', async (event, { downloadUrl, fileName }) => {
+  try {
+    if (!downloadUrl) throw new Error('رابط التنزيل غير متوفر.');
+    const safeName = (fileName || 'NeprasPro-ERP-Setup-latest.exe').replace(/[^\w\.\-\s]/gi, '_');
+    const targetPath = path.join(app.getPath('temp'), safeName);
+    
+    downloadedInstallerPath = targetPath;
+
+    await downloadUpdateFile(downloadUrl, targetPath, (progress) => {
+      if (event.sender && !event.sender.isDestroyed()) {
+        event.sender.send('updater:progress', progress);
+      }
+    });
+
+    activeDownloadReq = null;
+    return { success: true, filePath: targetPath };
+  } catch (err) {
+    activeDownloadReq = null;
+    console.error('[Updater Download Exception]:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.on('updater:cancel', () => {
+  if (activeDownloadReq) {
+    try { activeDownloadReq.destroy(); } catch (_) {}
+    activeDownloadReq = null;
+  }
+  if (downloadedInstallerPath) {
+    try { fs.unlinkSync(downloadedInstallerPath); } catch (_) {}
+    downloadedInstallerPath = null;
+  }
+});
+
+ipcMain.handle('updater:install', async () => {
+  try {
+    if (!downloadedInstallerPath || !fs.existsSync(downloadedInstallerPath)) {
+      throw new Error('ملف التحديث غير موجود.');
+    }
+    // Launch installer detached and quit current instance
+    const child = spawn(downloadedInstallerPath, [], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+    app.quit();
+    return { success: true };
+  } catch (err) {
+    console.error('[Updater Install Exception]:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.on('updater:open-url', (event, url) => {
+  if (url) shell.openExternal(url);
+});
 // ── App Lifecycle ──────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // Strip X-Frame-Options and CSP headers for EMIS portal pages

@@ -53,6 +53,10 @@ export default function SettingsPage({
   const [isCustomAdmin,       setIsCustomAdmin]       = useState(false);
   const [loading,             setLoading]             = useState(true);
 
+  // System Info & Updater state
+  const [updateInfo,       setUpdateInfo]       = useState(null);
+  const [checkingUpdate,   setCheckingUpdate]   = useState(false);
+
   // Form options for stages/grades
   const [formOpts, setFormOpts] = useState({ sections: [], stages: [], grades: [], academicYears: [] });
 
@@ -1175,6 +1179,9 @@ export default function SettingsPage({
             💣 تصفير وإعادة تهيئة النظام
           </button>
         )}
+        <button className={`form-tab ${activeTab === 'system_info' ? 'active' : ''}`} onClick={() => { setActiveTab('system_info'); setShowForm(false); }}>
+          🔄 معلومات النظام والتحديثات
+        </button>
       </div>
 
 
@@ -1208,6 +1215,137 @@ export default function SettingsPage({
             </div>
           </div>
         )}
+        {/* ── SYSTEM INFO & UPDATER TAB ─────────────────── */}
+        {activeTab === 'system_info' && (
+          <div className="glass-panel form-body" style={{ maxWidth: '700px', margin: '0 auto', padding: '28px 32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, borderBottom: '1px solid var(--border)', paddingBottom: 16 }}>
+              <span style={{ fontSize: 28 }}>🔄</span>
+              <div>
+                <h3 className="section-title" style={{ margin: 0 }}>معلومات النظام والتحديثات الأونلاين</h3>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
+                  التحقق من توفر إصدارات جديدة من منظومة نبراس برو مباشرة عبر الإنترنت
+                </p>
+              </div>
+            </div>
+
+            {/* Current Version Card */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '16px 20px' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>📦 الإصدار المثبت حالياً</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#1e293b', letterSpacing: '-0.5px' }}>
+                  v{updateInfo?.currentVersion || '1.3.1'}
+                </div>
+                <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 4 }}>منظومة نبراس برو التعليمية</div>
+              </div>
+
+              {updateInfo?.hasUpdate ? (
+                <div style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)', border: '1px solid #6ee7b7', borderRadius: 12, padding: '16px 20px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#065f46', marginBottom: 6 }}>🚀 إصدار جديد متاح</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: '#059669', letterSpacing: '-0.5px' }}>
+                    v{updateInfo.latestVersion}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#047857', marginTop: 4 }}>
+                    {updateInfo.releaseTitle || 'تحديث جديد من GitHub'}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '16px 20px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#15803d', marginBottom: 6 }}>✅ حالة التحديثات</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#166534' }}>
+                    {updateInfo === null ? 'لم يتم الفحص بعد' : 'أنت تستخدم أحدث إصدار'}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#4ade80', marginTop: 4 }}>
+                    {updateInfo?.currentVersion ? `v${updateInfo.currentVersion} — أحدث إصدار` : 'اضغط "فحص التحديثات" أدناه'}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Release Notes */}
+            {updateInfo?.hasUpdate && updateInfo?.releaseNotes && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>✨ ما الجديد في v{updateInfo.latestVersion}:</div>
+                <pre style={{ fontSize: 12.5, color: '#334155', whiteSpace: 'pre-line', lineHeight: 1.7, fontFamily: 'inherit', margin: 0, maxHeight: 150, overflowY: 'auto' }}>
+                  {updateInfo.releaseNotes}
+                </pre>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                disabled={checkingUpdate}
+                onClick={async () => {
+                  setCheckingUpdate(true);
+                  try {
+                    let data;
+                    if (window.electronAPI?.checkForUpdates) {
+                      data = await window.electronAPI.checkForUpdates();
+                    } else {
+                      const res = await fetch(`${API_BASE_URL}/system/check-updates`);
+                      data = await res.json();
+                    }
+                    setUpdateInfo(data);
+                    if (data?.hasUpdate) {
+                      toast.success(`يتوفر تحديث جديد v${data.latestVersion}! اضغط زر التثبيت.`);
+                    } else if (data?.success) {
+                      toast.success('أنت تستخدم أحدث إصدار من المنظومة.');
+                    } else {
+                      toast.error(data?.error || 'تعذر الاتصال بخادم التحديثات.');
+                    }
+                  } catch (err) {
+                    toast.error('لا يتوفر اتصال بالإنترنت أو حدث خطأ أثناء الفحص.');
+                  } finally {
+                    setCheckingUpdate(false);
+                  }
+                }}
+                style={{
+                  background: checkingUpdate ? '#94a3b8' : '#2563eb',
+                  color: '#fff', border: 'none', padding: '11px 22px',
+                  borderRadius: 10, fontSize: 13.5, fontWeight: 700,
+                  cursor: checkingUpdate ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  boxShadow: checkingUpdate ? 'none' : '0 4px 12px rgba(37, 99, 235, 0.25)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {checkingUpdate ? '⏳ جاري الفحص...' : '🔍 فحص التحديثات الآن'}
+              </button>
+
+              {updateInfo?.hasUpdate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = updateInfo?.portalUrl || updateInfo?.downloadUrl || 'https://unified-school-tools-website.vercel.app/';
+                    if (window.electronAPI?.openExternalUrl) {
+                      window.electronAPI.openExternalUrl(url);
+                    } else {
+                      window.open(url, '_blank');
+                    }
+                  }}
+                  style={{
+                    background: '#10b981', color: '#fff', border: 'none',
+                    padding: '11px 22px', borderRadius: 10, fontSize: 13.5,
+                    fontWeight: 700, cursor: 'pointer', display: 'flex',
+                    alignItems: 'center', gap: 8,
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  🚀 تنزيل وتثبيت v{updateInfo.latestVersion}
+                </button>
+              )}
+            </div>
+
+            {/* Footer info */}
+            <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)', fontSize: 12, color: '#94a3b8', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <span>🔗 المستودع الرسمي: github.com/diaaelattar/NeprasPro-ERP</span>
+              <span>🌐 الموقع: unified-school-tools-website.vercel.app</span>
+            </div>
+          </div>
+        )}
+
         {/* ── USER FORM (Add / Edit) ────────────────────── */}
         {showForm && activeTab === 'users' && (
           <form onSubmit={handleSaveUser} className="glass-panel form-body" style={{ maxWidth: '700px', margin: '0 auto' }}>
