@@ -2238,7 +2238,8 @@ const _emisColumnMap = (row) => {
     motherThirdName:  motherThirdName || null,
     motherForthName:  motherForthName || null,
     address:          g(['address', 'العنوان']) || null,
-    gradeName:        g(['levelId', 'الصف*', 'الصف', 'الفرقة']) || null,
+    stageName:        g(['stageId', 'المرحلة*', 'المرحلة', 'اسم المرحلة', 'المرحلة التعليمية', 'مرحلة', 'stageName', 'stage', 'Stage', 'txtStage', 'ddlStage']) || null,
+    gradeName:        g(['levelId', 'gradeId', 'الصف*', 'الصف', 'اسم الصف', 'الفرقة', 'gradeName', 'grade', 'txtGrade', 'ddlGrade', 'الصف المستهدف']) || null,
     sectionName:      sectionName || null,
     classroomName: (() => {
       let raw = g([
@@ -2273,27 +2274,32 @@ const _syncStudentClassroom = (sqliteDb, studentId, gradeId, academicYearId, raw
   if (!cleanCls || ['اختر', 'اختيار', 'الكل', '-- اختر --', '0', '-- اختر الفصل --', '--اختر--', 'لا يوجد', 'null', 'undefined'].includes(cleanCls)) return null;
 
   // Clean prefix if "فصل" is present
-  cleanCls = cleanCls.replace(/^فصل\s+/i, '').trim() || cleanCls;
+  cleanCls = cleanCls.replace(/^فصل\s*[\(\[]?/i, '').replace(/[\)\]]$/, '').trim() || cleanCls;
+
+  const numMatch = cleanCls.match(/\d+/);
+  const classNum = numMatch ? parseInt(numMatch[0]) : null;
 
   let cls = _get(sqliteDb, `
     SELECT id FROM classes
     WHERE grade_id = ? AND academic_year_id = ?
-      AND (class_name = ? OR class_name = ? OR class_name = ? OR class_name = ? OR class_name = ?)
-  `, [gradeId, academicYearId, cleanCls, `فصل ${cleanCls}`, `فصل (${cleanCls})`, `${cleanCls}/1`, `1/${cleanCls}`]);
+      AND (class_name = ? OR class_name = ? OR class_name = ? OR class_name = ? OR class_name = ? OR (class_number IS NOT NULL AND class_number = ?))
+  `, [gradeId, academicYearId, cleanCls, `فصل ${cleanCls}`, `فصل (${cleanCls})`, `${cleanCls}/1`, `1/${cleanCls}`, classNum]);
 
   if (!cls) {
-    const allCls = _all(sqliteDb, 'SELECT id, class_name FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
+    const allCls = _all(sqliteDb, 'SELECT id, class_name, class_number FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
     cls = allCls.find(c => {
-      const cn = c.class_name.trim();
-      return cn === cleanCls || cn.includes(cleanCls) || cleanCls.includes(cn);
+      const cn = String(c.class_name || '').trim();
+      return cn === cleanCls || cn.includes(cleanCls) || cleanCls.includes(cn) || (classNum !== null && c.class_number === classNum);
     });
   }
 
   if (!cls) {
     try {
-      sqliteDb.run('INSERT INTO classes (class_name, grade_id, academic_year_id) VALUES (?, ?, ?)', [cleanCls, gradeId, academicYearId]);
+      const grp = _get(sqliteDb, 'SELECT stage_id FROM grades_lookup WHERE id = ?', [gradeId]);
+      const stageId = grp?.stage_id || null;
+      sqliteDb.run('INSERT INTO classes (class_name, class_number, grade_id, academic_year_id, stage_id) VALUES (?, ?, ?, ?, ?)', [cleanCls, classNum, gradeId, academicYearId, stageId]);
       db.flushSQLite();
-      cls = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND class_name = ?', [gradeId, academicYearId, cleanCls]);
+      cls = _get(sqliteDb, 'SELECT id FROM classes WHERE grade_id = ? AND academic_year_id = ? AND (class_name = ? OR class_number = ?)', [gradeId, academicYearId, cleanCls, classNum]);
     } catch (_) {}
   }
 
@@ -2304,6 +2310,7 @@ const _syncStudentClassroom = (sqliteDb, studentId, gradeId, academicYearId, raw
         'INSERT INTO class_enrollments (class_id, student_id, academic_year_id) VALUES (?, ?, ?)',
         [cls.id, studentId, academicYearId]
       );
+      db.flushSQLite();
     } catch (_) {}
     return cls.id;
   }
@@ -2315,14 +2322,33 @@ const _ensureEmisSyncLogTable = (sqliteDb) => {
     // Drop shadow log table completely
     sqliteDb.run('DROP TABLE IF EXISTS emis_sync_log;');
 
-    // Auto-repair missing nationality, section, stage, academic_year for existing students
+    // Intelligent auto-repair for missing/corrupted stages for existing students
     try {
+      const activeStages = _all(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup WHERE is_active = 1 ORDER BY display_order ASC, id ASC');
+      const primaryActiveStage = activeStages[0] || _get(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup ORDER BY id ASC LIMIT 1');
+      
+      if (primaryActiveStage) {
+        const activeStageIds = activeStages.map(s => s.id);
+        if (activeStageIds.length > 0) {
+          const placeholders = activeStageIds.map(() => '?').join(',');
+          // If student has stage_id that is NOT in active stages, repair to matching active stage
+          const inactiveStudents = _all(sqliteDb, `SELECT id, stage_id, grade_id FROM students WHERE stage_id IS NULL OR stage_id = 0 OR stage_id NOT IN (${placeholders})`, activeStageIds);
+          for (const st of inactiveStudents) {
+            const grp = _get(sqliteDb, 'SELECT grade_number FROM grades_lookup WHERE id = ?', [st.grade_id]);
+            const gNum = grp?.grade_number || 1;
+            const targetGrade = _get(sqliteDb, 'SELECT id FROM grades_lookup WHERE stage_id = ? AND grade_number = ?', [primaryActiveStage.id, gNum])
+                             || _get(sqliteDb, 'SELECT id FROM grades_lookup WHERE stage_id = ? ORDER BY id ASC LIMIT 1', [primaryActiveStage.id]);
+            const targetGradeId = targetGrade?.id || st.grade_id;
+            sqliteDb.run('UPDATE students SET stage_id = ?, section_id = ?, grade_id = ? WHERE id = ?', [primaryActiveStage.id, primaryActiveStage.section_id, targetGradeId, st.id]);
+          }
+        }
+      }
       sqliteDb.run("UPDATE students SET nationality_id = 1 WHERE nationality_id IS NULL OR nationality_id = '' OR nationality_id = 0");
-      sqliteDb.run("UPDATE students SET section_id = 1 WHERE section_id IS NULL OR section_id = 0");
-      sqliteDb.run("UPDATE students SET stage_id = 1 WHERE stage_id IS NULL OR stage_id = 0");
       sqliteDb.run("UPDATE students SET academic_year_id = (SELECT id FROM academic_years WHERE is_current = 1 LIMIT 1) WHERE academic_year_id IS NULL OR academic_year_id = 0");
       db.flushSQLite();
-    } catch (_) {}
+    } catch (repairErr) {
+      console.warn('[DB Auto-Repair]', repairErr.message);
+    }
   } catch (e) {
     console.error('[DB] Cleanup error:', e.message);
   }
@@ -2348,7 +2374,7 @@ const emisSync = async (req, res) => {
     for (const rawRow of students) {
       try {
         const mapped = _emisColumnMap(rawRow);
-        let { nationalId, emisStudentCode, fullNameAr, gradeName, sectionName, classroomName } = mapped;
+        let { nationalId, emisStudentCode, fullNameAr, stageName, gradeName, sectionName, classroomName } = mapped;
 
         if (!nationalId && emisStudentCode) {
           const m = String(emisStudentCode).match(/\b\d{14}\b/);
@@ -2378,18 +2404,24 @@ const emisSync = async (req, res) => {
           stmt2.free();
         }
 
-        // تحديد المرحلة والصف للربط الدقيق
-        let sectionId = existing?.section_id || 1, stageId = existing?.stage_id || 1, gradeId = existing?.grade_id || 1;
-        const searchStageStr = (gradeName || sectionName || '').trim();
+        // ─── تحديد المرحلة والصف بدقة تامة طبقاً لمراحل المدرسة المفعلة ───
+        const activeStagesList = _all(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup WHERE is_active = 1 ORDER BY display_order ASC, id ASC');
+        const defaultStage = activeStagesList[0] || _get(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup ORDER BY id ASC LIMIT 1');
+
+        let sectionId = existing?.section_id || defaultStage?.section_id || 1;
+        let stageId = existing?.stage_id || defaultStage?.id || 1;
+        let gradeId = existing?.grade_id || null;
+
+        const searchStageStr = (stageName || gradeName || sectionName || '').trim();
         if (searchStageStr) {
-          const stagesList = _all(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup');
-          const matchedStage = stagesList.find(s => {
+          const stagesToSearch = activeStagesList.length > 0 ? activeStagesList : _all(sqliteDb, 'SELECT id, section_id, stage_name FROM stages_lookup');
+          const matchedStage = stagesToSearch.find(s => {
             const dbName = s.stage_name.trim();
-            if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
             if ((searchStageStr.includes('اعداد') || searchStageStr.includes('إعداد')) && !searchStageStr.includes('دول') && (dbName.includes('اعداد') || dbName.includes('إعداد')) && !dbName.includes('دول')) return true;
-            if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
+            if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
             if (searchStageStr.includes('ثانو') && dbName.includes('ثانو')) return true;
-            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل')) && (dbName.includes('روض') || dbName.includes('طفل'))) return true;
+            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل') || searchStageStr.includes('تمهيد')) && (dbName.includes('روض') || dbName.includes('طفل') || dbName.includes('تمهيد'))) return true;
+            if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
             return false;
           });
           if (matchedStage) {
@@ -2398,10 +2430,11 @@ const emisSync = async (req, res) => {
           }
         }
 
+        const gradesInStage = _all(sqliteDb, 'SELECT id, grade_name_ar, grade_number FROM grades_lookup WHERE stage_id = ? AND (is_active = 1 OR is_active IS NULL) ORDER BY grade_number ASC, id ASC', [stageId]);
         if (gradeName) {
           const getGradeNum = (str) => {
             if (str.includes('أول') || str.includes('اول') || str.includes('1')) return 1;
-            if (str.includes('ثان') || str.includes('ثان') || str.includes('2')) return 2;
+            if (str.includes('ثان') || str.includes('ثاني') || str.includes('2')) return 2;
             if (str.includes('ثالث') || str.includes('3')) return 3;
             if (str.includes('رابع') || str.includes('4')) return 4;
             if (str.includes('خامس') || str.includes('5')) return 5;
@@ -2409,13 +2442,18 @@ const emisSync = async (req, res) => {
             return 0;
           };
           const targetNum = getGradeNum(gradeName);
-          const gradesInStage = _all(sqliteDb, 'SELECT id, grade_name_ar FROM grades_lookup WHERE stage_id = ?', [stageId]);
           const matchedGrade = gradesInStage.find(g => {
-            if (targetNum > 0 && getGradeNum(g.grade_name_ar) === targetNum) return true;
+            if (targetNum > 0 && (g.grade_number === targetNum || getGradeNum(g.grade_name_ar) === targetNum)) return true;
             return g.grade_name_ar.includes(gradeName) || gradeName.includes(g.grade_name_ar);
           });
-          if (matchedGrade) gradeId = matchedGrade.id;
-          else if (gradesInStage.length > 0) gradeId = gradesInStage[0].id;
+          if (matchedGrade) {
+            gradeId = matchedGrade.id;
+          } else if (gradesInStage.length > 0) {
+            gradeId = gradesInStage[0].id;
+          }
+        }
+        if (!gradeId) {
+          gradeId = gradesInStage.length > 0 ? gradesInStage[0].id : (existing?.grade_id || 1);
         }
 
           const sParts = (fullNameAr || '').trim().split(/\s+/);

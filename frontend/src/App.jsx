@@ -3,7 +3,7 @@ import {
   Database, Shield, Layers, ArrowLeft, ArrowRight, CheckCircle2, 
   Activity, Settings, Lock, FileText, UserPlus, HelpCircle,
   GraduationCap, Users, UserCheck, Calendar, DollarSign, BookOpen, FileSpreadsheet,
-  ShieldAlert
+  ShieldAlert, ShieldCheck
 } from 'lucide-react';
 import './App.css';
 import StudentsList   from './pages/students/StudentsList';
@@ -672,12 +672,16 @@ function App() {
         {/* Sidebar */}
         <aside className="dashboard-sidebar">
           <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <img 
-              src={schoolLogo || '/app-logo.png'} 
-              alt="Logo" 
-              style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6 }} 
-              onError={(e) => { e.currentTarget.src = '/app-logo.png'; }}
-            />
+            {schoolLogo ? (
+              <img 
+                src={schoolLogo} 
+                alt="Logo" 
+                style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6 }} 
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            ) : (
+              <span style={{ fontSize: 22 }}>🏛️</span>
+            )}
             <span>نبراس برو ERP</span>
           </div>
           <p className="school-tagline">{schoolName}</p>
@@ -1679,10 +1683,12 @@ function App() {
               <strong style={{ fontSize: 16, color: '#1e3a8a' }}>{schoolName}</strong>
             </p>
 
-            <button className="btn-primary" style={{ padding: '12px 30px', fontSize: 15 }} onClick={async () => {
+            <button className="btn-primary" style={{ padding: '12px 30px', fontSize: 15 }} onClick={() => {
+              setDbConfigured(true);
               setInitialized(true);
               setIsLoggedIn(false);
-              await checkStatus(0);
+              setLoading(false);
+              setStep(1);
             }}>
               الانتقال لبوابة الدخول الموحدة
             </button>

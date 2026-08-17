@@ -12,7 +12,6 @@ const DOMAINS = [
     key: 'students',
     title: 'شؤون الطلاب والقبول',
     icon: '🎓',
-    iconImg: '/assets/icons/domains/students.png',
     badge: 'تسجيل وقيد وإحصاء',
     desc: 'سجلات وقوائم الطلاب، تسكين الفصول، شهادات القيد، والتحويلات',
     color: '#1a3c6e',
@@ -24,7 +23,6 @@ const DOMAINS = [
     key: 'admin',
     title: 'الإدارة العامة والتحكم',
     icon: '👑',
-    iconImg: '/assets/icons/domains/admin.png',
     badge: 'الإدارة والضبط',
     desc: 'الرؤية الشاملة للمؤسسة، إعدادات المراحل والفصول، إدارة الصلاحيات، والنسخ الاحتياطي',
     color: '#0f172a',
@@ -36,7 +34,6 @@ const DOMAINS = [
     key: 'control',
     title: 'الكنترول والامتحانات',
     icon: '📋',
-    iconImg: '/assets/icons/domains/control.png',
     badge: 'الامتحانات والشهادات',
     desc: 'أرقام الجلوس، اللجان، الترقيم السري، رصد الدرجات، الشيتات، وطباعة الشهادات',
     color: '#831843',
@@ -49,7 +46,6 @@ const DOMAINS = [
     key: 'staff',
     title: 'شؤون العاملين (HR)',
     icon: '👔',
-    iconImg: '/assets/icons/domains/staff.png',
     badge: 'الكوادر والإشراف',
     desc: 'بيانات المعلمين والإداريين، النصاب الأسبوعي، جدول الإشراف، والإفادات الإدارية',
     color: '#065f46',
@@ -63,7 +59,6 @@ const DOMAINS = [
     key: 'finance',
     title: 'الحسابات والخزينة',
     icon: '💰',
-    iconImg: '/assets/icons/domains/finance.png',
     badge: 'المصروفات والأقساط',
     desc: 'تحصيل المصروفات الدراسية، أقساط الباص والكتب، أذونات الصرف، وسندات القبض',
     color: '#78350f',
@@ -193,12 +188,16 @@ const LoginGateway = ({
           <div className="gateway-header-top">
             <div className="gateway-brand-info">
               <div className="gateway-logo-wrapper">
-                <img 
-                  src={schoolLogo || '/app-logo.png'} 
-                  alt="Logo" 
-                  className="gateway-school-logo" 
-                  onError={(e) => { e.currentTarget.src = '/app-logo.png'; }}
-                />
+                {schoolLogo ? (
+                  <img 
+                    src={schoolLogo} 
+                    alt="Logo" 
+                    className="gateway-school-logo" 
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                ) : (
+                  <span className="gateway-default-logo">🏛️</span>
+                )}
               </div>
               <div>
                 <h1 className="gateway-school-name">{schoolName || 'منظومة نبراس برو التعليمية'}</h1>
@@ -248,12 +247,8 @@ const LoginGateway = ({
                   }}
                 >
                   <div className="domain-header">
-                    <span className="domain-icon">
-                      {dom.iconImg ? (
-                        <img src={dom.iconImg} alt={dom.title} style={{ width: 44, height: 44, objectFit: 'contain', filter: dom.isLocked ? 'grayscale(40%) drop-shadow(0 2px 4px rgba(0,0,0,0.2))' : 'drop-shadow(0 4px 6px rgba(0,0,0,0.25))' }} />
-                      ) : (
-                        dom.icon
-                      )}
+                    <span className="domain-icon" style={{ fontSize: 32 }}>
+                      {dom.icon}
                     </span>
                     {dom.isLocked ? (
                       <span className="domain-badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', fontWeight: 800 }}>
@@ -304,12 +299,8 @@ const LoginGateway = ({
                 background: `linear-gradient(135deg, ${activeDomainObj?.color || '#0f172a'} 0%, ${activeDomainObj?.accent || '#3b82f6'} 100%)`
               }}
             >
-              <div className="banner-icon">
-                {activeDomainObj?.iconImg ? (
-                  <img src={activeDomainObj.iconImg} alt={activeDomainObj.title} style={{ width: 42, height: 42, objectFit: 'contain', filter: 'drop-shadow(0 3px 5px rgba(0,0,0,0.3))' }} />
-                ) : (
-                  activeDomainObj?.icon
-                )}
+              <div className="banner-icon" style={{ fontSize: 36 }}>
+                {activeDomainObj?.icon || '🏛️'}
               </div>
               <div style={{ flex: 1 }}>
                 <h2>{activeDomainObj?.title}</h2>

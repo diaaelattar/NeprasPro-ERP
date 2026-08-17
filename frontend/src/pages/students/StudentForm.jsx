@@ -276,8 +276,8 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
     }
   }, [form.stageId, isSecondaryStage]);
 
-  const filteredStages = formOpts.stages?.filter(s => !form.sectionId || String(s.section_id) === form.sectionId) || [];
-  const filteredGrades = formOpts.grades?.filter(g => !form.stageId  || String(g.stage_id)   === form.stageId)   || [];
+  const filteredStages = formOpts.stages?.filter(s => !form.sectionId || String(s.section_id) === String(form.sectionId) || String(s.id) === String(form.stageId)) || [];
+  const filteredGrades = formOpts.grades?.filter(g => !form.stageId  || String(g.stage_id)   === String(form.stageId)   || String(g.id) === String(form.gradeId))   || [];
 
   const handleSubmit = async () => {
     setError(''); setSuccess('');
