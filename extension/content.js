@@ -296,6 +296,52 @@
     const Utils = {
         sleep: ms => new Promise(r => setTimeout(r, ms)),
 
+        async getSpeedDelays() {
+            const mode = (await Store.get('speed_mode', 'balanced')) || 'balanced';
+            if (mode === 'fast' || mode === 'turbo') {
+                return {
+                    mode: 'fast',
+                    pollInterval: 70,
+                    settlingTime: 180,
+                    shortWait: 150,
+                    medWait: 350,
+                    maxSearchWait: 2000,
+                    searchPostSleep: 80
+                };
+            }
+            if (mode === 'safe') {
+                return {
+                    mode: 'safe',
+                    pollInterval: 200,
+                    settlingTime: 700,
+                    shortWait: 450,
+                    medWait: 900,
+                    maxSearchWait: 4500,
+                    searchPostSleep: 350
+                };
+            }
+            // balanced (default - fast & highly responsive)
+            return {
+                mode: 'balanced',
+                pollInterval: 100,
+                settlingTime: 300,
+                shortWait: 220,
+                medWait: 450,
+                maxSearchWait: 2800,
+                searchPostSleep: 120
+            };
+        },
+
+        async waitForElement(selector, maxTimeout = 2800, pollInterval = 100) {
+            const startTime = Date.now();
+            while (Date.now() - startTime < maxTimeout) {
+                const el = document.querySelector(selector);
+                if (el) return el;
+                await this.sleep(pollInterval);
+            }
+            return document.querySelector(selector);
+        },
+
         extractStudentId(url) {
             if (!url) return null;
             const m = url.match(/edit\/([^/?#]+)/i) || url.match(/id=([^&#]+)/i) || url.match(/code=([^&#]+)/i);
@@ -768,11 +814,11 @@ body.gm-dark-mode {
 
   <!-- وضع سرعة السحب والتأخير -->
   <div class="gm-row">
-    <label>⚡ وضع سرعة السحب (لتفادي فقد البيانات)</label>
+    <label>⚡ سرعة التجميع ومعدل الاستجابة الذكي</label>
     <select id="gm-speed-mode-select" class="gm-select" style="font-weight:700; color:#0284c7;">
-      <option value="balanced">⚡ متوازن (موصى به - انتظار 1.5 ثانية)</option>
-      <option value="safe">🛡️ آمن ومستقر (لسيرفر الوزارة البطيء - انتظار 2.8 ثانية)</option>
-      <option value="fast">🚀 فائق السرعة (سيرفر سريع - انتظار 0.8 ثانية)</option>
+      <option value="fast">🚀 فائق السرعة (أسرع 4 مرات - انتقال فوري عند ظهور البيانات)</option>
+      <option value="balanced" selected>⚡ متوازن وسريع (موصى به - معدل استجابة ذكي)</option>
+      <option value="safe">🛡️ آمن ومتأني (لسيرفر الوزارة البطيء أو الاتصال المتقطع)</option>
     </select>
   </div>
 
@@ -1621,21 +1667,23 @@ body.gm-dark-mode {
                 return;
             }
 
+            const delays = await Utils.getSpeedDelays();
             await UI.updateStats();
             const code    = targetCodes[currentIdx];
             const started = await this.executeSearchForCode(code);
             if (!started) { await Store.set('collecting', false); return; }
 
-            await Utils.sleep(CONFIG.WAIT_LONG);
-            const links = document.querySelectorAll(CONFIG.SELECTORS.STUDENT_LINK);
-            if (links.length > 0) {
-                window.location.href = links[0].getAttribute('href');
+            // الانتظار الذكي الفوري لظهور رابط الطالب بدلاً من الانتظار الأعمى 3 ثواني
+            const link = await Utils.waitForElement(CONFIG.SELECTORS.STUDENT_LINK, delays.maxSearchWait, delays.pollInterval);
+            if (link) {
+                await Utils.sleep(delays.searchPostSleep);
+                window.location.href = link.getAttribute('href');
             } else {
                 showToast(`⚠️ الكود ${code} غير موجود. تخطي وتسجيل كفاشل.`, 'warning');
                 let failed = await Store.get('failed_codes', []);
                 if (!failed.includes(code)) { failed.push(code); await Store.set('failed_codes', failed); }
                 await Store.set('current_code_index', currentIdx + 1);
-                await Utils.sleep(CONFIG.WAIT_SHORT);
+                await Utils.sleep(delays.shortWait);
                 window.location.reload();
             }
         },
@@ -1674,14 +1722,16 @@ body.gm-dark-mode {
                 return false;
             };
 
+            const delays = await Utils.getSpeedDelays();
+
             // 3. انتظار استقرار وتحميل البيانات
             let elapsed = 0;
             while (elapsed < CONFIG.EDIT_WAIT_MAX) {
                 if (isCoreIdentityLoaded() && !isAjaxActive()) break;
-                await Utils.sleep(400);
-                elapsed += 400;
+                await Utils.sleep(delays.pollInterval);
+                elapsed += delays.pollInterval;
             }
-            await Utils.sleep(1500);
+            await Utils.sleep(delays.settlingTime);
 
             try {
                 const studentData = {};
@@ -1787,7 +1837,8 @@ body.gm-dark-mode {
                 if (url.includes('/edit/')) {
                     await Scraper.onEditPageCollectAndBack();
                 } else if (url.includes('/list') || url.includes('/index') || url.includes('/search') || url.includes('/student')) {
-                    await Utils.sleep(1000);
+                    const delays = await Utils.getSpeedDelays();
+                    await Utils.sleep(delays.shortWait);
                     await Scraper.onListPageResume();
                 }
             } else {
