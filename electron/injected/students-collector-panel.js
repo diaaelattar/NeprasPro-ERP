@@ -1688,7 +1688,7 @@ body.gm-dark-mode {
             }
         },
 
-        // صفحة التعديل: سحب البيانات والعودة
+        // صفحة التعديل: سحب البيانات والعودة الفورية
         async onEditPageCollectAndBack() {
             const collecting = await Store.get('collecting', false);
             if (!collecting) return;
@@ -1697,39 +1697,29 @@ body.gm-dark-mode {
             const currentIdx  = await Store.get('current_code_index', 0);
             const currentCode = targetCodes[currentIdx];
 
-            showToast('جاري سحب بيانات الطالب...', 'info');
-
-            // 1. التحقق من اكتمال تحميل AJAX / UpdatePanel
-            const isAjaxActive = () => {
-                if (typeof Sys !== 'undefined' && Sys.WebForms && Sys.WebForms.PageRequestManager) {
-                    try { return Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack(); } catch (_) {}
-                }
-                if (typeof jQuery !== 'undefined' && jQuery.active > 0) return true;
-                return false;
-            };
-
-            // 2. التحقق من ظهور حقول الهوية الأساسية
-            const isCoreIdentityLoaded = () => {
-                const natInp = document.querySelector('input[name*="nat" i], input[id*="nat" i], span[id*="nat" i], span[id*="lblNational" i]');
-                if (natInp && (natInp.value || natInp.innerText)?.trim().length >= 10) return true;
-
-                const nameInp = document.querySelector('input[name*="name" i], input[id*="name" i], input[name*="txt_name" i], span[id*="name" i]');
-                if (nameInp && (nameInp.value || nameInp.innerText)?.trim().length >= 3) return true;
-
-                const pageText = document.body.innerText || '';
-                if (/\b([23]\d{13})\b/.test(pageText)) return true;
-
-                return false;
-            };
-
             const delays = await Utils.getSpeedDelays();
 
-            // 3. انتظار استقرار وتحميل البيانات
+            // 1. فحص فوري وسريع لجاهزية واستقرار الحقول في الصفحة
+            const hasFormData = () => {
+                const inputs = document.querySelectorAll(CONFIG.SELECTORS.FORM_INPUTS);
+                let filledCount = 0;
+                for (const inp of inputs) {
+                    if (inp.value && inp.value.trim().length > 0 && !['__VIEWSTATE', '__EVENTVALIDATION', '__EVENTTARGET', '__EVENTARGUMENT'].includes(inp.name)) {
+                        filledCount++;
+                        if (filledCount >= 3) return true;
+                    }
+                }
+                const pageText = document.body.innerText || '';
+                if (/\b([23]\d{13})\b/.test(pageText)) return true;
+                return false;
+            };
+
+            // 2. انتظار فوري ذكي بحد أقصى 1.5 ثانية (يكتفي بـ 50ms إذا كانت الصفحة محملة)
             let elapsed = 0;
-            while (elapsed < CONFIG.EDIT_WAIT_MAX) {
-                if (isCoreIdentityLoaded() && !isAjaxActive()) break;
-                await Utils.sleep(delays.pollInterval);
-                elapsed += delays.pollInterval;
+            while (elapsed < 2000) {
+                if (hasFormData()) break;
+                await Utils.sleep(50);
+                elapsed += 50;
             }
             await Utils.sleep(delays.settlingTime);
 
@@ -1788,9 +1778,7 @@ body.gm-dark-mode {
 
                     if (dataArr.length >= CONFIG.BATCH_SIZE) {
                         showToast(`✅ اكتملت الدفعة ${batchNum}! جاري التصدير والإرسال...`, 'success');
-                        // إرسال لنبراس برو أولاً
                         await NeprasAPI.sendBatch(dataArr);
-                        // ثم تصدير Excel احتياطياً
                         await Exporter.exportData(dataArr, batchNum);
                         dataArr = [];
                         await Store.set('collected_data', []);
@@ -1811,7 +1799,7 @@ body.gm-dark-mode {
                 console.error('[Ext] Scraping Error:', err);
             }
 
-            await Utils.sleep(CONFIG.WAIT_SHORT);
+            await Utils.sleep(delays.shortWait);
             const listUrl = await Store.get('list_page_url', '/student/list');
             window.location.href = listUrl;
         }
@@ -1831,7 +1819,10 @@ body.gm-dark-mode {
             // تفعيل الأداة واللوحة على كافة صفحات المنظومة فور تسجيل الدخول (استبعاد صفحة تسجيل الدخول فقط)
             if (!isLoginPage && (url.includes('emis.gov.eg') || url.includes('/student'))) {
                 await UI.ensureUI();
-                await UI.populateLevels();
+                // تحميل الصفوف فقط في صفحة البحث والقوائم لتجنب تعطيل صفحة الطالب
+                if (!url.includes('/edit/')) {
+                    await UI.populateLevels();
+                }
                 await UI.updateStats();
 
                 if (url.includes('/edit/')) {
