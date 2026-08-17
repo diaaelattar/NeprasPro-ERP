@@ -377,38 +377,6 @@ function App() {
 
     // Build sections structure
     const sectionsPayload = [];
-    if (sectionArab) {
-      const stages = [];
-      if (arabStages.nursery) stages.push('تمهيدي');
-      if (arabStages.kg) stages.push('رياض أطفال');
-      if (arabStages.primary) stages.push('ابتدائي');
-      if (arabStages.prep) stages.push('إعدادي');
-      if (arabStages.secondary) stages.push('ثانوي');
-      sectionsPayload.push({
-        name: 'القسم العربي',
-        type: 'arabic',
-        educationType: 'عربي',
-        legalStatus: 'حكومي',
-        stages
-      });
-    }
-
-    if (sectionLang) {
-      const stages = [];
-      if (langStages.nursery) stages.push('تمهيدي لغات');
-      if (langStages.kg) stages.push('رياض أطفال لغات');
-      if (langStages.primary) stages.push('ابتدائي لغات');
-      if (langStages.prep) stages.push('إعدادي لغات');
-      if (langStages.secondary) stages.push('ثانوي لغات');
-      sectionsPayload.push({
-        name: 'قسم اللغات',
-        type: 'languages',
-        educationType: 'رسمي لغات',
-        legalStatus: 'حكومي',
-        stages
-      });
-    }
-
     const payload = {
       schoolCode: schoolForm.schoolCode,
       schoolName: schoolForm.schoolName,
@@ -1463,10 +1431,13 @@ function App() {
                   }}
                 >
                   <option value="">اختر المحافظة...</option>
-                  {['القاهرة','الجيزة','الإسكندرية','الدقهلية','البحيرة','الفيوم','الغربية','الإسماعيلية',
-                    'المنوفية','المنيا','القليوبية','السويس','الشرقية','أسوان','أسيوط','بني سويف','بورسعيد',
-                    'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج'
-                  ].filter((v, i, a) => a.indexOf(v) === i).map(g => (
+                  {(governoratesList && governoratesList.length > 0
+                    ? governoratesList.map(g => g.name_ar)
+                    : ['القاهرة','الجيزة','الإسكندرية','الدقهلية','البحيرة','الفيوم','الغربية','الإسماعيلية',
+                       'المنوفية','المنيا','القليوبية','السويس','الشرقية','أسوان','أسيوط','بني سويف','بورسعيد',
+                       'دمياط','الوادي الجديد','شمال سيناء','جنوب سيناء','كفر الشيخ','مطروح','الأقصر','قنا','سوهاج','البحر الأحمر'
+                      ]
+                  ).filter((v, i, a) => a.indexOf(v) === i).map(g => (
                     <option key={g} value={g}>{g}</option>
                   ))}
                 </select>
@@ -1708,9 +1679,10 @@ function App() {
               <strong style={{ fontSize: 16, color: '#1e3a8a' }}>{schoolName}</strong>
             </p>
 
-            <button className="btn-primary" style={{ padding: '12px 30px', fontSize: 15 }} onClick={() => {
+            <button className="btn-primary" style={{ padding: '12px 30px', fontSize: 15 }} onClick={async () => {
               setInitialized(true);
-              setIsLoggedIn(false); // Transitions straight to LoginGateway
+              setIsLoggedIn(false);
+              await checkStatus(0);
             }}>
               الانتقال لبوابة الدخول الموحدة
             </button>
