@@ -1714,9 +1714,10 @@ body.gm-dark-mode {
                 return false;
             };
 
-            // 2. انتظار فوري ذكي بحد أقصى 1.5 ثانية (يكتفي بـ 50ms إذا كانت الصفحة محملة)
+            // 2. انتظار ذكي مرن: ينطلق فوراً بمجرد ظهور البيانات، وينتظر بصبر إذا كان السيرفر بطيئاً
             let elapsed = 0;
-            while (elapsed < 2000) {
+            const maxWait = delays.mode === 'safe' ? 8000 : (delays.mode === 'fast' ? 3500 : 5000);
+            while (elapsed < maxWait) {
                 if (hasFormData()) break;
                 await Utils.sleep(50);
                 elapsed += 50;
