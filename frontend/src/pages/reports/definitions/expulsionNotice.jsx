@@ -3,7 +3,7 @@ import React from 'react';
 const expulsionNotice = {
   id: 'expulsion-notice',
   name: 'إشعار فصل طالب وتنبيه إعادة القيد',
-  category: 'المطبوعات والنماذج',
+  category: 'المطبوعات والنماذج الرسمية',
   icon: '📜',
   orientation: 'portrait',
   filters: {"requiresYear":true},

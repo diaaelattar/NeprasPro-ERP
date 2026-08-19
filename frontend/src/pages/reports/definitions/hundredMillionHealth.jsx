@@ -1,19 +1,8 @@
 // ════════════════════════════════════════════════════════════════
-//  Report Definition: كشف متابعة الفحص الطبي المدرسي
-//  الترويسة الثلاثية القياسية + الفرز بالنوع والفصول + التذييل الرسمي الرباعي
+//  Report Definition: كشف مبادرة 100 مليون صحة (المسح الطبي الشامل)
+//  مطابق للنموذج الرسمي لحملة 100 مليون صحة لعلاج السمنة والأنيميا والتقزم
 // ════════════════════════════════════════════════════════════════
 import React, { useMemo } from 'react';
-
-const HEALTH_CHECKS = [
-  { id: 'vision',   label: 'البصر' },
-  { id: 'hearing',  label: 'السمع' },
-  { id: 'weight',   label: 'الوزن' },
-  { id: 'height',   label: 'الطول' },
-  { id: 'skin',     label: 'الجلدية' },
-  { id: 'teeth',    label: 'الأسنان' },
-  { id: 'chest',    label: 'الصدر' },
-  { id: 'general',  label: 'الحالة العامة' },
-];
 
 const normalizeDigits = (str) => {
   if (!str) return '';
@@ -35,7 +24,7 @@ const extractClassNum = (name) => {
   return 99999;
 };
 
-function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
+function HundredMillionHealthPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear, selectedClassroom } = meta;
 
   const cleanSchool = (schoolInfo.schoolName || schoolInfo.school_name || '').replace(/^مدرسة\s*/, '').trim();
@@ -81,9 +70,13 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
     ? `${selectedGrade?.grade_name_ar || ''} — فصل ${selectedClassroom.class_name}`
     : `${selectedGrade?.grade_name_ar || 'جميع فصول الصف'}`;
 
+  const border = '1.5px solid #000';
+  const thStyle = { border, padding: '4px 2px', textAlign: 'center', fontWeight: 900, fontSize: '11pt', color: '#000' };
+  const tdStyle = { border: '1px solid #000', padding: '4px 2px', textAlign: 'center', fontSize: '11pt', color: '#000', fontWeight: 700 };
+
   return (
     <div className="report-preview printable-page-block" id="print-area" data-orientation="landscape" style={{
-      padding: '12px 16px',
+      padding: '10px 14px',
       background: '#fff',
       color: '#000',
       fontFamily: 'Cairo, Tahoma, Arial, sans-serif'
@@ -113,7 +106,7 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
             margin: 0,
             textDecoration: 'underline'
           }}>
-            كشف متابعة الفحص الطبي المدرسي
+            كشف مبادرة 100 مليون صحة (المسح الطبي)
           </h2>
           <div className="report-subtitle-meta" style={{ fontSize: '11.5pt', fontWeight: 800, color: '#1e293b', marginTop: 2 }}>
             {targetLabel} | العام الدراسي: <strong>{academicYear} م</strong> | إجمالي الطلاب: <strong>{sortedStudents.length}</strong>
@@ -123,11 +116,11 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
         <div className="header-col-left" style={{ textAlign: 'left', fontSize: '11.5pt', fontWeight: 700, lineHeight: 1.4 }}>
           <div>العام الدراسي: <strong>{academicYear} م</strong></div>
           <div>تاريخ الاعتماد: <strong>{new Date().toLocaleDateString('ar-EG')}</strong></div>
-          <div>كود الاستمارة: <strong>NEP-HEALTH-LIST</strong></div>
+          <div>كود الاستمارة: <strong>NEP-100M-HEALTH</strong></div>
         </div>
       </div>
 
-      {/* Health Grid */}
+      {/* ══ 100 Million Health Multi-Level Table ══ */}
       <div className="register-table-wrap" style={{ width: '100%', overflowX: 'hidden' }}>
         <table className="register-table" dir="rtl" style={{
           width: '100%',
@@ -138,68 +131,94 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
           tableLayout: 'fixed'
         }}>
           <colgroup>
-            <col style={{ width: '3.5%' }} />  {/* م */}
-            <col style={{ width: '28%' }} />   {/* اسم الطالب بالكامل */}
-            <col style={{ width: '14%' }} />   {/* الرقم القومي */}
-            <col style={{ width: '5%' }} />    {/* النوع */}
-            <col style={{ width: '6.5%' }} />  {/* الفصل */}
-            {/* 8 الفحوصات الطبية */}
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            <col style={{ width: '4.5%' }} />
-            {/* ملاحظات */}
-            <col style={{ width: '7%' }} />
+            <col style={{ width: '3%' }} />   {/* م */}
+            <col style={{ width: '26%' }} />  {/* اسم التلميذ رباعياً */}
+            <col style={{ width: '5.5%' }} /> {/* الفصل */}
+            <col style={{ width: '12.5%' }} />{/* الرقم القومي */}
+            <col style={{ width: '10%' }} />  {/* التليفون */}
+            {/* نتائج المسح */}
+            <col style={{ width: '5.5%' }} /> {/* هيموجلوبين */}
+            <col style={{ width: '4.5%' }} /> {/* طول */}
+            {/* نتائج التسجيل */}
+            <col style={{ width: '4.5%' }} /> {/* الكتلة */}
+            <col style={{ width: '4%' }} />   {/* سلبي */}
+            <col style={{ width: '4%' }} />   {/* إيجابي */}
+            {/* الإحالة للعيادة */}
+            <col style={{ width: '5.5%' }} /> {/* تاريخ */}
+            <col style={{ width: '5.5%' }} /> {/* زيارة سابقة */}
+            {/* متابعة الزائرة */}
+            <col style={{ width: '4.5%' }} /> {/* سلبي */}
+            <col style={{ width: '4.5%' }} /> {/* إيجابي */}
           </colgroup>
           <thead>
-            <tr style={{ background: '#7c3aed', color: '#fff', fontWeight: 900, fontSize: '11pt' }}>
-              <th style={{ border: '1.5px solid #000', padding: '6px 2px' }}>م</th>
-              <th style={{ border: '1.5px solid #000', padding: '6px 8px', textAlign: 'right' }}>اسم الطالب بالكامل</th>
-              <th style={{ border: '1.5px solid #000', padding: '6px 2px' }}>الرقم القومي</th>
-              <th style={{ border: '1.5px solid #000', padding: '6px 2px' }}>النوع</th>
-              <th style={{ border: '1.5px solid #000', padding: '6px 2px' }}>الفصل</th>
-              {HEALTH_CHECKS.map(h => (
-                <th key={h.id} style={{ border: '1.5px solid #000', padding: '4px 1px', fontSize: '9pt', whiteSpace: 'nowrap' }}>
-                  {h.label}
-                </th>
-              ))}
-              <th style={{ border: '1.5px solid #000', padding: '6px 2px', fontSize: '9.5pt' }}>ملاحظات</th>
+            {/* ── Row 1 ── */}
+            <tr>
+              <th rowSpan="3" style={{ ...thStyle, background: '#dcfce7' }}>م</th>
+              <th rowSpan="3" style={{ ...thStyle, textAlign: 'right', paddingRight: '8px', background: '#dcfce7' }}>اسم التلميذ رباعياً</th>
+              <th rowSpan="3" style={{ ...thStyle, background: '#dcfce7' }}>الفصل</th>
+              <th rowSpan="3" style={{ ...thStyle, background: '#dcfce7' }}>الرقم القومى</th>
+              <th rowSpan="3" style={{ ...thStyle, background: '#dcfce7' }}>التليفون</th>
+              <th colSpan="2" rowSpan="2" style={{ ...thStyle, background: '#ffedd5' }}>نتائج المسح</th>
+              <th colSpan="5" style={{ ...thStyle, background: '#e0f2fe' }}>تملأ بواسطة إدارة النظم بالفرع</th>
+              <th colSpan="2" style={{ ...thStyle, background: '#fef9c3' }}>متابعة الزائرة</th>
+            </tr>
+            {/* ── Row 2 ── */}
+            <tr>
+              <th colSpan="3" style={{ ...thStyle, background: '#bae6fd' }}>نتائج التسجيل</th>
+              <th colSpan="2" style={{ ...thStyle, background: '#bae6fd' }}>الإحالة للعيادة</th>
+              <th colSpan="2" style={{ ...thStyle, background: '#fef08a' }}>نتيجة الإحالة للعيادة</th>
+            </tr>
+            {/* ── Row 3 ── */}
+            <tr>
+              <th style={{ ...thStyle, background: '#fed7aa', fontSize: '9pt' }}>هيموجلوبين</th>
+              <th style={{ ...thStyle, background: '#fed7aa', fontSize: '9pt' }}>طول</th>
+              <th style={{ ...thStyle, background: '#7dd3fc', fontSize: '9pt' }}>الكتلة</th>
+              <th style={{ ...thStyle, background: '#7dd3fc', fontSize: '9pt' }}>سلبى</th>
+              <th style={{ ...thStyle, background: '#7dd3fc', fontSize: '9pt' }}>إيجابى</th>
+              <th style={{ ...thStyle, background: '#7dd3fc', fontSize: '9pt' }}>تاريخ</th>
+              <th style={{ ...thStyle, background: '#7dd3fc', fontSize: '9pt' }}>زيارة سابقة</th>
+              <th style={{ ...thStyle, background: '#fde047', fontSize: '9pt' }}>سلبى</th>
+              <th style={{ ...thStyle, background: '#fde047', fontSize: '9pt' }}>إيجابى</th>
             </tr>
           </thead>
           <tbody>
             {sortedStudents.length > 0 ? (
               sortedStudents.map((s, idx) => {
+                const phone = s.emergency_phone || s.guardian_phone || s.phone || s.mother_phone || '—';
                 return (
                   <tr key={s.id || idx} style={{ background: idx % 2 === 1 ? '#f8fafc' : '#fff' }}>
-                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 800 }}>{idx + 1}</td>
-                    <td style={{ border: '1px solid #000', padding: '4px 8px', textAlign: 'right', fontWeight: 800, fontSize: '11.5pt', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    <td style={{ ...tdStyle, fontWeight: 800 }}>{idx + 1}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', paddingRight: '8px', fontWeight: 800, fontSize: '11.5pt', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                       {s.full_name_ar}
                     </td>
-                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontFamily: 'monospace', fontSize: '10.5pt', fontWeight: 700, whiteSpace: 'nowrap' }} dir="ltr">
-                      {s.national_id || '—'}
-                    </td>
-                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>
-                      {s.gender || '—'}
-                    </td>
-                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 800, fontSize: '11pt', whiteSpace: 'nowrap' }}>
+                    <td style={{ ...tdStyle, fontWeight: 800, fontSize: '11pt', whiteSpace: 'nowrap' }}>
                       {s.classroom_name || s.class_name || '—'}
                     </td>
-                    {HEALTH_CHECKS.map(h => (
-                      <td key={h.id} style={{ border: '1px solid #000', padding: '3px 1px', textAlign: 'center' }}>
-                        <span style={{ display: 'inline-block', width: 14, height: 14, border: '1.5px solid #64748b', borderRadius: 2, verticalAlign: 'middle' }} />
-                      </td>
-                    ))}
-                    <td style={{ border: '1px solid #000', padding: '4px 2px' }}></td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '10.5pt', fontWeight: 700, whiteSpace: 'nowrap' }} dir="ltr">
+                      {s.national_id || '—'}
+                    </td>
+                    <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '10pt', fontWeight: 700, whiteSpace: 'nowrap' }} dir="ltr">
+                      {phone}
+                    </td>
+                    {/* نتائج المسح */}
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    {/* نتائج التسجيل */}
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    {/* الإحالة للعيادة */}
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    {/* متابعة الزائرة */}
+                    <td style={{ ...tdStyle, height: 26 }}></td>
+                    <td style={{ ...tdStyle, height: 26 }}></td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={HEALTH_CHECKS.length + 6} style={{ textAlign: 'center', padding: 25, color: '#64748b', fontWeight: 700, fontSize: '12pt' }}>
+                <td colSpan="14" style={{ textAlign: 'center', padding: 25, color: '#64748b', fontWeight: 700, fontSize: '12pt' }}>
                   لا توجد بيانات مسجلة مطابقة لفلاتر البحث
                 </td>
               </tr>
@@ -220,7 +239,7 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
         fontWeight: 800
       }}>
         <div>
-          <div>الطبيب الفاحص / الزائرة الصحية</div>
+          <div>الزائرة الصحية ومسؤول الحملة</div>
           <div style={{ marginTop: 14, color: '#000' }}>التوقيع: ..........................</div>
         </div>
         <div>
@@ -241,12 +260,12 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
   );
 }
 
-const healthList = {
-  id:          'health-list',
-  name:        'كشف متابعة الفحص الطبي المدرسي',
-  desc:        'سجل نتائج الفحص الطبي الشامل للطلاب (البصر والسمع والأسنان والنمو والصحة العامة)',
+const hundredMillionHealth = {
+  id:          'hundred-million-health',
+  name:        'كشف 100 مليون صحة (المسح الطبي)',
+  desc:        'كشف مبادرة 100 مليون صحة للمسح الطبي الشامل لطلاب المدارس (السمنة والأنيميا والتقزم ونتائج الإحالة)',
   category:    'الصحة والسلامة المدرسية',
-  icon:        '🩺',
+  icon:        '🏥',
   orientation: 'landscape',
   available:   true,
 
@@ -259,10 +278,10 @@ const healthList = {
   },
 
   excelEndpoint: (f) =>
-    `/api/students/export/excel?academicYearId=${f.academicYearId}&gradeId=${f.gradeId}&classId=${f.classId || ''}&type=health`,
+    `/api/students/export/excel?academicYearId=${f.academicYearId}&gradeId=${f.gradeId}&classId=${f.classId || ''}&type=100-million-health`,
 
   excelFileName: (f, meta) =>
-    `كشف_الفحص_الطبي_${meta.selectedGrade?.grade_name_ar || ''}_${meta.selectedYear?.year_label?.replace('/', '_') || ''}.xlsx`,
+    `كشف_100_مليون_صحة_${meta.selectedGrade?.grade_name_ar || ''}_${meta.selectedYear?.year_label?.replace('/', '_') || ''}.xlsx`,
 
   buildQuery: (f) => {
     const q = new URLSearchParams({
@@ -278,7 +297,7 @@ const healthList = {
     return q.toString();
   },
 
-  PreviewComponent: HealthListPreview,
+  PreviewComponent: HundredMillionHealthPreview,
 };
 
-export default healthList;
+export default hundredMillionHealth;

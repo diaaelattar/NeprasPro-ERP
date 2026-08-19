@@ -131,3 +131,74 @@ export const formatClassNumeric = (classNumber, className) => {
   const numMatch = String(className).match(/\d+/);
   return numMatch ? numMatch[0] : String(className);
 };
+
+// ── 11. الخوارزمية القياسية المعتمدة للسن في 1 أكتوبر (وزارة التربية والتعليم) ──
+export const calculateAgeOnOct1st = (birthDate, academicYear, fallbackYear) => {
+  if (!birthDate) return { years: '', months: '', days: '' };
+
+  let bYear, bMonth, bDay;
+
+  const str = String(birthDate).trim();
+  // إذا كان المدخل رقماً قومياً مصرياً من 14 رقم
+  if (str.length === 14 && /^\d{14}$/.test(str)) {
+    const century = parseInt(str[0], 10);
+    const yPart = parseInt(str.substring(1, 3), 10);
+    bYear = century === 2 ? 1900 + yPart : (century === 3 ? 2000 + yPart : null);
+    bMonth = parseInt(str.substring(3, 5), 10);
+    bDay = parseInt(str.substring(5, 7), 10);
+  } else if (str.includes('-') || str.includes('/')) {
+    // تحليل YYYY-MM-DD أو YYYY/MM/DD بالأرقام لتفادي مشاكل الـ Timezone
+    const parts = str.split(/[-/]/).map(Number);
+    if (parts.length >= 3) {
+      if (parts[0] > 1900) { // YYYY-MM-DD
+        bYear = parts[0];
+        bMonth = parts[1];
+        bDay = parts[2];
+      } else if (parts[2] > 1900) { // DD-MM-YYYY
+        bDay = parts[0];
+        bMonth = parts[1];
+        bYear = parts[2];
+      }
+    }
+  }
+
+  if (!bYear || !bMonth || !bDay || isNaN(bYear) || isNaN(bMonth) || isNaN(bDay) || bMonth < 1 || bMonth > 12 || bDay < 1 || bDay > 31) {
+    return { years: '', months: '', days: '' };
+  }
+
+  // استخراج سنة بداية العام الدراسي (مثلاً 2025 من '2025/2026')
+  let targetYear = null;
+  if (academicYear) {
+    const match = String(academicYear).match(/(\d{4})/);
+    if (match) targetYear = parseInt(match[1], 10);
+  }
+  if (!targetYear && fallbackYear) {
+    const match = String(fallbackYear).match(/(\d{4})/);
+    if (match) targetYear = parseInt(match[1], 10);
+  }
+  if (!targetYear) {
+    const now = new Date();
+    targetYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  }
+
+  // الحساب المعتمد لوزارة التربية والتعليم في 1 أكتوبر:
+  let days = 1 - bDay;
+  let months = 10 - bMonth;
+  let years = targetYear - bYear;
+
+  if (days < 0) {
+    days += 30;
+    months -= 1;
+  }
+
+  if (months < 0) {
+    months += 12;
+    years -= 1;
+  }
+
+  return {
+    years: Math.max(0, years),
+    months: Math.max(0, months),
+    days: Math.max(0, days)
+  };
+};

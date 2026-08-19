@@ -97,7 +97,7 @@ const foreignStudentsReport = {
   id:          'foreign_students_report',
   name:        'سجل الطلاب الوافدين',
   desc:        'سجل تفصيلي بالطلاب غير المصريين المسجلين في المدرسة موضحاً جنسياتهم وبيانات تواصلهم',
-  category:    'سجلات أخرى',
+  category:    'السجلات المتخصصة',
   icon:        '🌍',
   orientation: 'landscape',
   available:   true,
@@ -117,7 +117,7 @@ const foreignStudentsReport = {
   buildQuery: (f) => {
     const q = new URLSearchParams({
       academicYearId: f.academicYearId,
-      limit: 2000,
+      limit: 'all',
       status: 'all',
     });
     if (f.sectionId) q.set('sectionId', f.sectionId);

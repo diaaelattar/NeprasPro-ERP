@@ -204,7 +204,16 @@ export default function TransferPrintModal({ transfer, institution, onClose }) {
   );
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 99999, background: 'rgba(0,0,0,0.7)', padding: 16, overflowY: 'auto' }}>
+    <div
+      className="modal-overlay"
+      style={{
+        zIndex: 99999,
+        background: 'rgba(0,0,0,0.8)',
+        padding: '24px 16px 40px',
+        overflowY: 'auto',
+        display: 'block'
+      }}
+    >
       
       {/* Modal Actions Bar (Invisible on print) */}
       <div className="no-print" style={{

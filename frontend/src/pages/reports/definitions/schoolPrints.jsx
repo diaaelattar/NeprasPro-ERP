@@ -91,7 +91,7 @@ const schoolPrints = {
   id:          'school_prints',
   name:        'مطبوعات ونماذج المدرسة (استدعاء/تأمين)',
   desc:        'نماذج استدعاء ولي الأمر والتحويلات الصحية الفردية',
-  category:    'سجلات أخرى',
+  category:    'المطبوعات والنماذج الرسمية',
   icon:        '🏥',
   orientation: 'portrait',
   available:   true,
@@ -112,7 +112,7 @@ const schoolPrints = {
       gradeId: f.gradeId,
       academicYearId: f.academicYearId,
       classId: f.classId,
-      limit: 100,
+      limit: 'all',
       status: 'all',
     });
     return q.toString();

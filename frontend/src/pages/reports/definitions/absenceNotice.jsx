@@ -142,7 +142,7 @@ const absenceNotice = {
   id:          'absence_notice',
   name:        'إخطار غياب (نموذج رسمي)',
   desc:        'نموذج رسمي لإخطار ولي الأمر بغياب نجله عن الدراسة مع تفاصيل الغياب',
-  category:    'المطبوعات والنماذج',
+  category:    'المطبوعات والنماذج الرسمية',
   icon:        '📩',
   orientation: 'portrait',
   available:   true,
@@ -158,7 +158,7 @@ const absenceNotice = {
     const q = new URLSearchParams({
       gradeId: f.gradeId,
       academicYearId: f.academicYearId,
-      limit: 500,
+      limit: 'all',
       status: 'all',
     });
     if (f.sectionId) q.set('sectionId', f.sectionId);

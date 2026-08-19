@@ -28,7 +28,7 @@ const secPortraitSheet = {
   buildQuery: (f) => {
     const q = new URLSearchParams({
       status: 'all',
-      limit: 100,
+      limit: 'all',
       mode: 'sec_portrait',
     });
     if (f.classId)        q.set('classId', f.classId);

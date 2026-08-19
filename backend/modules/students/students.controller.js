@@ -1,7 +1,7 @@
 const excelReportEngine = require('../../services/excelReportEngine');
 const db = require('../../config/db');
 const { formatClassroomLabel, extractClassNumber } = require('../../utils/classroomFormatter');
-const { getSchoolMasterInfo } = require('../../utils/schoolHelper');
+const { getSchoolMasterInfo, calculateAgeOnOct1st, detectSiblingsAndTwins, autoLinkSiblingsAndTwins } = require('../../utils/schoolHelper');
 
 // ─── sql.js helpers ───────────────────────────────────────────────────────────
 const _all = (sqliteDb, sql, params = []) => {
@@ -307,7 +307,7 @@ const getStudents = async (req, res) => {
       academicYearId, secondaryTrack, deleted, page = 1, limit = 30,
       sortBy, sortDir, genderOrder,  // new: gender ordering option
       gender, religion,       // new: demographic filters
-      isMerged, nationalityId // new: merge / nationality filters
+      isMerged, isOrphan, isTwin, isSpecialCase, isTalented, nationalityId // new: merge / nationality filters
     } = req.query;
 
     const where  = ['1=1'];
@@ -335,6 +335,23 @@ const getStudents = async (req, res) => {
         where.push("(s.status IN ('retained', 'باق') OR s.enrollment_status LIKE '%باق%' OR s.registration_status_id = 3)");
       } else if (activeMode === 'merged' || activeMode === 'دمج') {
         where.push("(s.is_merged = 1 OR s.is_merged = '1')");
+      } else if (activeMode === 'orphans' || activeMode === 'أيتام') {
+        where.push("(s.is_orphan = 1 OR s.father_status = 'متوفى' OR s.mother_status = 'متوفاة' OR s.orphan_type IS NOT NULL)");
+      } else if (activeMode === 'talented' || activeMode === 'gifted' || activeMode === 'موهوبين') {
+        where.push(`(s.is_talented = 1 OR (s.talent_description IS NOT NULL AND s.talent_description != '') OR EXISTS (SELECT 1 FROM student_special_cases ssc JOIN special_case_types sct ON sct.id = ssc.case_type_id WHERE ssc.student_id = s.id AND ssc.is_active = 1 AND sct.code IN ('sport_talent', 'art_talent', 'quran_hafiz', 'national_merit', 'gifted', 'scholarship')) )`);
+      } else if (activeMode === 'special_cases' || activeMode === 'discount_cases') {
+        where.push(`(
+          s.parent_staff_id IS NOT NULL 
+          OR s.is_orphan = 1 
+          OR s.father_status = 'متوفى' 
+          OR s.mother_status = 'متوفاة' 
+          OR s.is_merged = 1 
+          OR s.is_talented = 1 
+          OR s.is_twin = 1 
+          OR s.twin_student_id IS NOT NULL 
+          OR (s.sibling_student_ids IS NOT NULL AND s.sibling_student_ids != '' AND s.sibling_student_ids != '[]')
+          OR EXISTS (SELECT 1 FROM student_special_cases ssc WHERE ssc.student_id = s.id AND ssc.is_active = 1)
+        )`);
       } else if (activeMode === 'active' || activeMode === 'normal') {
         where.push("(s.status IN ('new', 'promoted', 'retained', 'مستجد', 'منقول', 'باق', 'active', 'نشط') OR s.status IS NULL OR s.status = '' OR s.enrollment_status IN ('مستجد', 'منقول', 'باق') OR s.enrollment_status IS NULL OR s.enrollment_status = '') AND (s.status NOT IN ('excluded', 'disconnected', 'suspended', 'مستبعد', 'منقطع', 'موقوف قيده') AND (s.enrollment_status NOT IN ('مستبعد', 'منقطع', 'موقوف قيده') OR s.enrollment_status IS NULL))");
       } else if (activeMode === 'all') {
@@ -364,6 +381,25 @@ const getStudents = async (req, res) => {
     if (nationalityId){ where.push('s.nationality_id = ?');  params.push(nationalityId); }
     if (isMerged === '1' || isMerged === 'true')  { where.push('s.is_merged = 1'); }
     if (isMerged === '0' || isMerged === 'false') { where.push('(s.is_merged IS NULL OR s.is_merged = 0)'); }
+    if (isOrphan === '1' || isOrphan === 'true')  { where.push("(s.is_orphan = 1 OR s.father_status = 'متوفى' OR s.mother_status = 'متوفاة' OR s.orphan_type IS NOT NULL)"); }
+    if (isTwin === '1' || isTwin === 'true')      { where.push('(s.is_twin = 1 OR s.twin_student_id IS NOT NULL)'); }
+    if (isTalented === '1' || isTalented === 'true') {
+      where.push(`(s.is_talented = 1 OR (s.talent_description IS NOT NULL AND s.talent_description != '') OR EXISTS (SELECT 1 FROM student_special_cases ssc JOIN special_case_types sct ON sct.id = ssc.case_type_id WHERE ssc.student_id = s.id AND ssc.is_active = 1 AND sct.code IN ('sport_talent', 'art_talent', 'quran_hafiz', 'national_merit', 'gifted', 'scholarship')) )`);
+    }
+    if (isSpecialCase === '1' || isSpecialCase === 'true') {
+      where.push(`(
+        s.parent_staff_id IS NOT NULL 
+        OR s.is_orphan = 1 
+        OR s.father_status = 'متوفى' 
+        OR s.mother_status = 'متوفاة' 
+        OR s.is_merged = 1 
+        OR s.is_talented = 1 
+        OR s.is_twin = 1 
+        OR s.twin_student_id IS NOT NULL 
+        OR (s.sibling_student_ids IS NOT NULL AND s.sibling_student_ids != '' AND s.sibling_student_ids != '[]')
+        OR EXISTS (SELECT 1 FROM student_special_cases ssc WHERE ssc.student_id = s.id AND ssc.is_active = 1)
+      )`);
+    }
 
     // ── Dynamic ORDER BY (Boys first / Girls first / Alphabetical) ────
     let orderClause = '';
@@ -397,6 +433,11 @@ const getStudents = async (req, res) => {
              s.birth_date, s.birth_place, s.guardian_phone, s.guardian_phone_2, s.enrollment_date,
              s.secondary_track, s.second_language, s.language_id_1, s.language_id_2,
              s.national_id, s.religion, s.guardian_name, s.guardian_job, s.guardian_relation, s.guardian_national_id, s.address,
+             s.mother_name, s.mother_national_id,
+             s.is_orphan, s.orphan_type, s.father_status, s.mother_status, s.social_research_number, s.social_research_date, s.orphan_notes,
+             s.is_twin, s.twin_student_id, s.sibling_student_ids,
+             s.parent_staff_id, s.is_talented, s.talent_description,
+             s.is_returned_from_abroad, s.country_from, s.transferred_from_school,
              s.is_merged, s.merge_type, s.disability_id, s.merge_decision_number, s.merge_decision_date, s.merge_notes,
              s.nationality_id, s.registration_status_id, n.name AS nationality_name,
              s.section_id, sec.name AS section_name, sec.type AS section_type,
@@ -406,13 +447,19 @@ const getStudents = async (req, res) => {
              c.class_name AS classroom_name,
              c.class_number,
              c.id AS classroom_id,
-             s.deletion_reason
+             s.deletion_reason,
+             (SELECT GROUP_CONCAT(sct.name_ar, ' • ') 
+              FROM student_special_cases ssc 
+              JOIN special_case_types sct ON sct.id = ssc.case_type_id 
+              WHERE ssc.student_id = s.id AND ssc.is_active = 1) AS special_cases_names,
+             stf.full_name_ar AS staff_parent_name
       FROM students s
       LEFT JOIN sections      sec ON sec.id = s.section_id
       LEFT JOIN stages_lookup st  ON st.id  = s.stage_id
       LEFT JOIN grades_lookup g   ON g.id   = s.grade_id
       LEFT JOIN academic_years ay ON ay.id  = s.academic_year_id
       LEFT JOIN nationalities  n  ON n.id   = s.nationality_id
+      LEFT JOIN staff          stf ON stf.id = s.parent_staff_id
       LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
       LEFT JOIN classes c ON c.id = COALESCE(ce.class_id, s.class_id)
       WHERE ${whereStr}
@@ -630,7 +677,11 @@ const createStudent = async (req, res) => {
     firstName, fatherName, gFatherName, familyName,
     motherFirstName, motherSecondName, motherThirdName, motherForthName,
     birthGovernorateId, fatherNationalityId, studyTypeId, registrationStatusId,
-    divisionId, specializationId, languageId1, languageId2, disabilityId
+    divisionId, specializationId, languageId1, languageId2, disabilityId,
+    isOrphan, orphanType, is_orphan, orphan_type,
+    fatherStatus, father_status, motherStatus, mother_status,
+    socialResearchNumber, social_research_number, socialResearchDate, social_research_date,
+    orphanNotes, orphan_notes
   } = req.body;
 
   // Build composite names with fallback
@@ -661,6 +712,13 @@ const createStudent = async (req, res) => {
   const mapped = mapStudentStatus(status);
   const returnedAbroadVal = (isReturnedFromAbroad || is_returned_from_abroad) ? 1 : 0;
   const countryFromVal = countryFrom || country_from || null;
+  const isOrphanVal = (isOrphan || is_orphan) ? 1 : 0;
+  const orphanTypeVal = orphanType || orphan_type || null;
+  const fatherStatusVal = fatherStatus || father_status || (isOrphanVal && (orphanTypeVal === 'يتيم الأب' || orphanTypeVal === 'يتيم الوالدين (الأب والأم)') ? 'متوفى' : 'على قيد الحياة');
+  const motherStatusVal = motherStatus || mother_status || (isOrphanVal && (orphanTypeVal === 'يتيم الأم' || orphanTypeVal === 'يتيم الوالدين (الأب والأم)') ? 'متوفاة' : 'على قيد الحياة');
+  const socResNumVal = socialResearchNumber || social_research_number || null;
+  const socResDateVal = socialResearchDate || social_research_date || null;
+  const orphanNotesVal = orphanNotes || orphan_notes || null;
 
   try {
     const sqliteDb = db.getSQLiteDb();
@@ -685,8 +743,10 @@ const createStudent = async (req, res) => {
           first_name, father_name, grandfather_name, family_name,
           mother_first_name, mother_second_name, mother_third_name, mother_fourth_name,
           birth_governorate_id, father_nationality_id, study_type_id, registration_status_id,
-          division_id, specialization_id, language_id_1, language_id_2, disability_id
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          division_id, specialization_id, language_id_1, language_id_2, disability_id,
+          is_orphan, orphan_type, father_status, mother_status,
+          social_research_number, social_research_date, orphan_notes
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [
         sectionId, stageId, gradeId, academicYearId, studentCode,
         fullNameAr, fullNameEn||null, birthDate||null, birthPlace||null,
@@ -705,11 +765,19 @@ const createStudent = async (req, res) => {
         fName||null, faName||null, gfName||null, famName||null,
         m1||null, m2||null, m3||null, m4||null,
         birthGovernorateId||null, fatherNationalityId||null, studyTypeId||null, registrationStatusId||null,
-        divisionId||null, specializationId||null, languageId1||null, languageId2||null, disabilityId||null
+        divisionId||null, specializationId||null, languageId1||null, languageId2||null, disabilityId||null,
+        isOrphanVal, orphanTypeVal, fatherStatusVal, motherStatusVal,
+        socResNumVal, socResDateVal, orphanNotesVal
       ]);
       studentId = _lastId(sqliteDb);
       for (const caseTypeId of (specialCases || [])) {
         sqliteDb.run('INSERT OR IGNORE INTO student_special_cases (student_id, case_type_id) VALUES (?,?)', [studentId, caseTypeId]);
+      }
+      if (isOrphanVal === 1) {
+        const orphanCase = _get(sqliteDb, `SELECT id FROM special_case_types WHERE code = 'orphan' OR name_ar LIKE '%أيتام%' OR name_ar LIKE '%يتيم%'`);
+        if (orphanCase && orphanCase.id) {
+          sqliteDb.run('INSERT OR IGNORE INTO student_special_cases (student_id, case_type_id) VALUES (?,?)', [studentId, orphanCase.id]);
+        }
       }
       if (transferredFromSchool) {
         const transCase = _get(sqliteDb, `SELECT id FROM special_case_types WHERE code = 'transferred_in' OR name_ar LIKE '%تحويل%' OR name_ar LIKE '%محول%'`);
@@ -745,7 +813,11 @@ const updateStudent = async (req, res) => {
     firstName, fatherName, gFatherName, familyName,
     motherFirstName, motherSecondName, motherThirdName, motherForthName,
     birthGovernorateId, fatherNationalityId, studyTypeId, registrationStatusId,
-    divisionId, specializationId, languageId1, languageId2, disabilityId
+    divisionId, specializationId, languageId1, languageId2, disabilityId,
+    isOrphan, orphanType, is_orphan, orphan_type,
+    fatherStatus, father_status, motherStatus, mother_status,
+    socialResearchNumber, social_research_number, socialResearchDate, social_research_date,
+    orphanNotes, orphan_notes
   } = req.body;
 
   let fullNameAr = (rawFullNameAr || '').trim();
@@ -771,6 +843,13 @@ const updateStudent = async (req, res) => {
   const mapped = mapStudentStatus(status);
   const returnedAbroadVal = (isReturnedFromAbroad || is_returned_from_abroad) ? 1 : 0;
   const countryFromVal = countryFrom || country_from || null;
+  const isOrphanVal = (isOrphan || is_orphan) ? 1 : 0;
+  const orphanTypeVal = orphanType || orphan_type || null;
+  const fatherStatusVal = fatherStatus || father_status || (isOrphanVal && (orphanTypeVal === 'يتيم الأب' || orphanTypeVal === 'يتيم الوالدين (الأب والأم)') ? 'متوفى' : 'على قيد الحياة');
+  const motherStatusVal = motherStatus || mother_status || (isOrphanVal && (orphanTypeVal === 'يتيم الأم' || orphanTypeVal === 'يتيم الوالدين (الأب والأم)') ? 'متوفاة' : 'على قيد الحياة');
+  const socResNumVal = socialResearchNumber || social_research_number || null;
+  const socResDateVal = socialResearchDate || social_research_date || null;
+  const orphanNotesVal = orphanNotes || orphan_notes || null;
 
   try {
     const sqliteDb = db.getSQLiteDb();
@@ -792,14 +871,15 @@ const updateStudent = async (req, res) => {
           first_name=?, father_name=?, grandfather_name=?, family_name=?,
           mother_first_name=?, mother_second_name=?, mother_third_name=?, mother_fourth_name=?,
           birth_governorate_id=?, father_nationality_id=?, study_type_id=?, registration_status_id=?,
-          division_id=?, specialization_id=?, language_id_1=?, language_id_2=?, disability_id=?
+          division_id=?, specialization_id=?, language_id_1=?, language_id_2=?, disability_id=?,
+          is_orphan=?, orphan_type=?, father_status=?, mother_status=?,
+          social_research_number=?, social_research_date=?, orphan_notes=?
         WHERE id=?
       `, [
         fullNameAr, fullNameEn||null, birthDate||null, birthPlace||null,
         nationalityId||null, nationalId||null, gender, religion||null,
         guardianName||null, guardianRelation||null, guardianNationalId||null,
         guardianPhone||null, guardianPhone2||null, guardianJob||null,
-        motherName||null, motherNationalityId||null, motherNationalId||null,
         address||null, studentPhone||null, secondLanguage||null, secondaryTrack||null, secondaryElective||null,
         isMerged ? 1 : 0, mergedGradeId||null, mergeType||null, mergeDecisionNumber||null, mergeDecisionDate||null, mergeNotes||null,
         mapped.status, mapped.enrollment, mapped.is_excluded,
@@ -811,6 +891,8 @@ const updateStudent = async (req, res) => {
         m1||null, m2||null, m3||null, m4||null,
         birthGovernorateId||null, fatherNationalityId||null, studyTypeId||null, registrationStatusId||null,
         divisionId||null, specializationId||null, languageId1||null, languageId2||null, disabilityId||null,
+        isOrphanVal, orphanTypeVal, fatherStatusVal, motherStatusVal,
+        socResNumVal, socResDateVal, orphanNotesVal,
         id
       ]);
       if (specialCases !== undefined) {
@@ -818,6 +900,13 @@ const updateStudent = async (req, res) => {
         for (const caseTypeId of specialCases) {
           sqliteDb.run(`INSERT INTO student_special_cases (student_id, case_type_id, is_active) VALUES (?,?,1)
             ON CONFLICT(student_id, case_type_id) DO UPDATE SET is_active = 1`, [id, caseTypeId]);
+        }
+      }
+      if (isOrphanVal === 1) {
+        const orphanCase = _get(sqliteDb, `SELECT id FROM special_case_types WHERE code = 'orphan' OR name_ar LIKE '%أيتام%' OR name_ar LIKE '%يتيم%'`);
+        if (orphanCase && orphanCase.id) {
+          sqliteDb.run(`INSERT INTO student_special_cases (student_id, case_type_id, is_active) VALUES (?,?,1)
+            ON CONFLICT(student_id, case_type_id) DO UPDATE SET is_active = 1`, [id, orphanCase.id]);
         }
       }
     });
@@ -849,29 +938,6 @@ const parseRange = (rangeStr) => {
   };
 };
 
-const calculateAgeOnOct1st = (birthDateStr, yearLabel) => {
-  if (!birthDateStr) return { days: '', months: '', years: '' };
-  const bd = new Date(birthDateStr);
-  if (isNaN(bd.getTime())) return { days: '', months: '', years: '' };
-  
-  const startYear = parseInt(yearLabel?.split('/')?.[0]) || bd.getFullYear();
-  const targetDate = new Date(startYear, 9, 1);
-  
-  let years = targetDate.getFullYear() - bd.getFullYear();
-  let months = targetDate.getMonth() - bd.getMonth();
-  let days = targetDate.getDate() - bd.getDate();
-  
-  if (days < 0) {
-    months--;
-    days += 30;
-  }
-  if (months < 0) {
-    years--;
-    months += 12;
-  }
-  return { days, months, years };
-};
-
 const exportExcelTemplate = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
   if (req.query.type === 'general-census' || req.query.report === 'general-census') {
@@ -882,15 +948,15 @@ const exportExcelTemplate = async (req, res) => {
   }
   try {
     const sqliteDb = db.getSQLiteDb();
-    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, isMerged, isOrphan, isForeign, isTwin, genderOrder, templateName } = req.query;
-    const where  = ['1=1'];
+    const { search, sectionId, stageId, gradeId, classId, status, academicYearId, secondaryTrack, isMerged, isOrphan, isForeign, isTwin, isSpecialCase, isTalented, genderOrder, templateName, viewMode, reportTitle } = req.query;
+    const where  = ['s.deleted_at IS NULL'];
     const params = [];
     if (search) {
       where.push('(s.full_name_ar LIKE ? OR s.student_code LIKE ? OR s.national_id LIKE ?)');
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
-    if (sectionId)     { where.push('s.section_id = ?');       params.push(sectionId); }
-    if (stageId)       { where.push('s.stage_id = ?');         params.push(stageId); }
+    if (sectionId && sectionId !== 'all') { where.push('s.section_id = ?'); params.push(sectionId); }
+    if (stageId && stageId !== 'all')     { where.push('s.stage_id = ?');   params.push(stageId); }
     if (gradeId && gradeId !== 'all_stage' && gradeId !== 'all') {
       where.push('s.grade_id = ?');
       params.push(gradeId);
@@ -899,17 +965,32 @@ const exportExcelTemplate = async (req, res) => {
       where.push('EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.student_id = s.id AND ce.class_id = ?)');
       params.push(classId);
     }
-    if (status === 'all') {}
-    else if (status)  { where.push('s.status = ?');           params.push(status); }
-    else              { where.push("s.status != 'suspended'"); }
 
-    if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
-    if (secondaryTrack) { where.push('s.secondary_track = ?');  params.push(secondaryTrack); }
+    if (viewMode === 'disconnected') {
+      where.push("s.status = 'disconnected'");
+    } else if (viewMode === 'suspended') {
+      where.push("s.status = 'suspended'");
+    } else if (viewMode === 'excluded') {
+      where.push("s.status = 'excluded'");
+    } else if (status === 'all') {
+      // no status filter
+    } else if (status) {
+      where.push('s.status = ?');
+      params.push(status);
+    } else {
+      where.push("s.status != 'suspended'");
+    }
+
+    if (academicYearId && academicYearId !== 'all') { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
+    if (secondaryTrack && secondaryTrack !== 'all') { where.push('s.secondary_track = ?');  params.push(secondaryTrack); }
 
     if (isMerged === '1' || isMerged === 'true') where.push('(s.is_merged = 1 OR s.is_special_case = 1)');
-    if (isOrphan === '1' || isOrphan === 'true') where.push('s.is_orphan = 1');
+    if (isOrphan === '1' || isOrphan === 'true') where.push("(s.is_orphan = 1 OR s.father_status = 'متوفى' OR s.mother_status = 'متوفاة' OR s.orphan_type IS NOT NULL)");
     if (isForeign === '1' || isForeign === 'true') where.push("(s.nationality_id IS NOT NULL AND s.nationality_id != '' AND s.nationality_id != 'EG')");
     if (isTwin === '1' || isTwin === 'true') where.push('(s.is_twin = 1 OR s.twin_student_id IS NOT NULL)');
+    if (isTalented === '1' || isTalented === 'true') {
+      where.push(`(s.is_talented = 1 OR (s.talent_description IS NOT NULL AND s.talent_description != '') OR EXISTS (SELECT 1 FROM student_special_cases ssc JOIN special_case_types sct ON sct.id = ssc.case_type_id WHERE ssc.student_id = s.id AND ssc.is_active = 1 AND sct.code IN ('sport_talent', 'art_talent', 'quran_hafiz', 'national_merit', 'gifted', 'scholarship')) )`);
+    }
 
     let genderSortClause = 's.full_name_ar ASC';
     if (genderOrder === 'boys_first') {
@@ -949,23 +1030,51 @@ const exportExcelTemplate = async (req, res) => {
     const grade = gradeId ? _get(sqliteDb, 'SELECT grade_name_ar FROM grades_lookup WHERE id = ?', [gradeId]) : null;
     const year = academicYearId ? _get(sqliteDb, 'SELECT year_label FROM academic_years WHERE id = ?', [academicYearId]) : null;
 
-    const buffer = await excelReportEngine.generateStudentRegisterReport({
-      templateName,
-      school,
-      gradeName: grade?.grade_name_ar || '',
-      yearLabel: year?.year_label || '',
-      totalStudents: students.length,
-      isMerged,
-      students,
-      calculateAgeOnOct1st
-    });
+    // Use sgl_all by default for student register and students list exports, or when templateName='sgl_all'
+    const useSglAll = templateName === 'sgl_all' || req.query.format === 'sgl_all' || req.query.type === 'student-register' || req.query.type === 'sgl_all' || viewMode || (!templateName && !req.query.type);
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=register_report.xlsx`);
+    let buffer;
+    let fileName;
+    let contentType;
+
+    if (useSglAll) {
+      let filePrefix = 'سجل_بيانات_الصف';
+      if (viewMode === 'disconnected') filePrefix = 'سجل_المنقطعين';
+      else if (viewMode === 'suspended') filePrefix = 'سجل_الموقوف_قيدهم';
+      else if (viewMode === 'excluded') filePrefix = 'سجل_المستبعدين';
+      else if (reportTitle) filePrefix = reportTitle.replace(/\s+/g, '_');
+
+      buffer = await excelReportEngine.generateSglAllReport({
+        school,
+        gradeName: grade?.grade_name_ar || '',
+        yearLabel: year?.year_label || '',
+        students,
+        reportTitle,
+        viewMode
+      });
+      fileName = encodeURIComponent(`${filePrefix}_${grade?.grade_name_ar || 'العام'}.xlsm`);
+      contentType = 'application/vnd.ms-excel.sheet.macroEnabled.12';
+    } else {
+      buffer = await excelReportEngine.generateStudentRegisterReport({
+        templateName,
+        school,
+        gradeName: grade?.grade_name_ar || '',
+        yearLabel: year?.year_label || '',
+        totalStudents: students.length,
+        isMerged,
+        students,
+        calculateAgeOnOct1st
+      });
+      fileName = encodeURIComponent(`سجل_الطلاب_${grade?.grade_name_ar || 'عام'}.xlsx`);
+      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`);
     return res.send(buffer);
   } catch (err) {
     console.error('Failed to export Excel register template:', err);
-    return res.status(500).json({ success: false, error: 'فشل تصدير ملف الإكسيل الرئيسي.' });
+    return res.status(500).json({ success: false, error: 'فشل تصدير ملف الإكسيل الرئيسي: ' + err.message });
   }
 };
 
@@ -4635,42 +4744,29 @@ const getRegister41Data = async (req, res) => {
       ${whereClause}
       ORDER BY s.full_name_ar ASC`, params);
 
-    const enriched = students.map((stu, idx) => {
-      let ageYears = 0, ageMonths = 0, ageDays = 0;
-      if (stu.birth_date) {
-        const bd = new Date(stu.birth_date);
-        const currentYear = parseInt(stu.academic_year?.split('/')[0]) || new Date().getFullYear();
-        const oct1 = new Date(currentYear, 9, 1);
-        
-        let years = oct1.getFullYear() - bd.getFullYear();
-        let months = oct1.getMonth() - bd.getMonth();
-        let days = oct1.getDate() - bd.getDate();
+    const currentYearRow = _get(sqliteDb, "SELECT year_label FROM academic_years WHERE is_current = 1 LIMIT 1") || _get(sqliteDb, "SELECT year_label FROM academic_years ORDER BY id DESC LIMIT 1");
+    const activeYearLabel = currentYearRow?.year_label || '';
 
-        if (days < 0) {
-          months -= 1;
-          days += 30;
-        }
-        if (months < 0) {
-          years -= 1;
-          months += 12;
-        }
-        ageYears = Math.max(0, years);
-        ageMonths = Math.max(0, months);
-        ageDays = Math.max(0, days);
-      }
+    const enriched = students.map((stu, idx) => {
+      const yearForCalc = stu.academic_year || activeYearLabel || academicYearId;
+      const age = calculateAgeOnOct1st(
+        stu.birth_date || stu.national_id,
+        yearForCalc,
+        activeYearLabel
+      );
 
       return {
         serial: idx + 1,
         ...stu,
-        age_oct_years: ageYears,
-        age_oct_months: ageMonths,
-        age_oct_days: ageDays,
+        age_oct_years: age.years !== '' ? age.years : 0,
+        age_oct_months: age.months !== '' ? age.months : 0,
+        age_oct_days: age.days !== '' ? age.days : 0,
         fees_status: ''
       };
     });
 
     const school = getSchoolMasterInfo(sqliteDb);
-    return res.json({ success: true, students: enriched, count: enriched.length, school });
+    return res.json({ success: true, students: enriched, count: enriched.length, school, academicYear: activeYearLabel });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -4760,6 +4856,29 @@ const getOctoberCensusData = async (req, res) => {
   }
 };
 
+// ─── Sibling & Twins Auto-Detection & Linking ──────────────────────────────
+const getDetectedSiblings = (req, res) => {
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const result = detectSiblingsAndTwins(sqliteDb);
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    return res.status(500).json({ error: 'فشل اكتشاف الإخوة والتوائم: ' + err.message });
+  }
+};
+
+const autoLinkSiblings = (req, res) => {
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const { groupKeys } = req.body || {};
+    const result = autoLinkSiblingsAndTwins(sqliteDb, groupKeys);
+    db.flushSQLite();
+    return res.json({ success: true, message: 'تم ربط الإخوة والتوائم بنجاح وتحديث السجلات', ...result });
+  } catch (err) {
+    return res.status(500).json({ error: 'فشل ربط الإخوة والتوائم: ' + err.message });
+  }
+};
+
 module.exports = {
   createStudent,
   updateStudent,
@@ -4813,4 +4932,6 @@ module.exports = {
   deleteStudentDocument,
   getRegister41Data,
   getOctoberCensusData,
+  getDetectedSiblings,
+  autoLinkSiblings
 };

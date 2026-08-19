@@ -2,26 +2,9 @@
 //  Report Definition: قوائم الفصول كاملة البيانات (مقسمة فصولاً لوحدها)
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
+import { calculateAgeOnOct1st } from '../../../constants/lookupOptions';
 
 /* ── helpers ───────────────────────────────────────────────────── */
-const calculateAgeOnOct1st = (birthDateStr, yearLabel) => {
-  if (!birthDateStr) return { days: '', months: '', years: '' };
-  let targetYear = new Date().getFullYear();
-  if (yearLabel) {
-    const match = yearLabel.match(/(\d{4})/);
-    if (match) targetYear = parseInt(match[1]);
-  }
-  const birth = new Date(birthDateStr);
-  if (isNaN(birth.getTime())) return { days: '', months: '', years: '' };
-  const target = new Date(targetYear, 9, 1);
-  let years  = target.getFullYear() - birth.getFullYear();
-  let months = target.getMonth()    - birth.getMonth();
-  let days   = target.getDate()     - birth.getDate();
-  if (days   < 0) { months--; days   += new Date(target.getFullYear(), target.getMonth(), 0).getDate(); }
-  if (months < 0) { years--;  months += 12; }
-  return { days, months, years };
-};
-
 const STATUS_LABELS = {
   promoted: 'منقول',
   retained: 'باقٍ للإعادة',
@@ -231,7 +214,7 @@ const callList = {
     const q = new URLSearchParams({
       gradeId: f.gradeId,
       academicYearId: f.academicYearId,
-      limit: '10000',
+      limit: 'all',
       status: 'all',
     });
     if (f.sectionId)   q.set('sectionId',   f.sectionId);

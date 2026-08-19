@@ -15,14 +15,37 @@ const STATUS_LABELS = {
 /* ── Preview Component ─────────────────────────────────────────── */
 function FullClassListPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear, selectedClassroom, classroomLabel } = meta;
-  const totalStudents = students.length;
+
+  // ── Sort Students according to user preference (genderOrder: boys_first / girls_first / alphabetical) ──
+  const sortedStudents = React.useMemo(() => {
+    const list = [...(students || [])];
+    const order = meta.genderOrder || meta.filters?.genderOrder || 'none';
+
+    return list.sort((a, b) => {
+      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
+      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
+
+      if (order === 'boys_first') {
+        if (isBoyA && !isBoyB) return -1;
+        if (!isBoyA && isBoyB) return 1;
+      } else if (order === 'girls_first') {
+        if (!isBoyA && isBoyB) return -1;
+        if (isBoyA && !isBoyB) return 1;
+      }
+
+      // Sort alphabetically by Arabic name
+      return String(a.full_name_ar || '').localeCompare(String(b.full_name_ar || ''), 'ar', { sensitivity: 'base' });
+    });
+  }, [students, meta.genderOrder, meta.filters]);
+
+  const totalStudents = sortedStudents.length;
   const perPage = 30; // 30 students per page for landscape/detailed print
   const pageCount = Math.ceil(totalStudents / perPage) || 1;
 
   return (
     <div className="report-preview full-class-list-preview" id="print-area" data-orientation="landscape">
       {Array.from({ length: pageCount }).map((_, pageIdx) => {
-        const pageStudents = students.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
+        const pageStudents = sortedStudents.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
         return (
           <div key={pageIdx} className={`printable-page-block${pageIdx > 0 ? ' page-break-before' : ''}`}>
 
@@ -146,7 +169,7 @@ const fullClassList = {
   buildQuery: (f) => {
     const q = new URLSearchParams({
       academicYearId: f.academicYearId,
-      limit: '10000',
+      limit: 'all',
       status: 'all',
     });
     if (f.gradeId && f.gradeId !== 'all_stage') q.set('gradeId', f.gradeId);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, X, Download, Loader2, FileSpreadsheet } from 'lucide-react';
 import API_BASE_URL from '../../config/api';
+import { calculateAgeOnOct1st } from '../../constants/lookupOptions';
 
 /**
  * Register41PrintModal
@@ -18,6 +19,7 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
   const [academicYear, setAcademicYear] = useState('');
 
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [excelGenerating, setExcelGenerating] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(false);
 
   const loadData = () => {
@@ -72,19 +74,34 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
             size: A4 landscape;
             margin: 8mm 10mm 10mm 10mm;
           }
-          * { box-sizing: border-box; margin: 0; padding: 0; }
+          * { box-sizing: border-box; margin: 0; padding: 0;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important; }
           body {
             font-family: 'Calibri', 'Segoe UI', Tahoma, Arial, sans-serif;
             font-size: 9.5pt;
             color: #000;
             background: #fff;
             direction: rtl;
+            width: 100%;
+          }
+          div { box-shadow: none !important; border-radius: 0 !important; }
+          #printable-register-41-content {
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 4mm !important;
           }
           thead { display: table-header-group; }
           tfoot { display: table-footer-group; }
           tr { page-break-inside: avoid; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 10pt; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 6pt; }
           th, td { border: 1pt solid #000; padding: 3pt 2pt; text-align: center; }
+          .reg41-footer {
+            page-break-before: avoid;
+            break-before: avoid;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
         </style>
       </head>
       <body>
@@ -139,6 +156,32 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
     }
   };
 
+  /* ── تصدير إكسيل ماكرو (sgl_all - ورقة بيانات الصف) ── */
+  const handleExportExcel = async () => {
+    try {
+      setExcelGenerating(true);
+      const res = await fetch(`${API_BASE_URL}/students/export/excel?templateName=sgl_all&format=sgl_all`);
+      if (!res.ok) throw new Error('فشل تصدير ملف الإكسيل');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `سجل_41_مستجدين_sgl_all_${new Date().toISOString().slice(0, 10)}.xlsm`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 1000);
+      setDownloadSuccess(true);
+      setTimeout(() => setDownloadSuccess(false), 4000);
+    } catch (err) {
+      alert('خطأ أثناء تصدير الإكسيل: ' + err.message);
+    } finally {
+      setExcelGenerating(false);
+    }
+  };
+
   const rawSchool   = school?.school_name || institution?.school_name || institution?.schoolName || '';
   const cleanSchool = rawSchool.replace(/^مدرسة\s*/, '').trim() || '...............';
   const rawAdmin    = school?.directorate || institution?.directorate || institution?.administration || '';
@@ -149,10 +192,26 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
   const now     = new Date();
   const dateStr = now.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
 
+  // ── إحصاء إجمالي الصف (يُحسب مباشرةً من بيانات الطلاب) ────────────────────
+  const statsBoys       = students.filter(s => ['ذكر','male','بنين','ذكور'].some(v => String(s.gender||'').includes(v))).length;
+  const statsGirls      = students.length - statsBoys;
+  const statsMuslims    = students.filter(s => String(s.religion||'').includes('مسلم')).length;
+  const statsChristians = students.filter(s => ['مسيحي','مسيح'].some(v => String(s.religion||'').includes(v))).length;
+  const statsMerged     = students.filter(s => s.is_merged).length;
+  const statsClasses    = [...new Set(students.map(s => s.class_name).filter(Boolean))].length || 1;
+  const statsGradeName  = students[0]?.grade_name_ar  || 'الصف الأول الابتدائي';
+  const statsStageName  = students[0]?.stage_name     || 'ابتدائي';
+
   return (
     <div
       className="modal-overlay"
-      style={{ zIndex: 99999, background: 'rgba(0,0,0,0.75)', padding: 16, overflowY: 'auto' }}
+      style={{
+        zIndex: 99999,
+        background: 'rgba(0,0,0,0.8)',
+        padding: '24px 16px 40px',
+        overflowY: 'auto',
+        display: 'block'
+      }}
     >
       {/* ── شريط الأدوات ── */}
       <div className="no-print" style={{
@@ -179,6 +238,21 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
               ✓ تم تنزيل PDF بنجاح
             </span>
           )}
+
+          <button
+            onClick={handleExportExcel}
+            disabled={excelGenerating}
+            style={{
+              background: excelGenerating ? '#15803d' : '#16a34a', color: '#fff', border: 'none',
+              borderRadius: 8, padding: '8px 18px',
+              fontWeight: 800, fontSize: 13, cursor: excelGenerating ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              boxShadow: '0 2px 6px rgba(22,163,74,0.4)'
+            }}
+          >
+            {excelGenerating ? <Loader2 size={15} className="spin" /> : <FileSpreadsheet size={15} />}
+            <span>{excelGenerating ? 'جاري التصدير...' : 'تصدير إكسيل (sgl_all)'}</span>
+          </button>
 
           <button
             onClick={handleExportPdf}
@@ -238,48 +312,7 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
           fontSize: 10
         }}
       >
-        {/* ══ الترويسة الثلاثية ══ */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-          direction: 'rtl', marginBottom: 10,
-          borderBottom: '2px solid #000', paddingBottom: 6
-        }}>
-          <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, lineHeight: 1.45, minWidth: 200 }}>
-            <div>محافظة: <strong>{gov}</strong></div>
-            <div>إدارة: <strong>{cleanAdmin} التعليمية</strong></div>
-            <div>مدرسة: <strong>{cleanSchool}</strong></div>
-          </div>
-
-          <div style={{ textAlign: 'center', flex: 1, padding: '0 10px' }}>
-            <h2 style={{
-              fontSize: 16.5, fontWeight: 900, margin: '0 0 2px',
-              textDecoration: 'underline', color: '#000'
-            }}>
-              سجل قيد التلاميذ المستجدين (سجل 41 مستجدين)
-            </h2>
-            <div style={{ fontSize: 13, fontWeight: 800, textDecoration: 'underline', color: '#000' }}>
-              للعام الدراسي: {academicYearLabel || academicYear || students[0]?.academic_year || '....../......'} م
-            </div>
-          </div>
-
-          <div style={{ textAlign: 'left', minWidth: 200 }}>
-            {logo ? (
-              <img src={logo} alt="شعار" style={{ maxHeight: 38, maxWidth: 75, objectFit: 'contain', display: 'block' }} />
-            ) : (
-              <div style={{
-                display: 'inline-block', border: '1px dashed #cbd5e1',
-                padding: '2px 6px', borderRadius: 4, textAlign: 'center'
-              }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: '#334155' }}>شعار المدرسة</div>
-              </div>
-            )}
-            <div style={{ fontSize: 9.5, color: '#334155', marginTop: 2, fontWeight: 600 }}>
-              تاريخ الطباعة: {dateStr}
-            </div>
-          </div>
-        </div>
-
-        {/* ══ جدول السجل (بدون كود الطالب) ══ */}
+        {/* ══ جدول السجل (بدون كود الطالب مع تكرار الترويسة في كل صفحة) ══ */}
         {loading ? (
           <div style={{ textAlign: 'center', padding: '50px 0' }}>
             <Loader2 size={32} className="spin" style={{ margin: '0 auto 10px', color: '#0284c7' }} />
@@ -297,11 +330,55 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
           <table style={{
             width: '100%',
             borderCollapse: 'collapse',
-            border: '1.5px solid #000',
+            border: 'none',
             fontSize: 9.5,
             textAlign: 'center'
           }}>
             <thead>
+              {/* ══ الترويسة الثلاثية داخل thead لتتكرر تلقائياً في كل صفحة ══ */}
+              <tr>
+                <th colSpan={14} style={{ border: 'none', background: '#fff', padding: '0 0 8px 0', fontWeight: 'normal' }}>
+                  <div style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                    direction: 'rtl', marginBottom: 6,
+                    borderBottom: '2px solid #000', paddingBottom: 6
+                  }}>
+                    <div style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, lineHeight: 1.45, minWidth: 200 }}>
+                      <div>محافظة: <strong>{gov}</strong></div>
+                      <div>إدارة: <strong>{cleanAdmin} التعليمية</strong></div>
+                      <div>مدرسة: <strong>{cleanSchool}</strong></div>
+                    </div>
+
+                    <div style={{ textAlign: 'center', flex: 1, padding: '0 10px' }}>
+                      <h2 style={{
+                        fontSize: 16.5, fontWeight: 900, margin: '0 0 2px',
+                        textDecoration: 'underline', color: '#000'
+                      }}>
+                        سجل قيد التلاميذ المستجدين (سجل 41 مستجدين)
+                      </h2>
+                      <div style={{ fontSize: 13, fontWeight: 800, textDecoration: 'underline', color: '#000' }}>
+                        للعام الدراسي: {academicYearLabel || academicYear || students[0]?.academic_year || '....../......'} م
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'left', minWidth: 200 }}>
+                      {logo ? (
+                        <img src={logo} alt="شعار" style={{ maxHeight: 38, maxWidth: 75, objectFit: 'contain', display: 'block' }} />
+                      ) : (
+                        <div style={{
+                          display: 'inline-block', border: '1px dashed #cbd5e1',
+                          padding: '2px 6px', borderRadius: 4, textAlign: 'center'
+                        }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: '#334155' }}>شعار المدرسة</div>
+                        </div>
+                      )}
+                      <div style={{ fontSize: 9.5, color: '#334155', marginTop: 2, fontWeight: 600 }}>
+                        تاريخ الطباعة: {dateStr}
+                      </div>
+                    </div>
+                  </div>
+                </th>
+              </tr>
               <tr style={{ background: '#f1f5f9', color: '#000', fontWeight: 800 }}>
                 <th style={{ border: '1px solid #000', padding: '5px 2px', width: 28 }} rowSpan={2}>م</th>
                 <th style={{ border: '1px solid #000', padding: '5px 6px', textAlign: 'right', minWidth: 160 }} rowSpan={2}>اسم التلميذ رباعي</th>
@@ -323,67 +400,130 @@ export default function Register41PrintModal({ institution, academicYearLabel, o
               </tr>
             </thead>
             <tbody>
-              {students.map((stu, i) => (
-                <tr key={stu.id || i} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{i + 1}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right', fontWeight: 700 }}>
-                    {stu.full_name_ar}
-                  </td>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px' }}>{stu.religion || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px', direction: 'ltr' }}>{stu.birth_date || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{stu.age_oct_years}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{stu.age_oct_months}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{stu.age_oct_days}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 2px', fontFamily: 'monospace', fontSize: 9.5 }}>{stu.national_id || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{stu.guardian_name || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 4px' }}>{stu.guardian_job || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{stu.address || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 4px', direction: 'ltr' }}>{stu.guardian_phone || '—'}</td>
-                  <td style={{ border: '1px solid #000', padding: '4px 4px', fontWeight: 700 }}>
-                    {stu.fees_status || ''}
-                  </td>
-                  <td style={{ border: '1px solid #000', padding: '4px 4px', fontSize: 9 }}>
-                    {stu.is_merged ? 'دمج' : '—'}
-                  </td>
-                </tr>
-              ))}
+              {students.map((stu, i) => {
+                const age = calculateAgeOnOct1st(
+                  stu.birth_date || stu.national_id,
+                  stu.academic_year || academicYear || academicYearLabel
+                );
+                return (
+                  <tr key={stu.id || i} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{i + 1}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right', fontWeight: 700 }}>
+                      {stu.full_name_ar}
+                    </td>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px' }}>{stu.religion || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px', direction: 'ltr' }}>{stu.birth_date || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{age.years !== '' ? age.years : stu.age_oct_years}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{age.months !== '' ? age.months : stu.age_oct_months}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontWeight: 700 }}>{age.days !== '' ? age.days : stu.age_oct_days}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 2px', fontFamily: 'monospace', fontSize: 9.5 }}>{stu.national_id || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{stu.guardian_name || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 4px' }}>{stu.guardian_job || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 6px', textAlign: 'right' }}>{stu.address || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 4px', direction: 'ltr' }}>{stu.guardian_phone || '—'}</td>
+                    <td style={{ border: '1px solid #000', padding: '4px 4px', fontWeight: 700 }}>
+                      {stu.fees_status || ''}
+                    </td>
+                    <td style={{ border: '1px solid #000', padding: '4px 4px', fontSize: 9 }}>
+                      {stu.is_merged ? 'دمج' : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
 
-        {/* ══ التذييل الرسمي الرباعي ══ */}
-        <table style={{
-          width: '100%', borderCollapse: 'collapse', border: 'none',
-          marginTop: 20, fontSize: 10.5, fontWeight: 800, textAlign: 'center'
-        }}>
-          <tbody>
-            <tr>
-              {[
-                'المسؤول المختص (كاتب السجل)',
-                'المراجع (الأخصائي)',
-                'وكيل شؤون الطلاب والتعليم',
-                'مدير المدرسة (يعتمد)'
-              ].map(label => (
-                <td key={label} style={{ width: '25%', padding: '4px', border: 'none' }}>
-                  <div>{label}</div>
-                  <div style={{ height: 26, borderBottom: '1px dotted #000', width: '70%', margin: '6px auto 0' }} />
-                </td>
-              ))}
-            </tr>
-            <tr>
-              <td colSpan={4} style={{ paddingTop: 6, border: 'none' }}>
-                <div style={{
-                  width: 70, height: 70, border: '1.5px dashed #94a3b8',
-                  borderRadius: '50%', margin: '6px auto 0',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 9.5, color: '#64748b', fontWeight: 700, textAlign: 'center'
-                }}>
-                  خاتم المدرسة
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        {/* ══ الإحصاء الإجمالي + التذييل (معاً لمنع انتقالهما لصفحة فارغة) ══ */}
+        {students.length > 0 && (
+          <div className="reg41-footer" style={{ marginTop: 16 }}>
+
+            {/* ── جدول الإحصاء الإجمالي للصف (مطابق لإجمالي 1 أكتوبر) ── */}
+            <div style={{
+              fontSize: 11.5, fontWeight: 900, textAlign: 'center',
+              marginBottom: 6, borderBottom: '1.5px solid #000', paddingBottom: 4, color: '#000'
+            }}>
+              إحصاء قيد التلاميذ المستجدين بسجل 41
+            </div>
+
+            <table style={{
+              width: '100%', borderCollapse: 'collapse', border: 'none',
+              fontSize: 10, textAlign: 'center', marginBottom: 14
+            }}>
+              <thead>
+                <tr style={{ background: '#f1f5f9', fontWeight: 800, color: '#000' }}>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 28 }} rowSpan={2}>م</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 4px', width: 85 }} rowSpan={2}>المرحلة</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 6px', width: 120 }} rowSpan={2}>الصف الدراسي</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 50 }} rowSpan={2}>عدد الفصول</th>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px' }} colSpan={3}>توزيع النوع</th>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px' }} colSpan={2}>الديانة</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 50 }} rowSpan={2}>مستجد</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 2px', width: 45 }} rowSpan={2}>دمج</th>
+                  <th style={{ border: '1px solid #000', padding: '4px 4px', width: 60 }} rowSpan={2}>الجملة الكلية</th>
+                </tr>
+                <tr style={{ background: '#f8fafc', fontWeight: 800, color: '#000' }}>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px', width: 45 }}>بنين</th>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px', width: 45 }}>بنات</th>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px', width: 50 }}>الجملة</th>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px', width: 45 }}>مسلم</th>
+                  <th style={{ border: '1px solid #000', padding: '3px 2px', width: 45 }}>مسيحي</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ background: '#fff', fontWeight: 700 }}>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px' }}>1</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 4px' }}>{statsStageName}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 4px', fontWeight: 800 }}>{statsGradeName}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px', fontWeight: 800 }}>{statsClasses}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px' }}>{statsBoys}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px' }}>{statsGirls}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px', fontWeight: 900, background: '#f8fafc' }}>{students.length}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px' }}>{statsMuslims}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px' }}>{statsChristians}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px', fontWeight: 800 }}>{students.length}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px' }}>{statsMerged || '—'}</td>
+                  <td style={{ border: '1px solid #000', padding: '6px 2px', fontWeight: 900, background: '#f1f5f9', fontSize: 10.5 }}>{students.length}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* ── التذييل الرسمي الرباعي ── */}
+            <table style={{
+              width: '100%', borderCollapse: 'collapse', border: 'none',
+              marginTop: 10, fontSize: 10.5, fontWeight: 800, textAlign: 'center'
+            }}>
+              <tbody>
+                <tr>
+                  {[
+                    'المسؤول المختص (كاتب السجل)',
+                    'المراجع (الأخصائي)',
+                    'وكيل شؤون الطلاب والتعليم',
+                    'مدير المدرسة (يعتمد)'
+                  ].map(label => (
+                    <td key={label} style={{ width: '25%', padding: '4px', border: 'none' }}>
+                      <div>{label}</div>
+                      <div style={{ height: 26, borderBottom: '1px dotted #000', width: '70%', margin: '6px auto 0' }} />
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td colSpan={4} style={{ paddingTop: 6, border: 'none' }}>
+                    <div style={{
+                      width: 70, height: 70, border: '1.5px dashed #94a3b8',
+                      borderRadius: '50%', margin: '6px auto 0',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 9.5, color: '#64748b', fontWeight: 700, textAlign: 'center'
+                    }}>
+                      خاتم المدرسة
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+          </div>
+        )}
       </div>
     </div>
   );

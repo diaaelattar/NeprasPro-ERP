@@ -455,7 +455,17 @@ const _migrateSQLiteSchema = (dbInstance) => {
       ['specialization_id', 'INTEGER'],
       ['language_id_1', 'INTEGER'],
       ['language_id_2', 'INTEGER'],
-      ['disability_id', 'INTEGER']
+      ['disability_id', 'INTEGER'],
+      ['is_twin', 'INTEGER DEFAULT 0'],
+      ['sibling_student_ids', 'TEXT'],
+      ['twin_student_id', 'INTEGER'],
+      ['is_orphan', 'INTEGER DEFAULT 0'],
+      ['orphan_type', 'TEXT'],
+      ['father_status', 'TEXT DEFAULT "على قيد الحياة"'],
+      ['mother_status', 'TEXT DEFAULT "على قيد الحياة"'],
+      ['social_research_number', 'TEXT'],
+      ['social_research_date', 'TEXT'],
+      ['orphan_notes', 'TEXT']
     ];
 
     newStudentCols.forEach(([col, type]) => {

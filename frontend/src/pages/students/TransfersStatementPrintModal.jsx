@@ -39,7 +39,16 @@ export default function TransfersStatementPrintModal({
   const gradeKeys = Object.keys(groupedByGrade);
 
   return (
-    <div className="modal-overlay" style={{ zIndex: 99999, background: 'rgba(0,0,0,0.75)', padding: 16, overflowY: 'auto' }}>
+    <div
+      className="modal-overlay"
+      style={{
+        zIndex: 99999,
+        background: 'rgba(0,0,0,0.8)',
+        padding: '24px 16px 40px',
+        overflowY: 'auto',
+        display: 'block'
+      }}
+    >
       
       {/* Top Action Bar (hidden on print) */}
       <div className="no-print" style={{

@@ -3,7 +3,7 @@ import React from 'react';
 const guardianSummonsNotice = {
   id: 'guardian-summons-notice',
   name: 'إشعار استدعاء ولي أمر طالب رسمي',
-  category: 'المطبوعات والنماذج',
+  category: 'المطبوعات والنماذج الرسمية',
   icon: '📩',
   orientation: 'portrait',
   filters: {"requiresYear":true},

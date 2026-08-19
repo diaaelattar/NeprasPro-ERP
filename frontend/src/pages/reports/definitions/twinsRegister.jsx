@@ -3,6 +3,7 @@
 //  يُظهر الطلاب التوائم المسجلين في المدرسة مرتبين معاً
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
+import RegisterStatsPage from '../RegisterStatsPage';
 
 function TwinsRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear } = meta;
@@ -162,6 +163,18 @@ function TwinsRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
           <div>يعتمد مدير المدرسة: ..........................</div>
         </div>
       </div>
+
+      {/* ══ صفحة الإحصاء الختامي المستقلة تماماً ══ */}
+      <RegisterStatsPage
+        title="سجل الطلاب التوائم"
+        subTitle={selectedGrade?.grade_name_ar ? `للصف: ${selectedGrade.grade_name_ar}` : ''}
+        registerCode="استمارة توائم ش.ط"
+        students={allTwins}
+        meta={meta}
+        schoolInfo={schoolInfo}
+        pageIndex={2}
+        totalPages={2}
+      />
     </div>
   );
 }
@@ -170,7 +183,7 @@ const twinsRegister = {
   id:          'twins_register',
   name:        'سجل الطلاب التوائم',
   desc:        'يُظهر الطلاب التوائم المسجلين في المدرسة مرتبين ومجمعين معاً في كشف واحد',
-  category:    'سجلات القيد',
+  category:    'السجلات المتخصصة',
   icon:        '👥',
   orientation: 'landscape',
   available:   true,

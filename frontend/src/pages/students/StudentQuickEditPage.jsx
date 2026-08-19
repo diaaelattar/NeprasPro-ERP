@@ -110,6 +110,57 @@ export default function StudentQuickEditPage({ onBack, activeSectionId }) {
     }).finally(() => setLoading(false));
   }, [filters, page, limit]);
 
+  // Comprehensive Refresh Handler
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      // 1. Reload Form Options
+      const optsRes = await fetch(`${API}/students/form-options`);
+      const optsData = await optsRes.json();
+      let currentAyId = filters.academicYearId;
+      if (optsData.success) {
+        setFormOpts(optsData);
+        if (!currentAyId) {
+          const cur = optsData.academicYears?.find(y => y.is_current === 1 || y.is_current === true);
+          currentAyId = cur ? String(cur.id) : (optsData.academicYears?.[0]?.id ? String(optsData.academicYears[0].id) : '');
+          if (currentAyId) {
+            setFilters(f => ({ ...f, academicYearId: currentAyId }));
+          }
+        }
+      }
+
+      // 2. Reload Classrooms
+      const ayId = currentAyId || formOpts.academicYears?.find(y => y.is_current === 1 || y.is_current === true)?.id;
+      const url = ayId ? `${API}/settings/classrooms?academicYearId=${ayId}` : `${API}/settings/classrooms`;
+      const clsRes = await fetch(url);
+      const clsData = await clsRes.json();
+      if (clsData.success) {
+        setAllClassrooms(clsData.classrooms || []);
+      }
+
+      // 3. Reload Students
+      const activeFilters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
+      if (!activeFilters.academicYearId && ayId) {
+        activeFilters.academicYearId = String(ayId);
+      }
+      const q = new URLSearchParams({ ...activeFilters, page: String(page), limit: String(limit), status: 'all' });
+      const stuRes = await fetch(`${API}/students?${q}`);
+      const stuData = await stuRes.json();
+      if (stuData.success) {
+        setStudents(stuData.students || []);
+        setTotalCount(stuData.total || stuData.students?.length || 0);
+        setTotalPages(stuData.totalPages || Math.ceil((stuData.total || stuData.students?.length || 0) / (limit === 'all' ? 100000 : parseInt(limit))) || 1);
+        setPendingChanges({});
+        setSelectedIds([]);
+        setSuccess('تم تحديث البيانات بنجاح ✅');
+      }
+    } catch (err) {
+      setError('تعذر تحديث البيانات: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => { loadStudents(); }, [loadStudents]);
   useEffect(() => {
     if (success) {
@@ -481,8 +532,32 @@ export default function StudentQuickEditPage({ onBack, activeSectionId }) {
             {filterClassrooms.map(c => <option key={c.id} value={c.id}>{c.formatted_name || c.class_name}</option>)}
           </select>
 
-          <button className="filter-reset" onClick={() => loadStudents()} style={{ padding: '0 16px' }}>
-            <RefreshCw size={14} /> تحديث
+          <button
+            className="filter-reset"
+            onClick={handleRefresh}
+            disabled={loading}
+            style={{
+              height: '38px',
+              padding: '0 16px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              borderRadius: '8px',
+              border: '1.5px solid #94a3b8',
+              background: '#ffffff',
+              color: '#0f172a',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              transition: 'all 0.2s'
+            }}
+          >
+            <RefreshCw size={15} className={loading ? 'spin' : ''} color="#0284c7" />
+            <span>{loading ? 'جاري التحديث...' : 'تحديث'}</span>
           </button>
         </div>
 

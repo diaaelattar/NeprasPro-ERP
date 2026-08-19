@@ -6,7 +6,7 @@
 
 const puppeteer = require('puppeteer');
 const db = require('../../config/db');
-const { getSchoolMasterInfo } = require('../../utils/schoolHelper');
+const { getSchoolMasterInfo, calculateAgeOnOct1st } = require('../../utils/schoolHelper');
 
 // ─── sql.js helpers ───────────────────────────────────────────────────────────
 const _all = (sqliteDb, sql, params = []) => {
@@ -788,19 +788,27 @@ exports.printRegister41Pdf = async (req, res) => {
     }
     const sqliteDb = db.getSQLiteDb();
     const school = getSchoolMasterInfo(sqliteDb);
-    const yearRow = _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE is_current = 1 LIMIT 1`);
+
+    // ── العام الدراسي: من الطلب أو النشط حالياً
+    const { gradeId, academicYearId } = req.body || req.query || {};
+    const yearRow = academicYearId
+      ? _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE id = ? LIMIT 1`, [Number(academicYearId)])
+      : _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE is_current = 1 LIMIT 1`);
     const yearId = yearRow?.id || 1;
     const academicYear = yearRow?.year_label || '....../......';
 
-    const gov        = school?.governorate  || '...............';
-    const rawAdmin   = school?.directorate  || '';
-    const cleanAdmin = rawAdmin.replace(/التعليمية\s*$/, '').trim() || '...............';
-    const rawSchool  = school?.school_name  || '';
+    const gov         = school?.governorate || '...............';
+    const rawAdmin    = school?.directorate || '';
+    const cleanAdmin  = rawAdmin.replace(/التعليمية\s*$/, '').trim() || '...............';
+    const rawSchool   = school?.school_name || '';
     const cleanSchool = rawSchool.replace(/^مدرسة\s*/, '').trim() || '...............';
-    const logoUrl    = school?.logo_url     || '';
+    const logoUrl     = school?.logo_url    || '';
 
     const now     = new Date();
     const dateStr = now.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    // ── بناء شرط الصف ديناميكياً
+    const gradeCondition = gradeId ? `AND s.grade_id = ${Number(gradeId)}` : 'AND g.grade_number = 1';
 
     const students = _all(sqliteDb, `
       SELECT
@@ -813,11 +821,12 @@ exports.printRegister41Pdf = async (req, res) => {
         c.class_name,
         ay.year_label AS academic_year
       FROM students s
-      LEFT JOIN grades_lookup  g   ON g.id = s.grade_id
+      LEFT JOIN grades_lookup  g   ON g.id  = s.grade_id
       LEFT JOIN stages_lookup  st  ON st.id = s.stage_id
+      LEFT JOIN academic_years ay  ON ay.id = s.academic_year_id
       LEFT JOIN class_enrollments ce ON ce.student_id = s.id AND ce.academic_year_id = s.academic_year_id
       LEFT JOIN classes        c   ON c.id = ce.class_id
-      WHERE s.deleted_at IS NULL AND s.academic_year_id = ? AND g.grade_number = 1
+      WHERE s.deleted_at IS NULL AND s.academic_year_id = ? ${gradeCondition}
         AND (s.enrollment_status IN ('new', 'promoted', 'مستجد', 'منقول')
           OR s.status IN ('new', 'promoted', 'مستجد', 'منقول', 'نشط', 'active')
           OR s.enrollment_status IS NULL
@@ -827,26 +836,18 @@ exports.printRegister41Pdf = async (req, res) => {
       ORDER BY s.full_name_ar ASC`, [Number(yearId)]);
 
     const enriched = students.map((stu, idx) => {
-      let ageYears = 0, ageMonths = 0, ageDays = 0;
-      if (stu.birth_date) {
-        const bd = new Date(stu.birth_date);
-        const currentYear = parseInt(stu.academic_year?.split('/')[0]) || new Date().getFullYear();
-        const oct1 = new Date(currentYear, 9, 1);
-        let years = oct1.getFullYear() - bd.getFullYear();
-        let months = oct1.getMonth() - bd.getMonth();
-        let days = oct1.getDate() - bd.getDate();
-        if (days < 0) { months -= 1; days += 30; }
-        if (months < 0) { years -= 1; months += 12; }
-        ageYears = Math.max(0, years);
-        ageMonths = Math.max(0, months);
-        ageDays = Math.max(0, days);
-      }
+      const yearForCalc = stu.academic_year || academicYear;
+      const age = calculateAgeOnOct1st(
+        stu.birth_date || stu.national_id,
+        yearForCalc,
+        academicYear
+      );
       return {
         serial: idx + 1,
         ...stu,
-        age_oct_years: ageYears,
-        age_oct_months: ageMonths,
-        age_oct_days: ageDays,
+        age_oct_years: age.years !== '' ? age.years : 0,
+        age_oct_months: age.months !== '' ? age.months : 0,
+        age_oct_days: age.days !== '' ? age.days : 0,
         fees_status: ''
       };
     });
@@ -886,35 +887,41 @@ exports.printRegister41Pdf = async (req, res) => {
       color: #000;
       line-height: 1.35;
       direction: rtl;
+      background: #fff;
     }
+
+    /* ── الترويسة الثلاثية ── */
     .hd-box {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
       border-bottom: 2pt solid #000;
-      padding-bottom: 6pt;
-      margin-bottom: 10pt;
+      padding-bottom: 5pt;
+      margin-bottom: 6pt;
+      text-align: right;
     }
-    .hd-r { text-align: right; font-size: 11pt; font-weight: 700; line-height: 1.4; min-width: 60mm; }
+    .hd-r { text-align: right; font-size: 10.5pt; font-weight: 700; line-height: 1.4; min-width: 65mm; }
     .hd-c { text-align: center; flex: 1; }
-    .hd-c h2 { font-size: 15pt; font-weight: 900; text-decoration: underline; margin-bottom: 2pt; }
-    .hd-yr { font-size: 12pt; font-weight: 800; text-decoration: underline; }
-    .hd-l { text-align: left; min-width: 60mm; font-size: 9.5pt; font-weight: 600; }
+    .hd-c h2 { font-size: 14pt; font-weight: 900; text-decoration: underline; margin-bottom: 2pt; color: #000; }
+    .hd-yr { font-size: 11pt; font-weight: 800; text-decoration: underline; color: #000; }
+    .hd-l { text-align: left; min-width: 65mm; font-size: 9.5pt; font-weight: 600; }
     .hd-l img { max-height: 38pt; max-width: 75pt; object-fit: contain; margin-bottom: 2pt; }
     .logo-box { display: inline-block; border: 1pt dashed #999; padding: 2pt 6pt; font-size: 9pt; }
 
-    table {
+    /* ── الجدول الأساسي ── */
+    table.main-table {
       width: 100%;
       border-collapse: collapse;
       border: 1.5pt solid #000;
       font-size: 9pt;
       text-align: center;
-      margin-bottom: 12pt;
+      margin-bottom: 10pt;
     }
-    th, td {
+    table.main-table th, table.main-table td {
       border: 1pt solid #000;
       padding: 3.5pt 2pt;
     }
+    /* تكرار thead بالكامل (الترويسة + أسماء الأعمدة) على كل صفحة تلقائياً */
     thead { display: table-header-group; }
     tfoot { display: table-footer-group; }
     tr { page-break-inside: avoid; }
@@ -923,16 +930,15 @@ exports.printRegister41Pdf = async (req, res) => {
       width: 100%;
       border-collapse: collapse;
       border: none;
-      margin-top: 20pt;
-      font-size: 10.5pt;
+      margin-top: 16pt;
+      font-size: 10pt;
       font-weight: 800;
       text-align: center;
     }
     .sigs-table td { border: none; padding: 4pt; }
     .sig-line { width: 70%; height: 1pt; border-bottom: 1pt dotted #000; margin: 18pt auto 0; }
     .stamp-box {
-      width: 65pt;
-      height: 65pt;
+      width: 60pt; height: 60pt;
       border: 1.5pt dashed #999;
       border-radius: 50%;
       margin: 6pt auto 0;
@@ -945,9 +951,14 @@ exports.printRegister41Pdf = async (req, res) => {
   </style>
 </head>
 <body>
-  ${headerHtml}
-  <table>
+  <table class="main-table">
     <thead>
+      <!-- الترويسة مدمجة داخل thead لضمان تكرارها رأسياً في كل صفحة -->
+      <tr>
+        <th colspan="14" style="border: none; background: #fff; padding: 0 0 6pt 0; font-weight: normal;">
+          ${headerHtml}
+        </th>
+      </tr>
       <tr style="background: #f1f5f9; font-weight: 800;">
         <th rowspan="2" style="width: 24pt;">م</th>
         <th rowspan="2" style="text-align: right; min-width: 130pt; padding-right: 6pt;">اسم التلميذ رباعي</th>
@@ -990,20 +1001,79 @@ exports.printRegister41Pdf = async (req, res) => {
     </tbody>
   </table>
 
-  <!-- التذييل الرسمي -->
-  <table class="sigs-table">
-    <tr>
-      <td><div>المسؤول المختص (كاتب السجل)</div><div class="sig-line"></div></td>
-      <td><div>المراجع (الأخصائي)</div><div class="sig-line"></div></td>
-      <td><div>وكيل شؤون الطلاب والتعليم</div><div class="sig-line"></div></td>
-      <td><div>مدير المدرسة (يعتمد)</div><div class="sig-line"></div></td>
-    </tr>
-    <tr>
-      <td colspan="4">
-        <div class="stamp-box">خاتم المدرسة</div>
-      </td>
-    </tr>
-  </table>
+  <!-- ══ الإحصاء الإجمالي للصف + التوقيعات (موحد ومطابق للطباعة المباشرة) ══ -->
+  ${(() => {
+    const statsBoys       = enriched.filter(s => ['ذكر','male','بنين','ذكور'].some(v => String(s.gender||'').includes(v))).length;
+    const statsGirls      = enriched.length - statsBoys;
+    const statsMuslims    = enriched.filter(s => String(s.religion||'').includes('مسلم') || s.religion === '1').length;
+    const statsChristians = enriched.filter(s => ['مسيحي','مسيح','2'].some(v => String(s.religion||'').includes(v))).length;
+    const statsMerged     = enriched.filter(s => s.is_merged).length;
+    const statsClasses    = [...new Set(enriched.map(s => s.class_name).filter(Boolean))].length || 1;
+    const statsGradeName  = enriched[0]?.grade_name_ar  || 'الصف الأول الابتدائي';
+    const statsStageName  = enriched[0]?.stage_name     || 'ابتدائي';
+
+    return `
+      <div style="page-break-inside: avoid; break-inside: avoid; margin-top: 14pt;">
+        <div style="font-size: 11pt; font-weight: 900; text-align: center; margin-bottom: 5pt; border-bottom: 1.5pt solid #000; padding-bottom: 3pt;">
+          إحصاء قيد التلاميذ المستجدين بسجل 41
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 9.5pt; text-align: center; margin-bottom: 12pt;">
+          <thead>
+            <tr style="background: #f1f5f9; font-weight: 800;">
+              <th style="border: 1pt solid #000; padding: 4pt 2pt; width: 28pt;" rowspan="2">م</th>
+              <th style="border: 1pt solid #000; padding: 4pt 4pt; width: 85pt;" rowspan="2">المرحلة</th>
+              <th style="border: 1pt solid #000; padding: 4pt 6pt; width: 120pt;" rowspan="2">الصف الدراسي</th>
+              <th style="border: 1pt solid #000; padding: 4pt 2pt; width: 50pt;" rowspan="2">عدد الفصول</th>
+              <th style="border: 1pt solid #000; padding: 3pt 2pt;" colspan="3">توزيع النوع</th>
+              <th style="border: 1pt solid #000; padding: 3pt 2pt;" colspan="2">الديانة</th>
+              <th style="border: 1pt solid #000; padding: 4pt 2pt; width: 50pt;" rowspan="2">مستجد</th>
+              <th style="border: 1pt solid #000; padding: 4pt 2pt; width: 45pt;" rowspan="2">دمج</th>
+              <th style="border: 1pt solid #000; padding: 4pt 4pt; width: 60pt;" rowspan="2">الجملة الكلية</th>
+            </tr>
+            <tr style="background: #f8fafc; font-weight: 800;">
+              <th style="border: 1pt solid #000; padding: 3pt 2pt; width: 45pt;">بنين</th>
+              <th style="border: 1pt solid #000; padding: 3pt 2pt; width: 45pt;">بنات</th>
+              <th style="border: 1pt solid #000; padding: 3pt 2pt; width: 50pt;">الجملة</th>
+              <th style="border: 1pt solid #000; padding: 3pt 2pt; width: 45pt;">مسلم</th>
+              <th style="border: 1pt solid #000; padding: 3pt 2pt; width: 45pt;">مسيحي</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="background: #fff; font-weight: 700;">
+              <td style="border: 1pt solid #000; padding: 5pt 2pt;">1</td>
+              <td style="border: 1pt solid #000; padding: 5pt 4pt;">${statsStageName}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 4pt; font-weight: 800;">${statsGradeName}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt; font-weight: 800;">${statsClasses}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt;">${statsBoys}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt;">${statsGirls}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt; font-weight: 900; background: #f8fafc;">${enriched.length}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt;">${statsMuslims}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt;">${statsChristians}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt; font-weight: 800;">${enriched.length}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt;">${statsMerged || '—'}</td>
+              <td style="border: 1pt solid #000; padding: 5pt 2pt; font-weight: 900; background: #f1f5f9; font-size: 10.5pt;">${enriched.length}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- التذييل الرباعي الرسمي للاعتماد -->
+        <table class="sigs-table" style="margin-top: 10pt; page-break-inside: avoid;">
+          <tr>
+            <td><div>المسؤول المختص (كاتب السجل)</div><div class="sig-line"></div></td>
+            <td><div>المراجع (الأخصائي)</div><div class="sig-line"></div></td>
+            <td><div>وكيل شؤون الطلاب والتعليم</div><div class="sig-line"></div></td>
+            <td><div>مدير المدرسة (يعتمد)</div><div class="sig-line"></div></td>
+          </tr>
+          <tr>
+            <td colspan="4">
+              <div class="stamp-box">خاتم المدرسة</div>
+            </td>
+          </tr>
+        </table>
+      </div>
+    `;
+  })()}
 </body>
 </html>`;
 
@@ -1013,7 +1083,8 @@ exports.printRegister41Pdf = async (req, res) => {
     });
 
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    await page.emulateMediaType('print');
+    await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
     const pdfBuffer = await page.pdf({
       format: 'A4',

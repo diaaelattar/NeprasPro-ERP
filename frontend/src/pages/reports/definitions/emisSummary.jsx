@@ -3,7 +3,7 @@ import React from 'react';
 const emisSummary = {
   id: 'emis-summary',
   name: 'بيان الإحصاء السنوي لوزارة التربية والتعليم (EMIS)',
-  category: 'إحصائيات',
+  category: 'الإحصائيات والتحليلات الرسمية',
   icon: '🏛️',
   orientation: 'landscape',
   filters: {"requiresYear":true},

@@ -7,6 +7,12 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 // Configure stable Chromium flags
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('ignore-certificate-errors');
+app.commandLine.appendSwitch('disable-features', 'NetworkService,NetworkServiceInProcess');
+app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-setuid-sandbox');
+app.commandLine.appendSwitch('disable-dev-shm-usage');
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-software-rasterizer');
 
 // ── Single Instance Lock ───────────────────────────────────────────────────────
 // Prevents two copies of the installed app running simultaneously.

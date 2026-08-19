@@ -4,12 +4,13 @@ import {
   GraduationCap, CheckCircle, ArrowLeftRight, RefreshCw,
   FileSpreadsheet, Eye, RotateCcw, Edit3, Layers,
   AlertTriangle, CheckSquare, Square, X, Save, UserX, Trash2,
-  Grid, ChevronsUpDown, ChevronUp, ChevronDown, SlidersHorizontal, Download, FileText
+  Grid, ChevronsUpDown, ChevronUp, ChevronDown, SlidersHorizontal, Download, FileText, Sparkles
 } from 'lucide-react';
 import API_BASE_URL from '../../config/api';
 import MergeStudentModal from './MergeStudentModal';
 import Register41PrintModal from './Register41PrintModal';
 import OctoberCensusPrintModal from './OctoberCensusPrintModal';
+import SiblingDiscoveryModal from './SiblingDiscoveryModal';
 import {
   ENROLLMENT_STATUS_OPTIONS,
   RELIGIONS,
@@ -215,6 +216,74 @@ function PurgeConfirmModal({ onConfirm, onClose, actionLoading }) {
   );
 }
 
+/* ── Extract National ID Confirm Modal ───────────────────────── */
+function ExtractNationalIdModal({ onConfirm, onClose, actionLoading }) {
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 99999, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}>
+      <div className="modal-card glass-panel" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="page-icon" style={{ width: 38, height: 38, background: 'rgba(2,132,199,0.15)', color: '#0284c7' }}>
+              <Sparkles size={20} />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800 }}>استخلاص البيانات من الرقم القومي</h3>
+              <p style={{ margin: 0, opacity: 0.7, fontSize: 12.5 }}>تحديث تواريخ الميلاد والمحافظات والجنس تلقائياً</p>
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body" style={{ padding: '20px 24px' }}>
+          <div style={{
+            background: 'rgba(2,132,199,0.08)',
+            border: '1px solid rgba(2,132,199,0.25)',
+            color: '#0369a1',
+            borderRadius: 10,
+            padding: '14px 16px',
+            fontSize: 13,
+            lineHeight: 1.6,
+            marginBottom: 14
+          }}>
+            ℹ️ <strong>تفاصيل العملية:</strong>
+            <div style={{ marginTop: 6, color: 'inherit' }}>
+              سيقوم النظام بتحليل الأرقام القومية لجميع الطلاب المسجلين واستخلاص (تاريخ الميلاد بدقة، الجنس، ومحل الميلاد/المحافظة) وتعبئتها آلياً.
+            </div>
+          </div>
+          <div style={{ fontSize: 12.5, color: '#64748b', fontWeight: 600, padding: '0 4px', lineHeight: 1.7 }}>
+            ✓ لن يتم التعديل على أي حقول معبأة مسبقاً لدى الطلاب.<br />
+            ✓ يتم تطبيق خوارزمية التحقق الرسمية المعتمدة لبطاقات الرقم القومي.
+          </div>
+        </div>
+        <div className="modal-footer" style={{ padding: '14px 24px', display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+          <button className="btn-cancel" onClick={onClose} disabled={actionLoading} style={{ padding: '8px 16px', borderRadius: 8, cursor: 'pointer' }}>
+            إلغاء
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={actionLoading}
+            style={{
+              background: '#0284c7',
+              color: '#fff',
+              border: 'none',
+              padding: '8px 20px',
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 13,
+              cursor: actionLoading ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              boxShadow: '0 2px 8px rgba(2,132,199,0.35)'
+            }}
+          >
+            <Sparkles size={16} /> {actionLoading ? 'جاري الاستخلاص...' : 'تأكيد الاستخلاص الآن'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ════════════════════════════════════════════════════════ */
 export default function StudentsList({ onAdd, onView, onImport, onDistribute, onTransfers, onQuickEdit, onAbsence, onSeating, activeSectionId, currentUser, isSuperAdmin }) {
   const [students,   setStudents]   = useState([]);
@@ -246,6 +315,8 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [showRegister41, setShowRegister41] = useState(false);
   const [showOctoberCensus, setShowOctoberCensus] = useState(false);
+  const [showExtractModal, setShowExtractModal] = useState(false);
+  const [showSiblingModal, setShowSiblingModal] = useState(false);
   const [reportsMenuOpen, setReportsMenuOpen] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
 
@@ -482,14 +553,19 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
   };
 
   const handleExtractNationalId = async () => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في استخلاص تاريخ الميلاد، الجنس، ومحل الميلاد لجميع الطلاب من أرقامهم القومية تلقائياً؟ لن يتم تعديل الحقول المعبأة مسبقاً.')) return;
     setActionLoading(true);
     try {
       const res = await fetch(`${API}/students/bulk-extract-national-id`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setSuccess(data.message); loadStudents();
-    } catch (e) { setError(e.message); } finally { setActionLoading(false); }
+      setSuccess(data.message);
+      setShowExtractModal(false);
+      loadStudents();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const resetFilters = () => {
@@ -576,34 +652,61 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                   <span style={{ fontSize: 14 }}>♿</span> <span>تسجيل دمج وطباعة</span>
                 </button>
 
+                <button
+                  onClick={() => {
+                    setShowSiblingModal(true);
+                    setReportsMenuOpen(false);
+                  }}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#4f46e5', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#eef2ff'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <Sparkles size={15} color="#4f46e5" /> <span>المكتشف الذكي للإخوة والتوائم</span>
+                </button>
+
                 <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
 
                 <button
                   onClick={async () => {
                     setReportsMenuOpen(false);
                     try {
+                      setActionLoading(true);
                       const q = new URLSearchParams();
-                      if (filters.sectionId)     q.set('sectionId',     filters.sectionId);
-                      if (filters.stageId)       q.set('stageId',       filters.stageId);
-                      if (filters.gradeId)       q.set('gradeId',       filters.gradeId);
-                      if (filters.classId)       q.set('classId',       filters.classId);
-                      if (filters.status)        q.set('status',        filters.status);
-                      if (filters.gender)        q.set('gender',        filters.gender);
-                      if (filters.academicYearId)q.set('academicYearId',filters.academicYearId);
+                      if (filters.search)                                         q.set('search', filters.search);
+                      if (filters.sectionId && filters.sectionId !== 'all')       q.set('sectionId', filters.sectionId);
+                      if (filters.stageId && filters.stageId !== 'all')           q.set('stageId', filters.stageId);
+                      if (filters.gradeId && filters.gradeId !== 'all' && filters.gradeId !== 'all_stage') q.set('gradeId', filters.gradeId);
+                      if (filters.classId && filters.classId !== 'all')           q.set('classId', filters.classId);
+                      if (filters.status && filters.status !== 'all')             q.set('status', filters.status);
+                      if (filters.gender && filters.gender !== 'all')             q.set('gender', filters.gender);
+                      if (filters.academicYearId && filters.academicYearId !== 'all') q.set('academicYearId', filters.academicYearId);
+
+                      q.set('templateName', 'sgl_all');
                       const res = await fetch(`${API}/students/export/excel?${q.toString()}`);
-                      if (!res.ok) throw new Error('فشل تصدير البيانات');
+                      if (!res.ok) {
+                        const errJson = await res.json().catch(() => ({}));
+                        throw new Error(errJson.error || 'فشل تصدير البيانات');
+                      }
                       const blob = await res.blob();
                       const url  = URL.createObjectURL(blob);
                       const a    = document.createElement('a');
                       a.href     = url;
-                      a.download = `students_export_${new Date().toISOString().slice(0,10)}.xlsx`;
+                      a.download = `سجل_بيانات_الطلاب_sgl_all_${new Date().toISOString().slice(0,10)}.xlsm`;
+                      document.body.appendChild(a);
                       a.click();
-                      URL.revokeObjectURL(url);
+                      setTimeout(() => {
+                        if (document.body.contains(a)) document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }, 1000);
+                      setSuccess('تم تصدير سجل بيانات الطلاب (sgl_all) بنجاح ✅');
                     } catch (err) {
-                      alert('خطأ في التصدير: ' + err.message);
+                      setError('خطأ في التصدير: ' + err.message);
+                    } finally {
+                      setActionLoading(false);
                     }
                   }}
-                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#16a34a', cursor: 'pointer' }}
+                  disabled={actionLoading}
+                  style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#16a34a', cursor: actionLoading ? 'not-allowed' : 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f0fdf4'}
                   onMouseLeave={e => e.currentTarget.style.background = 'none'}
                 >
@@ -660,13 +763,13 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
                 </button>
 
                 <button
-                  onClick={() => { handleExtractNationalId(); setToolsMenuOpen(false); }}
+                  onClick={() => { setShowExtractModal(true); setToolsMenuOpen(false); }}
                   disabled={actionLoading}
                   style={{ width: '100%', padding: '10px 14px', border: 'none', background: 'none', textAlign: 'right', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f1f5f9'}
                   onMouseLeave={e => e.currentTarget.style.background = 'none'}
                 >
-                  <RefreshCw size={15} color="#d97706" className={actionLoading ? 'spin' : ''} /> <span>تحديث الهويات وتواريخ الميلاد</span>
+                  <Sparkles size={15} color="#0284c7" /> <span>تحديث واستخلاص بيانات الهوية</span>
                 </button>
 
                 <button
@@ -1254,6 +1357,25 @@ export default function StudentsList({ onAdd, onView, onImport, onDistribute, on
         <OctoberCensusPrintModal
           academicYearLabel={formOpts?.academicYears?.find(y => y.id === filters.academicYearId)?.year_label}
           onClose={() => setShowOctoberCensus(false)}
+        />
+      )}
+
+      {showExtractModal && (
+        <ExtractNationalIdModal
+          onConfirm={handleExtractNationalId}
+          onClose={() => setShowExtractModal(false)}
+          actionLoading={actionLoading}
+        />
+      )}
+
+      {showSiblingModal && (
+        <SiblingDiscoveryModal
+          isOpen={showSiblingModal}
+          onClose={() => setShowSiblingModal(false)}
+          onLinkedSuccess={() => {
+            loadStudents();
+            loadStats();
+          }}
         />
       )}
     </div>

@@ -371,14 +371,25 @@ export default function StudentProfile({ studentId, onEdit, onBack }) {
               <h3 className="info-section-title">👨 بيانات ولي الأمر</h3>
               <InfoRow label="اسم ولي الأمر" value={s.guardian_name} />
               <InfoRow label="صفة ولي الأمر" value={s.guardian_relation} />
+              <InfoRow label="حالة الأب" value={s.father_status || (s.is_orphan && (s.orphan_type === 'يتيم الأب' || s.orphan_type === 'يتيم الوالدين (الأب والأم)') ? 'متوفى' : 'على قيد الحياة')} />
               <InfoRow label="الرقم القومي" value={s.guardian_national_id} dir="ltr" />
               <InfoRow label="رقم الهاتف الأساسي" value={s.guardian_phone} dir="ltr" />
               <InfoRow label="رقم الهاتف الإضافي" value={s.guardian_phone_2} dir="ltr" />
               <InfoRow label="الوظيفة" value={s.guardian_job} />
               <h3 className="info-section-title" style={{ marginTop: 24 }}>👩 بيانات الأم</h3>
               <InfoRow label="اسم الأم" value={s.mother_name} />
+              <InfoRow label="حالة الأم" value={s.mother_status || (s.is_orphan && (s.orphan_type === 'يتيم الأم' || s.orphan_type === 'يتيم الوالدين (الأب والأم)') ? 'متوفاة' : 'على قيد الحياة')} />
               <InfoRow label="جنسية الأم" value={s.mother_nationality_name} />
               <InfoRow label="الرقم القومي للأم" value={s.mother_national_id} dir="ltr" />
+              {(s.is_orphan === 1 || s.orphan_type || s.father_status === 'متوفى' || s.mother_status === 'متوفاة') && (
+                <>
+                  <h3 className="info-section-title" style={{ marginTop: 24 }}>🤲 الحالة الاجتماعية والأيتام</h3>
+                  <InfoRow label="حالة اليتم" value={s.orphan_type || (s.father_status === 'متوفى' && s.mother_status === 'متوفاة' ? 'يتيم الوالدين معاً' : s.father_status === 'متوفى' ? 'يتيم الأب' : 'يتيم الأم')} />
+                  {s.social_research_number && <InfoRow label="رقم بحث الشؤون / الشهادة" value={s.social_research_number} />}
+                  {s.social_research_date && <InfoRow label="تاريخ البحث / القرار" value={s.social_research_date} />}
+                  {s.orphan_notes && <InfoRow label="ملاحظات التكافل والإعفاء" value={s.orphan_notes} />}
+                </>
+              )}
             </div>
           )}
 

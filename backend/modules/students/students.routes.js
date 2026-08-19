@@ -78,7 +78,8 @@ router.get('/reports/register-41',                ctrl.getRegister41Data);
 router.get('/reports/october-census',             ctrl.getOctoberCensusData);
 router.post('/print/doc',                         printCtrl.printStudentDoc);
 router.post('/print/october-census',               printCtrl.printOctoberCensusPdf);
-router.post('/print/register-41',                 printCtrl.printRegister41Pdf);
+router.get('/siblings/detect',                     ctrl.getDetectedSiblings);
+router.post('/siblings/auto-link',                 ctrl.autoLinkSiblings);
 router.get('/duplicates',                         ctrl.getDuplicateStudents);
 
 router.get('/:id',                                ctrl.getStudent);

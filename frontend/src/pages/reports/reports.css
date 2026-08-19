@@ -511,10 +511,9 @@
   padding: 4px 6px;
   text-align: center;
   vertical-align: middle;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  word-break: keep-all;
-  height: 26px;
+  overflow: visible;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .register-table th {
@@ -537,9 +536,8 @@
 .register-table td.cell-name {
   text-align: right;
   padding-right: 6px;
-  white-space: nowrap !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  word-break: normal;
   font-size: 12px;
   font-weight: 800;
 }

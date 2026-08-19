@@ -118,7 +118,7 @@ const booksList = {
       gradeId: f.gradeId,
       academicYearId: f.academicYearId,
       classId: f.classId,
-      limit: 60,
+      limit: 'all',
       status: 'all',
     });
     if (f.sectionId) q.set('sectionId', f.sectionId);

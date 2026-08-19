@@ -3,6 +3,7 @@
 //  يعرض الطلاب الذين فقدوا أحد الوالدين (يتيم الأب / يتيم الأم / كليهما)
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
+import RegisterStatsPage from '../RegisterStatsPage';
 
 function OrphansRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear } = meta;
@@ -13,27 +14,27 @@ function OrphansRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const cleanAdmin = rawAdmin.replace(/التعليمية\s*$/, '').trim();
   const governorate = schoolInfo.governorate || 'الجيزة';
 
-  // Filter orphaned students — check father_status / mother_status fields
+  // Filter orphaned students — check is_orphan / orphan_type / father_status / mother_status fields
   const orphans = students.filter(s => {
-    const fatherDeceased = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1;
-    const motherDeceased = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1;
-    return fatherDeceased || motherDeceased;
+    const fatherDeceased = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1 || (s.is_orphan && (s.orphan_type === 'يتيم الأب' || s.orphan_type === 'يتيم الوالدين (الأب والأم)'));
+    const motherDeceased = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1 || (s.is_orphan && (s.orphan_type === 'يتيم الأم' || s.orphan_type === 'يتيم الوالدين (الأب والأم)'));
+    return Boolean(s.is_orphan === 1 || s.is_orphan === true || fatherDeceased || motherDeceased || s.orphan_type);
   });
 
   const fatherOrphans = orphans.filter(s => {
-    const fd = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1;
-    const md = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1;
-    return fd && !md;
+    const fd = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1 || s.orphan_type === 'يتيم الأب';
+    const md = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1 || s.orphan_type === 'يتيم الأم';
+    return (fd && !md) || s.orphan_type === 'يتيم الأب';
   });
   const motherOrphans = orphans.filter(s => {
-    const fd = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1;
-    const md = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1;
-    return md && !fd;
+    const fd = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1 || s.orphan_type === 'يتيم الأب';
+    const md = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1 || s.orphan_type === 'يتيم الأم';
+    return (md && !fd) || s.orphan_type === 'يتيم الأم';
   });
   const bothOrphans = orphans.filter(s => {
     const fd = s.father_status === 'متوفى' || s.father_status === 'deceased' || s.father_deceased === 1;
     const md = s.mother_status === 'متوفاة' || s.mother_status === 'deceased' || s.mother_deceased === 1;
-    return fd && md;
+    return (fd && md) || s.orphan_type === 'يتيم الوالدين (الأب والأم)';
   });
 
   const calcAge = (bd) => {
@@ -122,10 +123,10 @@ function OrphansRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
                     <td style={{ border: '1px solid #000', padding: '3px 2px' }}>{s.grade_name_ar || '—'}</td>
                     <td style={{ border: '1px solid #000', padding: '3px 2px', direction: 'ltr' }}>{s.classroom_name || s.class_name || '—'}</td>
                     <td style={{ border: '1px solid #000', padding: '3px 2px', color: '#dc2626', fontWeight: 900, fontSize: 13, background: '#fff5f5' }}>
-                      {s.father_status === 'متوفى' || s.father_deceased === 1 ? '✓' : ''}
+                      {s.father_status === 'متوفى' || s.father_deceased === 1 || s.orphan_type === 'يتيم الأب' || s.orphan_type === 'يتيم الوالدين (الأب والأم)' ? '✓' : ''}
                     </td>
                     <td style={{ border: '1px solid #000', padding: '3px 2px', color: '#7c3aed', fontWeight: 900, fontSize: 13, background: '#faf5ff' }}>
-                      {s.mother_status === 'متوفاة' || s.mother_deceased === 1 ? '✓' : ''}
+                      {s.mother_status === 'متوفاة' || s.mother_deceased === 1 || s.orphan_type === 'يتيم الأم' || s.orphan_type === 'يتيم الوالدين (الأب والأم)' ? '✓' : ''}
                     </td>
                     <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {s.guardian_name || s.parent_name || '—'}
@@ -154,6 +155,18 @@ function OrphansRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
           <div>يعتمد مدير المدرسة: ..........................</div>
         </div>
       </div>
+
+      {/* ══ صفحة الإحصاء الختامي المستقلة تماماً ══ */}
+      <RegisterStatsPage
+        title="سجل الطلاب الأيتام"
+        subTitle={selectedGrade?.grade_name_ar ? `للصف: ${selectedGrade.grade_name_ar}` : ''}
+        registerCode="استمارة أيتام ش.ط"
+        students={orphans}
+        meta={meta}
+        schoolInfo={schoolInfo}
+        pageIndex={2}
+        totalPages={2}
+      />
     </div>
   );
 }
@@ -162,7 +175,7 @@ const orphansRegister = {
   id:          'orphans_register',
   name:        'سجل الطلاب الأيتام',
   desc:        'يُظهر الطلاب الذين فقدوا الأب أو الأم أو كليهما مع بيانات الولي وإحصاء تلخيصي',
-  category:    'سجلات القيد',
+  category:    'السجلات المتخصصة',
   icon:        '🕊️',
   orientation: 'landscape',
   available:   true,
@@ -182,11 +195,13 @@ const orphansRegister = {
     const q = new URLSearchParams({
       limit: 'all',
       status: 'all',
+      isOrphan: 'true'
     });
     if (f.academicYearId) q.set('academicYearId', f.academicYearId);
     if (f.sectionId) q.set('sectionId', f.sectionId);
     if (f.stageId)   q.set('stageId', f.stageId);
     if (f.gradeId && f.gradeId !== 'all_stage')   q.set('gradeId', f.gradeId);
+    if (f.classId && f.classId !== 'all_grade' && f.classId !== 'all') q.set('classId', f.classId);
     return q.toString();
   },
 

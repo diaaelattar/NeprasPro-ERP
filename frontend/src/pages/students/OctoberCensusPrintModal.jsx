@@ -252,7 +252,13 @@ export default function OctoberCensusPrintModal({ institution, academicYearLabel
   return (
     <div
       className="modal-overlay"
-      style={{ zIndex: 99999, background: 'rgba(0,0,0,0.75)', padding: 16, overflowY: 'auto' }}
+      style={{
+        zIndex: 99999,
+        background: 'rgba(0,0,0,0.8)',
+        padding: '24px 16px 40px',
+        overflowY: 'auto',
+        display: 'block'
+      }}
     >
       {/* ── شريط الأدوات ── */}
       <div className="no-print" style={{

@@ -1,197 +1,11 @@
-/**
- * Unified School Helper Utility
- * Provides a single source of truth for institution/school metadata
- * across reports, exports, PDFs, control modules, and UI headers.
- */
+// ════════════════════════════════════════════════════════════════
+//  siblingDetector.js — محرك اكتشاف وربط الإخوة والتوائم الذكي (NeprasPro)
+// ════════════════════════════════════════════════════════════════
+//  1. الفيصل الرئيسي: الرقم القومي للأب/ولي الأمر (14 رقماً).
+//  2. الخوارزمية الذكية: تطبيع النص العربي + بصمة اسم الأب + الهاتف/العنوان.
+//  3. التمييز الدقيق: نفس تاريخ الميلاد = توائم (Twins) / تواريخ مختلفة = إخوة (Siblings).
+// ════════════════════════════════════════════════════════════════
 
-const _get = (sqliteDb, sql, params = []) => {
-  try {
-    const stmt = sqliteDb.prepare(sql);
-    if (params.length) stmt.bind(params);
-    const hasRow = stmt.step();
-    const row = hasRow ? stmt.getAsObject() : null;
-    stmt.free();
-    return row;
-  } catch (_) {
-    return null;
-  }
-};
-
-function getSchoolMasterInfo(sqliteDb) {
-  if (!sqliteDb) return getDefaultSchoolInfo();
-
-  try {
-    const inst = _get(sqliteDb, `
-      SELECT ic.*,
-             COALESCE(NULLIF(ic.governorate, ''), g.name_ar, '') AS governorate_name,
-             COALESCE(NULLIF(ic.directorate, ''), ea.name_ar, '') AS directorate_name,
-             st.full_name_ar AS staff_director_name
-      FROM institution_config ic
-      LEFT JOIN governorates g ON g.id = ic.governorate_id
-      LEFT JOIN educational_administrations ea ON ea.id = ic.administration_id
-      LEFT JOIN staff st ON (st.id = ic.director_id OR (st.position_title LIKE '%مدير%' AND ic.director_name IS NULL))
-      ORDER BY ic.id ASC
-      LIMIT 1
-    `) || _get(sqliteDb, 'SELECT * FROM institution_config LIMIT 1');
-
-    if (!inst) return getDefaultSchoolInfo();
-
-    const gov = (inst.governorate_name || inst.governorate || '').trim();
-    const dir = (inst.directorate_name || inst.directorate || '').trim();
-    const name = (inst.school_name || '').trim();
-    const director = (inst.director_name || inst.staff_director_name || '').trim();
-
-    return {
-      id: inst.id || 1,
-      school_code: inst.school_code || '',
-      school_name: name,
-      school_name_en: inst.school_name_en || '',
-      governorate: gov,
-      directorate: dir,
-      governorate_id: inst.governorate_id || null,
-      administration_id: inst.administration_id || null,
-      education_type: inst.education_type || 'رسمي',
-      director_name: director,
-      address: inst.address || '',
-      phone: inst.phone || '',
-      email: inst.email || '',
-      website: inst.website || '',
-      logo_url: inst.logo_url || '',
-      is_initialized: Boolean(inst.is_initialized),
-      // camelCase aliases for JSON API consistency
-      schoolCode: inst.school_code || '',
-      schoolName: name,
-      schoolNameEn: inst.school_name_en || '',
-      governorateId: inst.governorate_id || null,
-      administrationId: inst.administration_id || null,
-      educationType: inst.education_type || 'رسمي',
-      directorName: director,
-      logoUrl: inst.logo_url || '',
-      // Standard ministerial header strings
-      headerRight: `محافظة: ${gov || '................'}\nإدارة: ${dir || '................'}\nمدرسة: ${name || '................'}`,
-      headerGovDir: `مديرية التربية والتعليم بمحافظة: ${gov || '................'} - إدارة: ${dir || '................'} التعليمية`
-    };
-  } catch (_) {
-    return getDefaultSchoolInfo();
-  }
-}
-
-function getDefaultSchoolInfo() {
-  return {
-    id: 1,
-    school_code: '',
-    school_name: '',
-    school_name_en: '',
-    governorate: '',
-    directorate: '',
-    governorate_id: null,
-    administration_id: null,
-    education_type: 'رسمي',
-    director_name: '',
-    address: '',
-    phone: '',
-    email: '',
-    website: '',
-    logo_url: '',
-    is_initialized: false,
-    schoolCode: '',
-    schoolName: '',
-    schoolNameEn: '',
-    governorateId: null,
-    administrationId: null,
-    educationType: 'رسمي',
-    directorName: '',
-    logoUrl: '',
-    headerRight: 'محافظة: ................\nإدارة: ................\nمدرسة: ................',
-    headerGovDir: 'مديرية التربية والتعليم بمحافظة: ................ - إدارة: ................ التعليمية'
-  };
-}
-
-/**
- * حساب السن في 1 أكتوبر بدقة متناهية وفق اللوائح الوزارية المصرية
- * @param {string} birthDate - تاريخ الميلاد بصيغة YYYY-MM-DD أو رقم قومي مكون من 14 رقم
- * @param {string|number} academicYear - العام الدراسي (مثال: '2025/2026' أو 2025)
- * @param {string|number} fallbackYear - سنة احتياطية في حال عدم توفر العام الدراسي
- * @returns {{ years: number|string, months: number|string, days: number|string }}
- */
-function calculateAgeOnOct1st(birthDate, academicYear, fallbackYear) {
-  if (!birthDate) return { years: '', months: '', days: '' };
-
-  let bYear, bMonth, bDay;
-
-  const str = String(birthDate).trim();
-  // إذا كان المدخل رقماً قومياً مصرياً من 14 رقم
-  if (str.length === 14 && /^\d{14}$/.test(str)) {
-    const century = parseInt(str[0], 10);
-    const yPart = parseInt(str.substring(1, 3), 10);
-    bYear = century === 2 ? 1900 + yPart : (century === 3 ? 2000 + yPart : null);
-    bMonth = parseInt(str.substring(3, 5), 10);
-    bDay = parseInt(str.substring(5, 7), 10);
-  } else if (str.includes('-') || str.includes('/')) {
-    // تحليل YYYY-MM-DD أو YYYY/MM/DD بالأرقام لتفادي مشاكل الـ Timezone
-    const parts = str.split(/[-/]/).map(Number);
-    if (parts.length >= 3) {
-      if (parts[0] > 1900) { // YYYY-MM-DD
-        bYear = parts[0];
-        bMonth = parts[1];
-        bDay = parts[2];
-      } else if (parts[2] > 1900) { // DD-MM-YYYY
-        bDay = parts[0];
-        bMonth = parts[1];
-        bYear = parts[2];
-      }
-    }
-  }
-
-  if (!bYear || !bMonth || !bDay || isNaN(bYear) || isNaN(bMonth) || isNaN(bDay) || bMonth < 1 || bMonth > 12 || bDay < 1 || bDay > 31) {
-    return { years: '', months: '', days: '' };
-  }
-
-  // استخراج سنة بداية العام الدراسي (مثلاً 2025 من '2025/2026')
-  let targetYear = null;
-  if (academicYear) {
-    const match = String(academicYear).match(/(\d{4})/);
-    if (match) targetYear = parseInt(match[1], 10);
-  }
-  if (!targetYear && fallbackYear) {
-    const match = String(fallbackYear).match(/(\d{4})/);
-    if (match) targetYear = parseInt(match[1], 10);
-  }
-  if (!targetYear) {
-    const now = new Date();
-    targetYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-  }
-
-  // الحساب المعتمد لوزارة التربية والتعليم في 1 أكتوبر:
-  // اليوم المستهدف = 1
-  // الشهر المستهدف = 10 (أكتوبر)
-  // السنة المستهدفة = targetYear
-  let days = 1 - bDay;
-  let months = 10 - bMonth;
-  let years = targetYear - bYear;
-
-  if (days < 0) {
-    // استلاف شهر من أكتوبر (سبتمبر فيه 30 يوماً): 1 + 30 - bDay
-    days += 30;
-    months -= 1;
-  }
-
-  if (months < 0) {
-    // استلاف سنة من targetYear (12 شهراً)
-    months += 12;
-    years -= 1;
-  }
-
-  return {
-    years: Math.max(0, years),
-    months: Math.max(0, months),
-    days: Math.max(0, days)
-  };
-}
-
-/**
- * تطبيع النص العربي لإزالة الفروق الإملائية والتشكيل والمسافات الزائدة
- */
 function normalizeArabic(text) {
   if (!text || typeof text !== 'string') return '';
   return text
@@ -207,9 +21,6 @@ function normalizeArabic(text) {
     .replace(/\s+/g, ' ');                // توحيد المسافات
 }
 
-/**
- * استخراج بصمة الأب والجد (من المقطع الثاني لاسم الطالب فصاعداً، أو اسم ولي الأمر)
- */
 function extractFatherSignature(fullName, guardianName) {
   const normFull = normalizeArabic(fullName);
   const normGuardian = normalizeArabic(guardianName);
@@ -224,6 +35,7 @@ function extractFatherSignature(fullName, guardianName) {
     }
   }
 
+  // الاحتفاظ بأول 3 إلى 4 مقاطع من اسم الأب
   return parts.slice(0, 4).join(' ');
 }
 
@@ -233,16 +45,13 @@ function cleanPhone(phone) {
   return digits.length >= 8 ? digits.slice(-10) : '';
 }
 
-/**
- * اكتشاف جميع مجموعات الإخوة والتوائم في المدرسة
- */
 function detectSiblingsAndTwins(sqliteDb) {
   if (!sqliteDb) return { groups: [], totalSiblingsCount: 0, totalTwinsCount: 0 };
 
   const stmt = sqliteDb.prepare(`
     SELECT s.id, s.full_name_ar, s.student_code, s.national_id, s.birth_date,
            s.gender, s.guardian_name, s.guardian_national_id, s.guardian_phone,
-           s.mother_name, s.mother_national_id, s.address, s.twin_student_id,
+           s.mother_name, s.mother_national_id, s.address, s.is_twin, s.twin_student_id,
            s.sibling_student_ids,
            g.grade_name_ar, c.class_name AS classroom_name, ay.year_label AS academic_year
     FROM students s
@@ -367,9 +176,6 @@ function detectSiblingsAndTwins(sqliteDb) {
   };
 }
 
-/**
- * الربط التلقائي للإخوة والتوائم وتحديث قاعدة البيانات
- */
 function autoLinkSiblingsAndTwins(sqliteDb, groupKeysToLink = null) {
   if (!sqliteDb) throw new Error('قاعدة البيانات غير مهيأة');
 
@@ -433,9 +239,6 @@ function autoLinkSiblingsAndTwins(sqliteDb, groupKeysToLink = null) {
 }
 
 module.exports = {
-  getSchoolMasterInfo,
-  getDefaultSchoolInfo,
-  calculateAgeOnOct1st,
   normalizeArabic,
   extractFatherSignature,
   detectSiblingsAndTwins,

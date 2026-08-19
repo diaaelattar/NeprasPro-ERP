@@ -13,7 +13,30 @@ const STATUS_LABELS = {
 /* ── Preview Component ─────────────────────────────────────────── */
 function ClassListPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear, selectedClassroom, classroomLabel } = meta;
-  const totalStudents = students.length;
+
+  // ── Sort Students according to user preference (genderOrder: boys_first / girls_first / alphabetical) ──
+  const sortedStudents = React.useMemo(() => {
+    const list = [...(students || [])];
+    const order = meta.genderOrder || meta.filters?.genderOrder || 'none';
+
+    return list.sort((a, b) => {
+      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
+      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
+
+      if (order === 'boys_first') {
+        if (isBoyA && !isBoyB) return -1;
+        if (!isBoyA && isBoyB) return 1;
+      } else if (order === 'girls_first') {
+        if (!isBoyA && isBoyB) return -1;
+        if (isBoyA && !isBoyB) return 1;
+      }
+
+      // Sort alphabetically by Arabic name
+      return String(a.full_name_ar || '').localeCompare(String(b.full_name_ar || ''), 'ar', { sensitivity: 'base' });
+    });
+  }, [students, meta.genderOrder, meta.filters]);
+
+  const totalStudents = sortedStudents.length;
   const perPage = 50;
   const half    = 25;
   const pageCount = Math.ceil(totalStudents / perPage) || 1;
@@ -21,7 +44,7 @@ function ClassListPreview({ students = [], meta = {}, schoolInfo = {} }) {
   return (
     <div className="report-preview" id="print-area" data-orientation="portrait">
       {Array.from({ length: pageCount }).map((_, pageIdx) => {
-        const pageStudents = students.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
+        const pageStudents = sortedStudents.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
         return (
           <div key={pageIdx} className="printable-page-block">
 
@@ -137,11 +160,12 @@ const classList = {
       gradeId: f.gradeId,
       academicYearId: f.academicYearId,
       classId: f.classId,
-      limit: 500,
+      limit: 'all',
       status: 'all',
     });
     if (f.sectionId) q.set('sectionId', f.sectionId);
     if (f.stageId)   q.set('stageId',   f.stageId);
+    if (f.genderOrder && f.genderOrder !== 'none') q.set('genderOrder', f.genderOrder);
     return q.toString();
   },
 

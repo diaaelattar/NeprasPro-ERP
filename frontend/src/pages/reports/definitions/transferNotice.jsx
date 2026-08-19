@@ -3,7 +3,7 @@ import React from 'react';
 const transferNotice = {
   id: 'transfer-notice',
   name: 'إشعار وموافقة نقل طالب إلى مدرسة أخرى',
-  category: 'المطبوعات والنماذج',
+  category: 'المطبوعات والنماذج الرسمية',
   icon: '📄',
   orientation: 'portrait',
   filters: {"requiresYear":true},

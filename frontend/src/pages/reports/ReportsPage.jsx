@@ -17,13 +17,15 @@ const API = API_BASE_URL;
 
 /* ── Category icons ────────────────────────────────────────────── */
 const CAT_ICONS = {
-  'الكل':                   <Sparkles  size={14} />,
-  'تقارير مخصصة':            <Sparkles  size={14} />,
-  'سجلات القيد':             <BookOpen  size={14} />,
-  'قوائم الفصول':            <List      size={14} />,
-  'سجلات رصد أعمال السنة':    <Layers    size={14} />,
-  'إحصائيات':                <BarChart3 size={14} />,
-  'المطبوعات والنماذج':       <Printer   size={14} />,
+  'الكل':                      <Sparkles  size={14} />,
+  'سجلات القيد والمناداة':      <BookOpen  size={14} />,
+  'قوائم وتوزيع الفصول':        <List      size={14} />,
+  'الكنترول والامتحانات':       <Layers    size={14} />,
+  'سجلات رصد أعمال السنة':       <Layers    size={14} />,
+  'الإحصائيات والتحليلات الرسمية': <BarChart3 size={14} />,
+  'المطبوعات والنماذج الرسمية':  <Printer   size={14} />,
+  'الصحة والسلامة المدرسية':    <BookOpen  size={14} />,
+  'السجلات المتخصصة':           <Sparkles  size={14} />,
 };
 
 /* ── Unique categories ─────────────────────────────────────────── */
@@ -169,23 +171,33 @@ export default function ReportsPage({ activeSectionId }) {
 
   const switchReport = (id) => {
     if (id === activeId) return;
+    const targetReport = REPORTS.find(r => r.id === id);
     setActiveId(id);
     setStudents([]);
     setReportReady(false);
     setError('');
+
+    // Reset classId if target report does not explicitly require a single class
+    if (!targetReport?.filters?.requiresClass) {
+      setFilters(f => ({ ...f, classId: '', isBatchMode: false }));
+    }
   };
 
   const handleCategorySelect = (cat) => {
     setSelectedCategory(cat);
+    setFilters(f => ({ ...f, classId: '', isBatchMode: false }));
     const catReports = cat === 'الكل' ? REPORTS : REPORTS.filter(r => r.category === cat);
     if (catReports.length > 0) {
       switchReport(catReports[0].id);
     }
   };
 
-  const isBatchMode = Boolean(filters.isBatchMode) ||
-                       filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
-                       filters.printScope === 'all_grade' || filters.printScope === 'all_stage';
+  const supportsBatch = Boolean(activeReport?.category === 'سجلات رصد أعمال السنة' || activeReport?.hasBatchMode);
+  const isBatchMode = supportsBatch && (
+    Boolean(filters.isBatchMode) ||
+    filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
+    filters.printScope === 'all_grade' || filters.printScope === 'all_stage'
+  );
 
   const effectiveFilters = {
     ...filters,
@@ -231,9 +243,11 @@ export default function ReportsPage({ activeSectionId }) {
   const exportExcel = async () => {
     if (exportingExcel || exportingPdf) return;
 
-    const isBatchMode = Boolean(filters.isBatchMode) || 
-                        filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
-                        filters.printScope === 'all_grade' || filters.printScope === 'all_stage';
+    const isBatchMode = supportsBatch && (
+      Boolean(filters.isBatchMode) || 
+      filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
+      filters.printScope === 'all_grade' || filters.printScope === 'all_stage'
+    );
 
     setExportingExcel(true);
     setExportMsg('');
@@ -353,9 +367,11 @@ export default function ReportsPage({ activeSectionId }) {
   const exportPdf = async (preview = false) => {
     if (exportingPdf || exportingExcel) return;
 
-    const isBatchMode = Boolean(filters.isBatchMode) || 
-                        filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
-                        filters.printScope === 'all_grade' || filters.printScope === 'all_stage';
+    const isBatchMode = supportsBatch && (
+      Boolean(filters.isBatchMode) || 
+      filters.classId === 'all_grade' || filters.classId === 'all_stage' ||
+      filters.printScope === 'all_grade' || filters.printScope === 'all_stage'
+    );
 
     setExportingPdf(true);
     setExportMsg('جاري توليد PDF من الإكسيل...');
@@ -531,14 +547,14 @@ export default function ReportsPage({ activeSectionId }) {
                 <input
                   type="text"
                   className="reports-search-input"
-                  placeholder="ابحث باسم التقرير (40 تقرير)..."
+                  placeholder={`ابحث باسم التقرير (${REPORTS.length} تقرير)...`}
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
                 />
               </div>
 
               <button className="reports-hub-btn" onClick={() => setShowHubModal(true)}>
-                <LayoutGrid size={16} /> <span>دليل كل التقارير (40)</span>
+                <LayoutGrid size={16} /> <span>دليل كل التقارير ({REPORTS.length})</span>
               </button>
             </div>
           </div>
@@ -643,9 +659,9 @@ export default function ReportsPage({ activeSectionId }) {
               )}
 
               {/* Classroom */}
-              {activeReport.filters?.requiresClass && (
+              {(activeReport.filters?.requiresClass || activeReport.filters?.showClass) && (
                 <div className="filter-field">
-                  <label>الفصل *</label>
+                  <label>الفصل {activeReport.filters?.requiresClass ? '*' : ''}</label>
                   <select
                     value={filters.classId}
                     onChange={e => setF({ classId: e.target.value })}
@@ -654,7 +670,7 @@ export default function ReportsPage({ activeSectionId }) {
                   >
                     <option value="">
                       {filters.gradeId && filters.academicYearId
-                        ? (classrooms.length ? 'اختر الفصل...' : 'لا توجد فصول')
+                        ? (classrooms.length ? (activeReport.filters?.requiresClass ? 'اختر الفصل...' : 'كل فصول الصف (عرض الكل)') : 'لا توجد فصول')
                         : 'اختر الصف والعام أولاً'}
                     </option>
                     {classrooms.map(c =>
@@ -674,9 +690,9 @@ export default function ReportsPage({ activeSectionId }) {
                     onChange={e => setF({ religion: e.target.value })}
                     style={{ background: '#ecfdf5', borderColor: '#a7f3d0', fontWeight: 700, color: '#065f46' }}
                   >
-                    <option value="all">الكل (مسلمون ومسيحيون)</option>
-                    <option value="مسلم">☪️ الديانة المسلمة فقط</option>
-                    <option value="مسيحي">✝️ الديانة المسيحية فقط</option>
+                    <option value="all">الكل (مسلم ومسيحي)</option>
+                    <option value="مسلم">☪️ مسلم</option>
+                    <option value="مسيحي">✝️ مسيحي</option>
                   </select>
                 </div>
               )}
@@ -697,8 +713,8 @@ export default function ReportsPage({ activeSectionId }) {
                 </div>
               )}
 
-              {/* Checkbox for Batch Exporting All Classes */}
-              {!activeReport.filters?.hideBatchMode && activeReport?.category !== 'إحصائيات' && (
+              {/* Checkbox for Batch Exporting All Classes (Only for evaluation sheets / batch-enabled reports) */}
+              {supportsBatch && !activeReport.filters?.hideBatchMode && (
                 <div className="filter-field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 700, color: '#1e40af', background: '#eff6ff', padding: '8px 12px', borderRadius: 8, border: '1px solid #bfdbfe', width: '100%' }}>
                     <input
@@ -793,7 +809,7 @@ export default function ReportsPage({ activeSectionId }) {
                   onClick={() => exportPdf(false)}
                   disabled={exportingExcel || exportingPdf}
                   style={{ background: '#6366f1', color: '#fff', opacity: (exportingExcel || exportingPdf) ? 0.7 : 1, borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-                  title="توليد وتنزيل PDF من شيت الماكرو الوزاري"
+                  title="توليد وتنزيل PDF من شيت الماكرو المعتمد"
                 >
                   <FileText size={15} />
                   <span>📄 تصدير ماكرو PDF</span>
@@ -873,8 +889,8 @@ export default function ReportsPage({ activeSectionId }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Sparkles size={20} color="#6366f1" />
                 <div>
-                  <h3 style={{ margin: 0 }}>دليل وسجل التقارير الوزارية الموحد (40 تقريراً رسمياً)</h3>
-                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>اختر التقرير المطلوب لعرضه وتصديره مباشرة</div>
+                  <h3 style={{ margin: 0 }}>دليل وسجل التقارير الشامل والموحد ({REPORTS.length} تقرير)</h3>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>اختر التقرير المطلوب لعرضه وتصديره مباشرة | إجمالي التقارير المتاحة: {filteredReports.length}</div>
                 </div>
               </div>
               <button className="modal-close" onClick={() => setShowHubModal(false)}><X size={18} /></button>
@@ -890,7 +906,11 @@ export default function ReportsPage({ activeSectionId }) {
                       className={`reports-category-pill ${selectedCategory === cat ? 'active' : ''}`}
                       onClick={() => setSelectedCategory(cat)}
                     >
-                      {cat}
+                      {CAT_ICONS[cat] || null}
+                      <span>{cat}</span>
+                      <span style={{ fontSize: 10, opacity: 0.75, marginRight: 4 }}>
+                        ({cat === 'الكل' ? REPORTS.length : REPORTS.filter(r => r.category === cat).length})
+                      </span>
                     </button>
                   ))}
                 </div>

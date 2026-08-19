@@ -28,7 +28,7 @@ const primaryPortraitSheet = {
   buildQuery: (f) => {
     const q = new URLSearchParams({
       status: 'all',
-      limit: 100,
+      limit: 'all',
       mode: 'primary_portrait',
     });
     if (f.classId)        q.set('classId', f.classId);

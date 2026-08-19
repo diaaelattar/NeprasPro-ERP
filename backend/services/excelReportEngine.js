@@ -153,7 +153,7 @@ function escapeXml(str) {
  */
 function setInlineStringCell(xml, cellRef, text) {
   if (text === null || text === undefined) text = '';
-  const safe = escapeXml(text);
+  const safe = escapeXml(text).replace(/\r?\n/g, '&#10;');
   
   const reSelf = new RegExp(`<c r="${cellRef}"([^>]*)/>`);
   if (reSelf.test(xml)) {
@@ -504,11 +504,123 @@ async function generateMacroGradesReport({ templateName, school, className, year
   }
 }
 
+/**
+ * Generates sgl_all (.xlsm) macro report with 'بيانات_الصف' sheet populated.
+ * - Single header at rows 2, 3, 4.
+ * - Students populated row-by-row starting from Row 8 without empty row breaks.
+ */
+async function generateSglAllReport({ school = {}, gradeName = '', yearLabel = '', students = [], reportTitle = '', viewMode = '' }) {
+  const templatePath = resolveTemplatePath('students', 'sgl_all.xltm');
+  if (!templatePath) throw new Error('قالب sgl_all.xltm غير موجود');
+
+  const tempPath = createTempTemplateCopy(templatePath, '.xlsm');
+
+  try {
+    const rawData = fs.readFileSync(tempPath);
+    const zip = await JSZip.loadAsync(rawData);
+
+    await patchContentTypeToWorkbook(zip);
+
+    // Sheet2 is "بيانات_الصف"
+    let sheet2 = zip.file('xl/worksheets/sheet2.xml') ? await zip.file('xl/worksheets/sheet2.xml').async('string') : null;
+    if (!sheet2) throw new Error('ورقة بيانات_الصف غير موجودة في القالب');
+
+    const gov = school.governorate || '';
+    const dir = school.directorate || '';
+    const schName = school.schoolName || school.school_name || '';
+
+    // 1. الترويسة (مرة واحدة في الأعلى)
+    sheet2 = setInlineStringCell(sheet2, 'B2', `محافظة : ${gov}`);
+    sheet2 = setInlineStringCell(sheet2, 'B3', `إدارة : ${dir} التعليمية`);
+    sheet2 = setInlineStringCell(sheet2, 'B4', `مدرسة : ${schName}`);
+
+    const firstStu = students[0];
+    const resolvedGrade = gradeName || firstStu?.grade_name_ar || 'العام';
+    const cleanGrade = resolvedGrade.startsWith('الصف') ? resolvedGrade : (resolvedGrade === 'العام' ? 'العام' : `الصف ${resolvedGrade}`);
+    const resolvedYear = yearLabel || firstStu?.academic_year || '2025 / 2026';
+
+    let mainTitle = `سجل قيد تلاميذ ${cleanGrade}`;
+    if (reportTitle) {
+      mainTitle = `${reportTitle} - ${cleanGrade}`;
+    } else if (viewMode === 'disconnected') {
+      mainTitle = `سجل الطلاب المنقطعين عن الدراسة - ${cleanGrade}`;
+    } else if (viewMode === 'suspended') {
+      mainTitle = `سجل الطلاب الموقوف قيدهم - ${cleanGrade}`;
+    } else if (viewMode === 'excluded') {
+      mainTitle = `سجل الطلاب المستبعدين - ${cleanGrade}`;
+    }
+
+    // عنوان السجل على سطرين في الخلية E3
+    const headerTitleOnTwoLines = `${mainTitle}\nللعام الدراسي ${resolvedYear}`;
+    sheet2 = setInlineStringCell(sheet2, 'E3', headerTitleOnTwoLines);
+
+    const { calculateAgeOnOct1st } = require('../utils/schoolHelper');
+
+    // 2. صفوف الطلاب المتتالية بدون فواصل بدءاً من السطر 8
+    students.forEach((s, idx) => {
+      const r = 8 + idx;
+      const serial = idx + 1;
+      const age = calculateAgeOnOct1st(
+        s.birth_date || s.national_id,
+        s.academic_year || yearLabel
+      );
+
+      // استخراج رقم الفصل مجرداً (مثال: "13" بدلاً من "فصل 13")
+      let classNum = '';
+      if (s.class_number !== null && s.class_number !== undefined && s.class_number !== '') {
+        classNum = String(s.class_number);
+      } else {
+        const rawClass = String(s.classroom_name || s.class_name || '');
+        const match = rawClass.match(/\d+/);
+        classNum = match ? match[0] : rawClass.replace(/^فصل\s*/, '').trim();
+      }
+
+      // النوع الرسمي: بنين - بنات
+      const isFemale = ['أنثى', 'بنت', 'بنات', 'female', 'f'].some(v => String(s.gender || '').toLowerCase().includes(v));
+      const gender = isFemale ? 'بنات' : 'بنين';
+
+      const religion = s.religion || 'مسلم';
+      const nationality = s.nationality_name || s.nationality || 'مصري';
+      const status = s.enrollment_status || s.status || 'مستجد';
+      const merged = s.is_merged === 1 ? 'دمج' : '—';
+
+      sheet2 = setInlineStringCell(sheet2, `A${r}`, serial);
+      sheet2 = setInlineStringCell(sheet2, `B${r}`, s.full_name_ar || '');
+      sheet2 = setInlineStringCell(sheet2, `C${r}`, s.national_id || '');
+      sheet2 = setInlineStringCell(sheet2, `D${r}`, s.birth_date || '');
+      sheet2 = setInlineStringCell(sheet2, `E${r}`, age.days !== '' ? age.days : '');
+      sheet2 = setInlineStringCell(sheet2, `F${r}`, age.months !== '' ? age.months : '');
+      sheet2 = setInlineStringCell(sheet2, `G${r}`, age.years !== '' ? age.years : '');
+      sheet2 = setInlineStringCell(sheet2, `H${r}`, classNum);
+      sheet2 = setInlineStringCell(sheet2, `I${r}`, gender);
+      sheet2 = setInlineStringCell(sheet2, `J${r}`, religion);
+      sheet2 = setInlineStringCell(sheet2, `K${r}`, nationality);
+      sheet2 = setInlineStringCell(sheet2, `L${r}`, status);
+      sheet2 = setInlineStringCell(sheet2, `M${r}`, merged);
+      sheet2 = setInlineStringCell(sheet2, `N${r}`, s.guardian_name || '');
+      sheet2 = setInlineStringCell(sheet2, `O${r}`, s.guardian_job || '');
+      sheet2 = setInlineStringCell(sheet2, `P${r}`, s.guardian_phone || s.emergency_phone || '');
+      sheet2 = setInlineStringCell(sheet2, `Q${r}`, s.address || '');
+      sheet2 = setInlineStringCell(sheet2, `R${r}`, s.enrollment_date || s.created_at?.split('T')?.[0] || '');
+    });
+
+    zip.file('xl/worksheets/sheet2.xml', sheet2);
+
+    const generatedBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    return await finalizeCleanBuffer(generatedBuffer);
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+    }
+  }
+}
+
 module.exports = {
   resolveTemplatePath,
   generatePrimaryPortraitSheet,
   generatePrimaryLandscapeSheet,
   generateStudentRegisterReport,
   generateFullClassListReport,
-  generateMacroGradesReport
+  generateMacroGradesReport,
+  generateSglAllReport
 };

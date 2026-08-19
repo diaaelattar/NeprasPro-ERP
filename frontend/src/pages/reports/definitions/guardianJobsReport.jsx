@@ -218,7 +218,7 @@ const guardianJobsReport = {
   id:          'guardian_jobs_report',
   name:        'كشف وظائف وأرقام هواتف أولياء الأمور',
   desc:        'تقرير مخصص لحصر وتصنيف وظائف أولياء الأمور مع الفرز السريع والاتصال بالهاتف 1 و 2',
-  category:    'تقارير مخصصة',
+  category:    'السجلات المتخصصة',
   icon:        '💼',
   orientation: 'portrait',
   available:   true,

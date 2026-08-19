@@ -301,34 +301,34 @@
             if (mode === 'fast' || mode === 'turbo') {
                 return {
                     mode: 'fast',
-                    pollInterval: 70,
-                    settlingTime: 180,
-                    shortWait: 150,
-                    medWait: 350,
-                    maxSearchWait: 2000,
-                    searchPostSleep: 80
+                    pollInterval: 100,
+                    settlingTime: 600,
+                    shortWait: 500,
+                    medWait: 1000,
+                    maxSearchWait: 4000,
+                    searchPostSleep: 300
                 };
             }
             if (mode === 'safe') {
                 return {
                     mode: 'safe',
                     pollInterval: 200,
-                    settlingTime: 700,
-                    shortWait: 450,
-                    medWait: 900,
-                    maxSearchWait: 4500,
-                    searchPostSleep: 350
+                    settlingTime: 1200,
+                    shortWait: 1000,
+                    medWait: 2000,
+                    maxSearchWait: 7000,
+                    searchPostSleep: 600
                 };
             }
-            // balanced (default - fast & highly responsive)
+            // balanced (default - highly reliable & stable)
             return {
                 mode: 'balanced',
-                pollInterval: 100,
-                settlingTime: 300,
-                shortWait: 220,
-                medWait: 450,
-                maxSearchWait: 2800,
-                searchPostSleep: 120
+                pollInterval: 120,
+                settlingTime: 800,
+                shortWait: 700,
+                medWait: 1400,
+                maxSearchWait: 5000,
+                searchPostSleep: 400
             };
         },
 
@@ -1594,27 +1594,78 @@ body.gm-dark-mode {
             }
         },
 
+        // البحث الذكي عن حقل كود التلميذ
+        findCodeInput() {
+            return Utils.findInputByLabelText('كود التلميذ') ||
+                   Utils.findInputByLabelText('كود الطالب') ||
+                   Utils.findInputByLabelText('الكود') ||
+                   Utils.findInputByLabelText('كود') ||
+                   document.querySelector('input[name*="code" i], input[id*="code" i], input[placeholder*="كود" i], input[name*="student_code" i], input[id*="student_code" i], input[name*="txtCode" i], input[id*="txtCode" i]');
+        },
+
+        // البحث الذكي عن زر البحث
+        findSearchButton() {
+            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a.btn, a.btn-primary, a[role="button"]'));
+            return buttons.find(b => {
+                const txt = (b.innerText || b.value || '').trim();
+                return /بحث|Search/i.test(txt) || b.querySelector('.fa-search, .bi-search, svg, [class*="search" i]');
+            }) || document.querySelector('button[type="submit"], #btnSearch, #btn_search, .btn-search, input[name*="search" i], input[id*="search" i]');
+        },
+
+        // البحث الذكي عن رابط أو زر تعديل الطالب
+        findStudentLink(code) {
+            if (code) {
+                const directCodeLink = document.querySelector(`a[href*="${code}" i], button[onclick*="${code}" i], a[onclick*="${code}" i]`);
+                if (directCodeLink) return directCodeLink;
+            }
+
+            const standardLink = document.querySelector('a[href*="/student/edit/" i], a[href*="/Student/edit/" i], a[href*="/student/Edit/" i], a[href*="/Student/Edit/" i]');
+            if (standardLink) return standardLink;
+
+            // البحث داخل جدول النتائج
+            const tables = Array.from(document.querySelectorAll('table'));
+            for (const table of tables) {
+                const rows = Array.from(table.querySelectorAll('tbody tr, tr')).filter(r => r.querySelectorAll('td').length > 0);
+                for (const row of rows) {
+                    const rowText = row.innerText || '';
+                    if (!code || rowText.includes(code)) {
+                        const actionLink = row.querySelector('a[href*="edit" i], a[onclick*="edit" i], button[onclick*="edit" i], a.btn-edit, a.btn-info, a.btn-primary, a[title*="تعديل"], a[title*="عرض"]') || row.querySelector('a');
+                        if (actionLink) return actionLink;
+                    }
+                }
+            }
+
+            return document.querySelector(CONFIG.SELECTORS.STUDENT_LINK);
+        },
+
         // تنفيذ البحث عن كود
         async executeSearchForCode(code) {
             const savedLevel = await Store.get('target_level_val');
-            const gradeEl    = Utils.findInputByLabelText('الصف');
-            if (gradeEl && gradeEl.value !== savedLevel) {
+            const gradeEl    = Utils.findInputByLabelText('الصف') || document.querySelector('select[name*="grade" i], select[id*="grade" i], select[name*="level" i], select[id*="level" i]');
+            if (gradeEl && savedLevel && gradeEl.value !== savedLevel) {
                 Utils.setInputValueAngular(gradeEl, savedLevel);
                 await Utils.sleep(CONFIG.WAIT_SHORT);
             }
-            const codeEl = Utils.findInputByLabelText('كود التلميذ');
-            if (!codeEl) { showToast('❌ لم يُعثر على حقل "كود التلميذ"!', 'error'); return false; }
-            Utils.setInputValueAngular(codeEl, code);
-            await Utils.sleep(500);
 
-            const nidEl = Utils.findInputByLabelText('الرقم القومى');
+            const codeEl = this.findCodeInput();
+            if (!codeEl) {
+                showToast('❌ لم يُعثر على حقل "كود التلميذ" في هذه الصفحة!', 'error');
+                return false;
+            }
+            Utils.setInputValueAngular(codeEl, code);
+            await Utils.sleep(300);
+
+            const nidEl = Utils.findInputByLabelText('الرقم القومى') || document.querySelector('input[name*="national" i], input[id*="national" i], input[placeholder*="الرقم القومي" i]');
             if (nidEl?.value) Utils.setInputValueAngular(nidEl, '');
 
-            const searchBtn = Array.from(document.querySelectorAll('button'))
-                .find(b => b.innerText.trim() === CONFIG.SELECTORS.SEARCH_BTN_TEXT);
-            if (!searchBtn) { showToast('❌ لم يُعثر على زر "بحث"!', 'error'); return false; }
+            const searchBtn = this.findSearchButton();
+            if (!searchBtn) {
+                showToast('❌ لم يُعثر على زر "بحث"!', 'error');
+                return false;
+            }
+
             searchBtn.click();
-            showToast(`🔍 بحث عن: ${code}`, 'info');
+            showToast(`🔍 جاري البحث عن كود التلميذ: ${code}...`, 'info');
             return true;
         },
 
@@ -1658,9 +1709,7 @@ body.gm-dark-mode {
 
                 const finalData = await Store.get('collected_data', []);
                 if (finalData.length > 0) {
-                    // إرسال لنبراس برو أولاً
                     await NeprasAPI.sendBatch(finalData);
-                    // ثم تصدير Excel احتياطياً
                     await Exporter.exportData(finalData, 'Final');
                     await Store.set('collected_data', []);
                 }
@@ -1671,19 +1720,40 @@ body.gm-dark-mode {
             await UI.updateStats();
             const code    = targetCodes[currentIdx];
             const started = await this.executeSearchForCode(code);
-            if (!started) { await Store.set('collecting', false); return; }
+            if (!started) {
+                await Store.set('collecting', false);
+                UI.updateStatus('متوقف', false);
+                UI._setToggleBtn(false);
+                return;
+            }
 
-            // الانتظار الذكي الفوري لظهور رابط الطالب بدلاً من الانتظار الأعمى 3 ثواني
-            const link = await Utils.waitForElement(CONFIG.SELECTORS.STUDENT_LINK, delays.maxSearchWait, delays.pollInterval);
+            // الانتظار المتأني لظهور رابط الطالب في الجدول
+            let link = null;
+            let elapsed = 0;
+            const searchTimeout = Math.max(delays.maxSearchWait, 3500);
+
+            while (elapsed < searchTimeout) {
+                await Utils.sleep(delays.pollInterval);
+                elapsed += delays.pollInterval;
+                link = this.findStudentLink(code);
+                if (link) break;
+            }
+
             if (link) {
                 await Utils.sleep(delays.searchPostSleep);
-                window.location.href = link.getAttribute('href');
+                showToast(`🚀 جاري فتح صفحة الطالب [${code}]...`, 'success');
+                const href = link.getAttribute('href');
+                if (href && !href.startsWith('javascript:')) {
+                    window.location.href = href;
+                } else {
+                    link.click();
+                }
             } else {
-                showToast(`⚠️ الكود ${code} غير موجود. تخطي وتسجيل كفاشل.`, 'warning');
+                showToast(`⚠️ الكود [${code}] غير موجود أو لم تظهر نتائجه. تسجيل كفاشل والانتقال للتالي.`, 'warning');
                 let failed = await Store.get('failed_codes', []);
                 if (!failed.includes(code)) { failed.push(code); await Store.set('failed_codes', failed); }
                 await Store.set('current_code_index', currentIdx + 1);
-                await Utils.sleep(delays.shortWait);
+                await Utils.sleep(1200);
                 window.location.reload();
             }
         },
@@ -1699,28 +1769,52 @@ body.gm-dark-mode {
 
             const delays = await Utils.getSpeedDelays();
 
-            // 1. فحص فوري وسريع لجاهزية واستقرار الحقول في الصفحة
-            const hasFormData = () => {
-                const inputs = document.querySelectorAll(CONFIG.SELECTORS.FORM_INPUTS);
+            // 1. فحص حقيقي لجاهزية بيانات الطالب في صفحة التعديل (الاسم والرقم القومي الفعلي)
+            const isStudentFormReady = () => {
+                const inputs = Array.from(document.querySelectorAll(CONFIG.SELECTORS.FORM_INPUTS));
+                let hasValidName = false;
+                let hasValidNationalId = false;
+                let hasValidCode = false;
                 let filledCount = 0;
+
                 for (const inp of inputs) {
-                    if (inp.value && inp.value.trim().length > 0 && !['__VIEWSTATE', '__EVENTVALIDATION', '__EVENTTARGET', '__EVENTARGUMENT'].includes(inp.name)) {
-                        filledCount++;
-                        if (filledCount >= 3) return true;
+                    const val = (inp.value || '').trim();
+                    if (!val) continue;
+
+                    // استبعاد حقول ASP.NET التقنية وحقول الإخفاء
+                    if (['__VIEWSTATE', '__EVENTVALIDATION', '__EVENTTARGET', '__EVENTARGUMENT'].some(k => (inp.name || '').includes(k))) {
+                        continue;
+                    }
+
+                    filledCount++;
+
+                    // 14 رقم قومي صحيح
+                    if (/^[23]\d{13}$/.test(val)) {
+                        hasValidNationalId = true;
+                    }
+                    // كود التلميذ
+                    else if (/^\d{6,10}$/.test(val)) {
+                        hasValidCode = true;
+                    }
+                    // اسم عربي حقيقي (ليس نص زر)
+                    else if (/[\u0621-\u064A]{3,}/.test(val)) {
+                        if (!['اختر', 'بحث', 'حفظ', 'تعديل', 'رجوع', 'إلغاء', 'القسم العربي', 'رسمي', 'مستجد', 'منقول'].includes(val)) {
+                            hasValidName = true;
+                        }
                     }
                 }
-                const pageText = document.body.innerText || '';
-                if (/\b([23]\d{13})\b/.test(pageText)) return true;
-                return false;
+
+                // نعتبر الصفحة جاهزة فقط عند اكتمال تحميل اسم أو رقم قومي أو كود الطالب
+                return (hasValidNationalId || (hasValidName && hasValidCode) || (hasValidName && filledCount >= 3));
             };
 
-            // 2. انتظار ذكي مرن: ينطلق فوراً بمجرد ظهور البيانات، وينتظر بصبر إذا كان السيرفر بطيئاً
+            // 2. انتظار ذكي مرن: ينتظر ظهور بيانات الطالب الحقيقية قبل المتابعة
             let elapsed = 0;
-            const maxWait = delays.mode === 'safe' ? 8000 : (delays.mode === 'fast' ? 3500 : 5000);
+            const maxWait = delays.mode === 'safe' ? 10000 : (delays.mode === 'fast' ? 5000 : 7000);
             while (elapsed < maxWait) {
-                if (hasFormData()) break;
-                await Utils.sleep(50);
-                elapsed += 50;
+                if (isStudentFormReady()) break;
+                await Utils.sleep(100);
+                elapsed += 100;
             }
             await Utils.sleep(delays.settlingTime);
 

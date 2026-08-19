@@ -3,7 +3,7 @@ import React from 'react';
 const medicalExemptionList = {
   id: 'medical-exemption-list',
   name: 'كشف الإعفاء الطبي والتربية الرياضية',
-  category: 'الصحة المدرسية',
+  category: 'الصحة والسلامة المدرسية',
   icon: '🏥',
   orientation: 'portrait',
   filters: {"requiresYear":true},

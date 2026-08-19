@@ -98,7 +98,7 @@ const droppedStudentsReport = {
   id:          'dropped_students_report',
   name:        'سجل الطلاب المنقطعين وموقوفي القيد',
   desc:        'يُظهر الطلاب الموقوف قيدهم أو المنقطعين مع بيانات التواصل للاتصال بأولياء أمورهم',
-  category:    'إحصائيات',
+  category:    'الإحصائيات والتحليلات الرسمية',
   icon:        '⚠️',
   orientation: 'landscape',
   available:   true,
@@ -118,7 +118,7 @@ const droppedStudentsReport = {
   buildQuery: (f) => {
     const q = new URLSearchParams({
       academicYearId: f.academicYearId,
-      limit: 2000,
+      limit: 'all',
       status: 'all', // Fetch all and filter client side, or status=suspended
     });
     if (f.sectionId) q.set('sectionId', f.sectionId);

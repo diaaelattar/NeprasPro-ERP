@@ -76,7 +76,9 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
     // Guardian & Mother Info (including 4-part mother name)
     guardianName: '', guardianRelation: 'أب', guardianNationalId: '',
     guardianPhone: '', guardianPhone2: '', guardianJob: '',
+    fatherStatus: 'على قيد الحياة',
     motherName: '', motherFirstName: '', motherSecondName: '', motherThirdName: '', motherForthName: '',
+    motherStatus: 'على قيد الحياة',
     motherNationalityId: '1', motherNationalId: '', fatherNationalityId: '1',
     enrollmentDate: new Date().toISOString().split('T')[0],
 
@@ -87,6 +89,7 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
     isTalented: false, talentCategory: 'موهبة علمية وتكنولوجية', talentDescription: '',
     isReturnedFromAbroad: false, countryFrom: '', returnDate: '',
     isTransferred: false, transferredFromSchool: '', transferredFromDirectorate: '', transferredFromGovernorate: '',
+    isOrphan: false, orphanType: 'يتيم الأب', socialResearchNumber: '', socialResearchDate: '', orphanNotes: '',
     specialCases: []
   });
 
@@ -250,6 +253,13 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               isReturnedFromAbroad: Boolean(s.is_returned_from_abroad), countryFrom: s.country_from || '',
               isTransferred: Boolean(s.transferred_from_school), transferredFromSchool: s.transferred_from_school || '',
               transferredFromDirectorate: s.transferred_from_directorate || '', transferredFromGovernorate: s.transferred_from_governorate || '',
+              fatherStatus: s.father_status || (s.is_orphan && (s.orphan_type === 'يتيم الأب' || s.orphan_type === 'يتيم الوالدين (الأب والأم)') ? 'متوفى' : 'على قيد الحياة'),
+              motherStatus: s.mother_status || (s.is_orphan && (s.orphan_type === 'يتيم الأم' || s.orphan_type === 'يتيم الوالدين (الأب والأم)') ? 'متوفاة' : 'على قيد الحياة'),
+              isOrphan: Boolean(s.is_orphan || s.father_status === 'متوفى' || s.mother_status === 'متوفاة'),
+              orphanType: s.orphan_type || (s.father_status === 'متوفى' && s.mother_status === 'متوفاة' ? 'يتيم الوالدين (الأب والأم)' : s.father_status === 'متوفى' ? 'يتيم الأب' : s.mother_status === 'متوفاة' ? 'يتيم الأم' : 'يتيم الأب'),
+              socialResearchNumber: s.social_research_number || '',
+              socialResearchDate: s.social_research_date || '',
+              orphanNotes: s.orphan_notes || '',
               specialCases: (d.specialCases || []).map(c => c.case_type_id)
             });
           }
@@ -826,6 +836,21 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
               </div>
 
               <div className="field-group col-span-1">
+                <label className="field-label">حالة الأب (الحياة / الوفاة)</label>
+                <select className="field-input" value={form.fatherStatus || 'على قيد الحياة'} onChange={e => {
+                  const val = e.target.value;
+                  setForm(f => {
+                    const isNowOrphan = val === 'متوفى' || f.motherStatus === 'متوفاة';
+                    const oType = (val === 'متوفى' && f.motherStatus === 'متوفاة') ? 'يتيم الوالدين (الأب والأم)' : (val === 'متوفى' ? 'يتيم الأب' : (f.motherStatus === 'متوفاة' ? 'يتيم الأم' : f.orphanType));
+                    return { ...f, fatherStatus: val, isOrphan: isNowOrphan, orphanType: oType };
+                  });
+                }}>
+                  <option value="على قيد الحياة">على قيد الحياة</option>
+                  <option value="متوفى">متوفى ⚰️</option>
+                </select>
+              </div>
+
+              <div className="field-group col-span-1">
                 <label className="field-label">الرقم القومي لولي الأمر</label>
                 <input type="text" className="field-input" dir="ltr" maxLength={14} placeholder="14 رقم"
                   value={form.guardianNationalId} onChange={e => setF('guardianNationalId', e.target.value)} />
@@ -843,7 +868,7 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
                   value={form.guardianPhone2} onChange={e => setF('guardianPhone2', e.target.value)} />
               </div>
 
-              <div className="field-group col-span-2">
+              <div className="field-group col-span-1">
                 <label className="field-label">مهنة / وظيفة ولي الأمر</label>
                 <input type="text" className="field-input" placeholder="مهندس / معلم / طبيب ..."
                   value={form.guardianJob} onChange={e => setF('guardianJob', e.target.value)} />
@@ -909,6 +934,21 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
                       motherForthName: parts.slice(3).join(' ') || f.motherForthName
                     }));
                   }} />
+              </div>
+
+              <div className="field-group col-span-1">
+                <label className="field-label">حالة الأم (الحياة / الوفاة)</label>
+                <select className="field-input" value={form.motherStatus || 'على قيد الحياة'} onChange={e => {
+                  const val = e.target.value;
+                  setForm(f => {
+                    const isNowOrphan = f.fatherStatus === 'متوفى' || val === 'متوفاة';
+                    const oType = (f.fatherStatus === 'متوفى' && val === 'متوفاة') ? 'يتيم الوالدين (الأب والأم)' : (f.fatherStatus === 'متوفى' ? 'يتيم الأب' : (val === 'متوفاة' ? 'يتيم الأم' : f.orphanType));
+                    return { ...f, motherStatus: val, isOrphan: isNowOrphan, orphanType: oType };
+                  });
+                }}>
+                  <option value="على قيد الحياة">على قيد الحياة</option>
+                  <option value="متوفاة">متوفاة ⚰️</option>
+                </select>
               </div>
 
               <div className="field-group col-span-1">
@@ -1134,6 +1174,60 @@ export default function StudentForm({ studentId, onSaved, onCancel, activeSectio
                       <div className="field-group col-span-1">
                         <label className="field-label">المحافظة</label>
                         <input type="text" className="field-input" placeholder="الجيزة" value={form.transferredFromGovernorate} onChange={e => setF('transferredFromGovernorate', e.target.value)} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 7. رعاية الأيتام والتكافل الاجتماعي */}
+                <div style={{ background: form.isOrphan ? '#fff1f2' : '#f8fafc', border: `1px solid ${form.isOrphan ? '#f43f5e' : '#e2e8f0'}`, borderRadius: 12, padding: 14, transition: 'all 0.2s' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontWeight: 800, fontSize: 14.5 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 20 }}>🤲</span>
+                      <span>طالب يتيم (حصر الأيتام، التكافل الاجتماعي، وإعفاء المصروفات)</span>
+                    </div>
+                    <input type="checkbox" checked={form.isOrphan} onChange={e => {
+                      const chk = e.target.checked;
+                      setForm(f => ({
+                        ...f,
+                        isOrphan: chk,
+                        fatherStatus: chk ? (f.orphanType === 'يتيم الأم' ? 'على قيد الحياة' : 'متوفى') : f.fatherStatus,
+                        motherStatus: chk ? (f.orphanType === 'يتيم الأب' ? 'على قيد الحياة' : 'متوفاة') : f.motherStatus
+                      }));
+                    }} style={{ width: 18, height: 18, cursor: 'pointer' }} />
+                  </label>
+                  {form.isOrphan && (
+                    <div className="fields-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginTop: 12, paddingTop: 12, borderTop: '1px solid #fecdd3' }}>
+                      <div className="field-group col-span-1">
+                        <label className="field-label">تصنيف ونوع اليتم</label>
+                        <select className="field-input" value={form.orphanType || 'يتيم الأب'} onChange={e => {
+                          const val = e.target.value;
+                          setForm(f => ({
+                            ...f,
+                            orphanType: val,
+                            fatherStatus: (val === 'يتيم الأب' || val === 'يتيم الوالدين (الأب والأم)') ? 'متوفى' : 'على قيد الحياة',
+                            motherStatus: (val === 'يتيم الأم' || val === 'يتيم الوالدين (الأب والأم)') ? 'متوفاة' : 'على قيد الحياة'
+                          }));
+                        }}>
+                          <option value="يتيم الأب">يتيم الأب فقط</option>
+                          <option value="يتيم الأم">يتيم الأم فقط</option>
+                          <option value="يتيم الوالدين (الأب والأم)">يتيم الوالدين معاً (وفاة الأب والأم)</option>
+                        </select>
+                      </div>
+
+                      <div className="field-group col-span-1">
+                        <label className="field-label">رقم بحث الشؤون الاجتماعية / شهادة الوفاة</label>
+                        <input type="text" className="field-input" placeholder="رقم البحث أو وثيقة الوفاة..." value={form.socialResearchNumber} onChange={e => setF('socialResearchNumber', e.target.value)} />
+                      </div>
+
+                      <div className="field-group col-span-1">
+                        <label className="field-label">تاريخ البحث / القرار</label>
+                        <input type="date" className="field-input" value={form.socialResearchDate} onChange={e => setF('socialResearchDate', e.target.value)} />
+                      </div>
+
+                      <div className="field-group col-span-3">
+                        <label className="field-label">ملاحظات التكافل الاجتماعي والإعفاء</label>
+                        <input type="text" className="field-input" placeholder="ملاحظات الأخصائي الاجتماعي والإعفاء المعتمد من المصروفات..." value={form.orphanNotes} onChange={e => setF('orphanNotes', e.target.value)} />
                       </div>
                     </div>
                   )}

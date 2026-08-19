@@ -28,7 +28,7 @@ const prepPortraitSheet = {
   buildQuery: (f) => {
     const q = new URLSearchParams({
       status: 'all',
-      limit: 100,
+      limit: 'all',
       mode: 'prep_portrait',
     });
     if (f.classId)        q.set('classId', f.classId);

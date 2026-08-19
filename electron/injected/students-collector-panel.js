@@ -301,34 +301,34 @@
             if (mode === 'fast' || mode === 'turbo') {
                 return {
                     mode: 'fast',
-                    pollInterval: 70,
-                    settlingTime: 180,
-                    shortWait: 150,
-                    medWait: 350,
-                    maxSearchWait: 2000,
-                    searchPostSleep: 80
+                    pollInterval: 100,
+                    settlingTime: 600,
+                    shortWait: 500,
+                    medWait: 1000,
+                    maxSearchWait: 4000,
+                    searchPostSleep: 300
                 };
             }
             if (mode === 'safe') {
                 return {
                     mode: 'safe',
                     pollInterval: 200,
-                    settlingTime: 700,
-                    shortWait: 450,
-                    medWait: 900,
-                    maxSearchWait: 4500,
-                    searchPostSleep: 350
+                    settlingTime: 1200,
+                    shortWait: 1000,
+                    medWait: 2000,
+                    maxSearchWait: 7000,
+                    searchPostSleep: 600
                 };
             }
-            // balanced (default - fast & highly responsive)
+            // balanced (default - highly reliable & stable)
             return {
                 mode: 'balanced',
-                pollInterval: 100,
-                settlingTime: 300,
-                shortWait: 220,
-                medWait: 450,
-                maxSearchWait: 2800,
-                searchPostSleep: 120
+                pollInterval: 120,
+                settlingTime: 800,
+                shortWait: 700,
+                medWait: 1400,
+                maxSearchWait: 5000,
+                searchPostSleep: 400
             };
         },
 
@@ -1594,27 +1594,88 @@ body.gm-dark-mode {
             }
         },
 
+        // تحديد زر "بحث" الأساسي بدقة متناهية واستبعاد "المزيد من أدوات البحث"
+        findPrimarySearchButton() {
+            const candidates = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a.btn, a[role="button"]'));
+
+            const isSecondary = (text) => {
+                return /المزيد|أدوات|خيارات|متقدم|مسح|إلغاء|تفريغ|إعادة|ضبط|رجوع|تصدير|طباعة/i.test(text);
+            };
+
+            // 1. التطابق الدقيق الحرفي مع كلمة "بحث" أو "Search"
+            for (const b of candidates) {
+                const text = (b.innerText || b.value || b.getAttribute('title') || '').trim();
+                if (/^\s*(بحث|Search)\s*$/i.test(text)) {
+                    return b;
+                }
+            }
+
+            // 2. زر submit أو معرف صريح لا يحتوي على كلمات أدوات البحث الثانوية
+            for (const b of candidates) {
+                const text = (b.innerText || b.value || '').trim();
+                if ((b.type === 'submit' || b.id?.toLowerCase().includes('search') || b.className?.includes('btn-search')) && /بحث/i.test(text) && !isSecondary(text)) {
+                    return b;
+                }
+            }
+
+            // 3. فحص direct input/button submit
+            const direct = document.querySelector('button[type="submit"], input[type="submit"][value*="بحث"], #btnSearch, #btn_search');
+            if (direct && !isSecondary(direct.innerText || direct.value || '')) {
+                return direct;
+            }
+
+            // 4. أول زر يحتوي على "بحث" وليس زراً ثانوياً
+            for (const b of candidates) {
+                const text = (b.innerText || b.value || '').trim();
+                if (/بحث/i.test(text) && !isSecondary(text)) {
+                    return b;
+                }
+            }
+
+            return null;
+        },
+
         // تنفيذ البحث عن كود
         async executeSearchForCode(code) {
             const savedLevel = await Store.get('target_level_val');
-            const gradeEl    = Utils.findInputByLabelText('الصف');
-            if (gradeEl && gradeEl.value !== savedLevel) {
+            const gradeEl    = Utils.findInputByLabelText('الصف') || document.querySelector('select[name*="grade" i], select[id*="grade" i], select[name*="level" i], select[id*="level" i]');
+            if (gradeEl && savedLevel && gradeEl.value !== savedLevel) {
                 Utils.setInputValueAngular(gradeEl, savedLevel);
                 await Utils.sleep(CONFIG.WAIT_SHORT);
             }
-            const codeEl = Utils.findInputByLabelText('كود التلميذ');
-            if (!codeEl) { showToast('❌ لم يُعثر على حقل "كود التلميذ"!', 'error'); return false; }
-            Utils.setInputValueAngular(codeEl, code);
-            await Utils.sleep(500);
 
-            const nidEl = Utils.findInputByLabelText('الرقم القومى');
+            // إذا كان حقل الكود غير ظاهر ومخفياً، نفتحه عبر زر "المزيد من أدوات البحث" إن وُجد
+            let codeEl = Utils.findInputByLabelText('كود التلميذ') || Utils.findInputByLabelText('كود الطالب') || document.querySelector('input[name*="code" i], input[id*="code" i], input[placeholder*="كود" i]');
+            if (!codeEl || codeEl.offsetParent === null) {
+                const moreToolsBtn = Array.from(document.querySelectorAll('button, a.btn, a, span'))
+                    .find(b => /المزيد من أدوات البحث|أدوات البحث|بحث متقدم/i.test((b.innerText || b.textContent || '').trim()));
+                if (moreToolsBtn) {
+                    moreToolsBtn.click();
+                    await Utils.sleep(400);
+                    codeEl = Utils.findInputByLabelText('كود التلميذ') || Utils.findInputByLabelText('كود الطالب') || document.querySelector('input[name*="code" i], input[id*="code" i], input[placeholder*="كود" i]');
+                }
+            }
+
+            if (!codeEl) {
+                showToast('❌ لم يُعثر على حقل "كود التلميذ"!', 'error');
+                return false;
+            }
+
+            Utils.setInputValueAngular(codeEl, code);
+            await Utils.sleep(400);
+
+            const nidEl = Utils.findInputByLabelText('الرقم القومى') || document.querySelector('input[name*="national" i], input[id*="national" i]');
             if (nidEl?.value) Utils.setInputValueAngular(nidEl, '');
 
-            const searchBtn = Array.from(document.querySelectorAll('button'))
-                .find(b => b.innerText.trim() === CONFIG.SELECTORS.SEARCH_BTN_TEXT);
-            if (!searchBtn) { showToast('❌ لم يُعثر على زر "بحث"!', 'error'); return false; }
+            // الضغط على زر "بحث" الأساسي الحقيقي
+            const searchBtn = this.findPrimarySearchButton();
+            if (!searchBtn) {
+                showToast('❌ لم يُعثر على زر "بحث" الأساسي!', 'error');
+                return false;
+            }
+
             searchBtn.click();
-            showToast(`🔍 بحث عن: ${code}`, 'info');
+            showToast(`🔍 جاري البحث عن كود: ${code}`, 'info');
             return true;
         },
 
@@ -1647,7 +1708,7 @@ body.gm-dark-mode {
                 if (failedCodes.length > 0) {
                     showToast(`⚠️ تعذر تجميع ${failedCodes.length} أكواد بعد ${CONFIG.MAX_AUTO_RETRY} محاولات.`, 'error');
                 } else {
-                    showToast('🎉 اكتمل العمل! جميع الأكواد بنجاح.', 'success');
+                    showToast('🎉 اكتمل العمل! تم تجميع جميع الطلاب بنجاح.', 'success');
                     Utils.playDone();
                 }
 
@@ -1658,37 +1719,51 @@ body.gm-dark-mode {
 
                 const finalData = await Store.get('collected_data', []);
                 if (finalData.length > 0) {
-                    // إرسال لنبراس برو أولاً
                     await NeprasAPI.sendBatch(finalData);
-                    // ثم تصدير Excel احتياطياً
                     await Exporter.exportData(finalData, 'Final');
                     await Store.set('collected_data', []);
                 }
                 return;
             }
 
-            const delays = await Utils.getSpeedDelays();
             await UI.updateStats();
             const code    = targetCodes[currentIdx];
             const started = await this.executeSearchForCode(code);
-            if (!started) { await Store.set('collecting', false); return; }
+            if (!started) {
+                await Store.set('collecting', false);
+                UI.updateStatus('متوقف', false);
+                UI._setToggleBtn(false);
+                return;
+            }
 
-            // الانتظار الذكي الفوري لظهور رابط الطالب بدلاً من الانتظار الأعمى 3 ثواني
-            const link = await Utils.waitForElement(CONFIG.SELECTORS.STUDENT_LINK, delays.maxSearchWait, delays.pollInterval);
+            // انتظار تحميل نتيجة البحث واستقرار الجدول
+            await Utils.sleep(2200);
+
+            let link = document.querySelector(CONFIG.SELECTORS.STUDENT_LINK) ||
+                       document.querySelector('a[href*="/student/edit/" i], a[href*="/Student/edit/" i], a[href*="/edit/" i]');
+
+            // محاولة إضافية سريعة إن لم يظهر
+            if (!link) {
+                await Utils.sleep(1500);
+                link = document.querySelector(CONFIG.SELECTORS.STUDENT_LINK) ||
+                       document.querySelector('a[href*="/student/edit/" i], a[href*="/Student/edit/" i], a[href*="/edit/" i]');
+            }
+
             if (link) {
-                await Utils.sleep(delays.searchPostSleep);
+                showToast(`🚀 جاري فتح ملف الطالب [${code}]...`, 'success');
+                await Utils.sleep(300);
                 window.location.href = link.getAttribute('href');
             } else {
-                showToast(`⚠️ الكود ${code} غير موجود. تخطي وتسجيل كفاشل.`, 'warning');
+                showToast(`⚠️ الكود [${code}] غير موجود. تخطي وتسجيل كفاشل.`, 'warning');
                 let failed = await Store.get('failed_codes', []);
                 if (!failed.includes(code)) { failed.push(code); await Store.set('failed_codes', failed); }
                 await Store.set('current_code_index', currentIdx + 1);
-                await Utils.sleep(delays.shortWait);
+                await Utils.sleep(1000);
                 window.location.reload();
             }
         },
 
-        // صفحة التعديل: سحب البيانات والعودة الفورية
+        // صفحة التعديل: سحب البيانات والعودة
         async onEditPageCollectAndBack() {
             const collecting = await Store.get('collecting', false);
             if (!collecting) return;
@@ -1697,32 +1772,39 @@ body.gm-dark-mode {
             const currentIdx  = await Store.get('current_code_index', 0);
             const currentCode = targetCodes[currentIdx];
 
-            const delays = await Utils.getSpeedDelays();
+            showToast('⏳ جاري استخراج بيانات التلميذ...', 'info');
 
-            // 1. فحص فوري وسريع لجاهزية واستقرار الحقول في الصفحة
-            const hasFormData = () => {
-                const inputs = document.querySelectorAll(CONFIG.SELECTORS.FORM_INPUTS);
-                let filledCount = 0;
-                for (const inp of inputs) {
-                    if (inp.value && inp.value.trim().length > 0 && !['__VIEWSTATE', '__EVENTVALIDATION', '__EVENTTARGET', '__EVENTARGUMENT'].includes(inp.name)) {
-                        filledCount++;
-                        if (filledCount >= 3) return true;
-                    }
+            // 1. التحقق من اكتمال تحميل AJAX / UpdatePanel
+            const isAjaxActive = () => {
+                if (typeof Sys !== 'undefined' && Sys.WebForms && Sys.WebForms.PageRequestManager) {
+                    try { return Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack(); } catch (_) {}
                 }
-                const pageText = document.body.innerText || '';
-                if (/\b([23]\d{13})\b/.test(pageText)) return true;
+                if (typeof jQuery !== 'undefined' && jQuery.active > 0) return true;
                 return false;
             };
 
-            // 2. انتظار ذكي مرن: ينطلق فوراً بمجرد ظهور البيانات، وينتظر بصبر إذا كان السيرفر بطيئاً
+            // 2. التحقق من ظهور حقول الهوية الأساسية للطالب
+            const isCoreIdentityLoaded = () => {
+                const natInp = document.querySelector('input[name*="nat" i], input[id*="nat" i], span[id*="nat" i], span[id*="lblNational" i]');
+                if (natInp && (natInp.value || natInp.innerText)?.trim().length >= 10) return true;
+
+                const nameInp = document.querySelector('input[name*="name" i], input[id*="name" i], input[name*="txt_name" i], span[id*="name" i]');
+                if (nameInp && (nameInp.value || nameInp.innerText)?.trim().length >= 3) return true;
+
+                const pageText = document.body.innerText || '';
+                if (/\b([23]\d{13})\b/.test(pageText)) return true;
+
+                return false;
+            };
+
+            // 3. انتظار استقرار وتحميل البيانات
             let elapsed = 0;
-            const maxWait = delays.mode === 'safe' ? 8000 : (delays.mode === 'fast' ? 3500 : 5000);
-            while (elapsed < maxWait) {
-                if (hasFormData()) break;
-                await Utils.sleep(50);
-                elapsed += 50;
+            while (elapsed < 12000) {
+                if (isCoreIdentityLoaded() && !isAjaxActive()) break;
+                await Utils.sleep(300);
+                elapsed += 300;
             }
-            await Utils.sleep(delays.settlingTime);
+            await Utils.sleep(800);
 
             try {
                 const studentData = {};
@@ -1800,7 +1882,7 @@ body.gm-dark-mode {
                 console.error('[Ext] Scraping Error:', err);
             }
 
-            await Utils.sleep(delays.shortWait);
+            await Utils.sleep(CONFIG.WAIT_SHORT);
             const listUrl = await Store.get('list_page_url', '/student/list');
             window.location.href = listUrl;
         }

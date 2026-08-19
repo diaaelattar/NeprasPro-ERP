@@ -210,38 +210,38 @@ function EnrollmentStatusCensusPreview({ students, meta, schoolInfo }) {
     <div className="report-preview" id="print-area" data-orientation="landscape" style={{ background: '#fff', color: '#000', fontFamily: "'Amiri', 'Segoe UI', Tahoma, sans-serif" }}>
       <div className="printable-page-block" style={{ padding: '10px 15px', minHeight: 'auto', boxSizing: 'border-box' }}>
 
-        {/* ── الترويسة الرسمية للتقرير ────────────────────────────────────── */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', direction: 'rtl', marginBottom: 14 }}>
-          
+        {/* ── الترويسة القياسية الرسمية للتقرير ────────────────────────────────────── */}
+        <div className="report-official-header" style={{
+          marginBottom: 10,
+          paddingBottom: 8,
+          borderBottom: '2px solid #000',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          direction: 'rtl'
+        }}>
           {/* الجانب الأيمن: بيانات المحافظة والإدارة والمدرسة الفعلية */}
-          <div style={{ textAlign: 'right', fontSize: '14px', lineHeight: '1.6', fontWeight: 700, minWidth: '180px' }}>
-            <div>محافظة: <strong>{schoolInfo.governorate || '................'}</strong></div>
-            <div>إدارة: <strong>{schoolInfo.directorate ? `${schoolInfo.directorate} التعليمية` : '................'}</strong></div>
-            <div>مدرسة: <strong>{schoolInfo.schoolName || '................'}</strong></div>
+          <div className="header-col-right" style={{ textAlign: 'right', fontSize: '12.5pt', lineHeight: 1.5, fontWeight: 700, width: '33%' }}>
+            <div>مديرية التربية والتعليم بمحافظة: <strong>{schoolInfo.governorate || '................'}</strong></div>
+            <div>إدارة: <strong>{schoolInfo.directorate ? `${schoolInfo.directorate.replace(/^إدارة\s*/, '').replace(/التعليمية\s*$/, '')} التعليمية` : '................'}</strong></div>
+            <div>مدرسة: <strong>{(schoolInfo.schoolName || schoolInfo.school_name || '').replace(/^مدرسة\s*/, '') || '................'}</strong></div>
           </div>
 
           {/* المنتصف: عنوان التقرير والعام الدراسي الفعلي */}
-          <div style={{ textAlign: 'center', flex: 1, padding: '0 10px' }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 900, margin: '0 0 4px 0', textDecoration: 'underline', color: '#000', letterSpacing: '0.3px' }}>
+          <div className="header-col-center" style={{ textAlign: 'center', flex: 1 }}>
+            <h2 className="report-title-main" style={{ fontSize: '16pt', fontWeight: 900, margin: 0, textDecoration: 'underline', color: '#000' }}>
               إحصاء حالات القيد والتسجيل للتلاميذ
             </h2>
-            <div style={{ fontSize: '15px', fontWeight: 800, textDecoration: 'underline', color: '#000' }}>
-              للعام الدراسي: {currentActiveYear} م
+            <div className="report-subtitle-meta" style={{ fontSize: '12.5pt', fontWeight: 800, color: '#1e293b', marginTop: 3 }}>
+              للعام الدراسي: <strong>{currentActiveYear} م</strong> | إجمالي الطلاب المقيدين: <strong>{students?.length || 0}</strong> طالب
             </div>
           </div>
 
-          {/* الجانب الأيسر: الشعار والتاريخ والوقت */}
-          <div style={{ textAlign: 'left', minWidth: '180px' }}>
-            {schoolInfo.logoUrl ? (
-              <img src={schoolInfo.logoUrl} alt="Logo" style={{ maxHeight: 48, maxWidth: 90, objectFit: 'contain' }} />
-            ) : (
-              <div style={{ display: 'inline-block', textAlign: 'center', border: '1px dashed #cbd5e1', padding: '4px 8px', borderRadius: 4 }}>
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#334155' }}>شعار المدرسة</div>
-              </div>
-            )}
-            <div style={{ fontSize: '11px', color: '#334155', marginTop: 4, direction: 'rtl', textAlign: 'left', fontWeight: 600 }}>
-              {new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })} {new Date().toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })}
-            </div>
+          {/* الجانب الأيسر: العام والتاريخ وكود النموذج */}
+          <div className="header-col-left" style={{ textAlign: 'left', fontSize: '12.5pt', fontWeight: 700, width: '30%', lineHeight: 1.5 }}>
+            <div>العام الدراسي: <strong>{currentActiveYear} م</strong></div>
+            <div>تاريخ الاعتماد: <strong>{new Date().toLocaleDateString('ar-EG')}</strong></div>
+            <div>كود الاستمارة: <strong>NEP-ENROLLMENT-STATUS</strong></div>
           </div>
         </div>
 
@@ -369,7 +369,7 @@ function EnrollmentStatusCensusPreview({ students, meta, schoolInfo }) {
 const enrollmentStatusCensus = {
   id: 'enrollment-status-census',
   name: 'إحصاء حالات القيد',
-  category: 'إحصائيات',
+  category: 'الإحصائيات والتحليلات الرسمية',
   icon: '📊',
   orientation: 'landscape',
   filters: {

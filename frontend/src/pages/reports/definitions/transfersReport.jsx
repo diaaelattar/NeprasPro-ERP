@@ -93,7 +93,7 @@ const transfersReport = {
   id:          'transfers_report',
   name:        'سجل حركة التحويلات السنوي',
   desc:        'سجل كامل للتحويلات الصادرة والواردة وأسبابها',
-  category:    'سجلات أخرى',
+  category:    'سجلات القيد والمناداة',
   icon:        '🔃',
   orientation: 'portrait',
   available:   true,

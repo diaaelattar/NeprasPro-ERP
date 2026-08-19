@@ -2,25 +2,8 @@
 //  Report Definition: سجل قيد تلاميذ الصف (سجل 41 د - الطباعة الرسمية)
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
-
-/* ── helpers ───────────────────────────────────────────────────── */
-const calculateAgeOnOct1st = (birthDateStr, yearLabel) => {
-  if (!birthDateStr) return { days: '', months: '', years: '' };
-  let targetYear = new Date().getFullYear();
-  if (yearLabel) {
-    const match = yearLabel.match(/(\d{4})/);
-    if (match) targetYear = parseInt(match[1]);
-  }
-  const birth = new Date(birthDateStr);
-  if (isNaN(birth.getTime())) return { days: '', months: '', years: '' };
-  const target = new Date(targetYear, 9, 1);
-  let years  = target.getFullYear() - birth.getFullYear();
-  let months = target.getMonth()    - birth.getMonth();
-  let days   = target.getDate()     - birth.getDate();
-  if (days   < 0) { months--; days   += new Date(target.getFullYear(), target.getMonth(), 0).getDate(); }
-  if (months < 0) { years--;  months += 12; }
-  return { days, months, years };
-};
+import RegisterStatsPage from '../RegisterStatsPage';
+import { calculateAgeOnOct1st } from '../../../constants/lookupOptions';
 
 const STATUS_LABELS = {
   promoted: 'منقول',
@@ -228,55 +211,7 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
             </table>
           </div>
 
-          {/* ── Statistical Summary Table at the End of the Register (On the Last Page) ── */}
-          {pageIndex === totalPages - 1 && (
-            <div style={{ marginTop: 8, marginBottom: 4, pageBreakInside: 'avoid' }}>
-              <div style={{ fontWeight: 800, fontSize: 10.5, marginBottom: 2, textAlign: 'right', color: '#0f172a' }}>
-                📊 جدول إحصائي شامل بطلاب الصف:
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', fontSize: 9, textAlign: 'center' }}>
-                <thead>
-                  <tr style={{ background: '#e2e8f0', fontWeight: 800 }}>
-                    <th style={{ border: '1px solid #000', padding: '2px' }}>عدد الفصول</th>
-                    <th colSpan="3" style={{ border: '1px solid #000', padding: '2px', background: '#cbd5e1' }}>الديانة المسلمة</th>
-                    <th colSpan="3" style={{ border: '1px solid #000', padding: '2px', background: '#cbd5e1' }}>الديانة المسيحية</th>
-                    <th colSpan="3" style={{ border: '1px solid #000', padding: '2px', background: '#bfdbfe' }}>الإجمالي العام</th>
-                    <th style={{ border: '1px solid #000', padding: '2px' }}>الدمج</th>
-                  </tr>
-                  <tr style={{ background: '#f1f5f9', fontWeight: 700, fontSize: 8.5 }}>
-                    <th style={{ border: '1px solid #000', padding: '2px' }}>فصول</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنين</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنات</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 50 }}>جملة</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنين</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 45 }}>بنات</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 50 }}>جملة</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 50, background: '#dbeafe' }}>بنين</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 50, background: '#dbeafe' }}>بنات</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 60, background: '#93c5fd', fontWeight: 900 }}>الجملة</th>
-                    <th style={{ border: '1px solid #000', padding: '2px', width: 55 }}>طلاب دمج</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ fontWeight: 800, fontSize: 10, background: '#fff' }}>
-                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.classesCount}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.muslimBoys}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.muslimGirls}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px', background: '#f8fafc' }}>{stats.muslimTotal}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.christianBoys}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.christianGirls}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px', background: '#f8fafc' }}>{stats.christianTotal}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px', background: '#eff6ff' }}>{stats.boys}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px', background: '#eff6ff' }}>{stats.girls}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px', background: '#bfdbfe', fontSize: 11, fontWeight: 900 }}>{stats.total}</td>
-                    <td style={{ border: '1px solid #000', padding: '2px' }}>{stats.mergedCount}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Standard Official 4-Column Signatures Footer (Repeated on every page) */}
+          {/* Standard Official 4-Column Signatures Footer (Repeated on every student page) */}
           <div className="official-signatures-footer" style={{ marginTop: 8, paddingTop: 4, borderTop: '1.5px solid #1e3a8a', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', textAlign: 'center', fontSize: 9.5, fontWeight: 800 }}>
             <div>
               <div>مسؤول شئون الطلاب (كاتب السجل)</div>
@@ -296,10 +231,22 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
             </div>
           </div>
           <div style={{ textAlign: 'center', fontSize: 8.5, color: '#64748b', marginTop: 2 }}>
-            صفحة ({pageIndex + 1}) من ({totalPages})
+            صفحة ({pageIndex + 1}) من ({totalPages + 1})
           </div>
         </div>
       ))}
+
+      {/* ══ صفحة الإحصاء الختامي المستقلة تماماً (صفحة خاصة منفصلة في نهاية السجل) ══ */}
+      <RegisterStatsPage
+        title="سجل قيد تلاميذ الصف"
+        subTitle={selectedGrade?.grade_name_ar ? `للصف: ${selectedGrade.grade_name_ar}` : ''}
+        registerCode="سجل 41 د"
+        students={students}
+        meta={meta}
+        schoolInfo={schoolInfo}
+        pageIndex={totalPages + 1}
+        totalPages={totalPages + 1}
+      />
     </div>
   );
 }
@@ -309,7 +256,7 @@ const studentRegister = {
   id:          'student_register',
   name:        'سجل القيد',
   desc:        'سجل قيد تلاميذ الصف المعتمد والمفصل',
-  category:    'سجلات القيد',
+  category:    'سجلات القيد والمناداة',
   icon:        '📋',
   orientation: 'landscape',
   available:   true,
@@ -337,12 +284,13 @@ const studentRegister = {
     if (filters.stageId)        q.set('stageId', filters.stageId);
     if (filters.gradeId && filters.gradeId !== 'all_stage') q.set('gradeId', filters.gradeId);
     if (filters.classId && filters.classId !== 'all_grade' && filters.classId !== 'all_stage') q.set('classId', filters.classId);
+    q.set('templateName', 'sgl_all');
     return `/api/students/export/excel?${q.toString()}`;
   },
 
   excelFileName: (filters, meta) => {
     const gradeName = meta.selectedGrade?.grade_name_ar || 'الصف';
-    return `سجل_قيد_الطلاب_${gradeName}.xlsx`;
+    return `سجل_قيد_الطلاب_${gradeName}.xlsm`;
   },
 
   PreviewComponent: StudentRegisterPreview
