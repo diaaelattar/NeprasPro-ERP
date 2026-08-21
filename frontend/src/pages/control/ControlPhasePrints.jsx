@@ -12,6 +12,10 @@ import {
 import { MinisterialPrintHeader, MinisterialPrintFooter } from '../../components/common/MinisterialPrintHeader';
 import { printElementById } from '../../utils/printHelper';
 
+// Fix: window.location.hostname is empty string in Electron (file:// protocol) → always use 127.0.0.1
+const _apiHost = (typeof window !== 'undefined' && window.location?.hostname?.trim()) ? window.location.hostname : '127.0.0.1';
+
+
 // Second language codes and labels helper (FR, GE, IT, SP)
 export const getSecondLangInfo = (langStr) => {
   if (!langStr) return null;
@@ -164,7 +168,7 @@ export default function ControlPhasePrints({
   const fetchControlMarks = async (termNum = 1) => {
     if (!gradeId) return;
     try {
-      const res = await fetch(`http://${window.location.hostname}:3001/api/control/marks?gradeId=${gradeId}&term=${termNum}`);
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks?gradeId=${gradeId}&term=${termNum}`);
       const data = await res.json();
       if (data.success && data.marks) {
         const map = {};
@@ -202,7 +206,7 @@ export default function ControlPhasePrints({
   const fetchResultsSummary = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:3001/api/control/results-summary?gradeId=${gradeId}`);
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/results-summary?gradeId=${gradeId}`);
       const data = await res.json();
       if (data.success) {
         setReportResults(data);
@@ -279,7 +283,7 @@ export default function ControlPhasePrints({
     if (schoolInfo && Object.keys(schoolInfo).length > 0) {
       setLocalSchoolInfo(schoolInfo);
     } else {
-      fetch(`http://${window.location.hostname}:3001/api/setup/status`)
+      fetch(`http://\$\{_apiHost\}:3001/api/setup/status`)
         .then(r => r.json())
         .then(d => {
           if (d?.institution) setLocalSchoolInfo(d.institution);

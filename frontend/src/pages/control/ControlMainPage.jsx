@@ -10,7 +10,9 @@ import {
 import ControlPhasePrints from './ControlPhasePrints';
 import { sortStudentsByGenderAndName, isBoy, isGirl } from '../../utils/studentSorter';
 
-const API_BASE = `http://${window.location.hostname}:3001/api/control`;
+// Fix: window.location.hostname is empty string in Electron (file:// protocol) → always use 127.0.0.1
+const _apiHost = (typeof window !== 'undefined' && window.location?.hostname?.trim()) ? window.location.hostname : '127.0.0.1';
+const API_BASE = `http://${_apiHost}:3001/api/control`;
 
 export default function ControlMainPage({
   externalActiveTab,
@@ -196,7 +198,7 @@ export default function ControlMainPage({
 
   const fetchSchoolInfo = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:3001/api/setup/status`);
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/setup/status`);
       const data = await res.json();
       if (data && data.institution) {
         setSchoolInfo(data.institution);
@@ -3214,7 +3216,7 @@ function MarksEntryPanel({
         payload.writtenMarks = item.is_absent || item.is_exempt ? 0 : numVal;
       }
 
-      const res = await fetch(`http://${window.location.hostname}:3001/api/control/marks/single`, {
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks/single`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -3339,7 +3341,7 @@ function MarksEntryPanel({
     setAutoSaveStatus('saving');
 
     try {
-      const res = await fetch(`http://${window.location.hostname}:3001/api/control/marks`, {
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ marks: payload, term, academicYearId: 1 })
@@ -3373,7 +3375,7 @@ function MarksEntryPanel({
   const fetchMarksAndStudents = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://${window.location.hostname}:3001/api/control/marks?gradeId=${gradeId}&term=${term}&classId=${selectedClassId}`);
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks?gradeId=${gradeId}&term=${term}&classId=${selectedClassId}`);
       const data = await res.json();
       if (data.success) {
         setStudents(data.students || []);
@@ -3512,7 +3514,7 @@ function MarksEntryPanel({
         });
       });
 
-      const res = await fetch(`http://${window.location.hostname}:3001/api/control/marks`, {
+      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ marks: marksPayload, term, academicYearId: 1 })

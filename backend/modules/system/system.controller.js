@@ -80,16 +80,59 @@ const getSystemInfo = async (req, res) => {
 
 // ─── GET /api/system/check-updates ─────────────────────────────────────────
 const checkUpdates = async (req, res) => {
-  const currentVersion = packageJson.version;
+  const currentVersion = packageJson.version || '1.0.0';
   try {
-    const releaseData = await fetchJson(GITHUB_API_LATEST);
+    let releaseData;
+    try {
+      releaseData = await fetchJson(GITHUB_API_LATEST);
+    } catch (fetchErr) {
+      // Handle HTTP 404: no published releases yet
+      if (fetchErr.message && fetchErr.message.includes('HTTP 404')) {
+        return res.json({
+          success: true,
+          currentVersion,
+          latestVersion: currentVersion,
+          hasUpdate: false,
+          releaseTitle: `الإصدار ${currentVersion} (لا توجد إصدارات منشورة بعد)`,
+          releaseNotes: 'لم يتم نشر أي إصدار رسمي على GitHub بعد. أنت تستخدم النسخة الحالية من المنظومة.',
+          publishedAt: null,
+          downloadUrl: `https://github.com/${GITHUB_REPO}`,
+          fileName: null,
+          fileSizeBytes: 0,
+          portalUrl: PORTAL_URL,
+          githubReleaseUrl: `https://github.com/${GITHUB_REPO}/releases`,
+          noReleasesYet: true
+        });
+      }
+      throw fetchErr; // Re-throw other errors (network, timeout, etc.)
+    }
+
     const remoteTag = releaseData.tag_name || releaseData.name || '';
     const remoteVersion = remoteTag.replace(/^v/i, '').trim();
-    
+
+    // If remoteVersion is empty, treat as no update available
+    if (!remoteVersion) {
+      return res.json({
+        success: true,
+        currentVersion,
+        latestVersion: currentVersion,
+        hasUpdate: false,
+        releaseTitle: 'لا توجد إصدارات منشورة حالياً',
+        releaseNotes: 'لم يتم نشر أي إصدار رسمي على GitHub بعد.',
+        publishedAt: null,
+        downloadUrl: `https://github.com/${GITHUB_REPO}/releases`,
+        fileName: null,
+        fileSizeBytes: 0,
+        portalUrl: PORTAL_URL,
+        githubReleaseUrl: `https://github.com/${GITHUB_REPO}/releases`,
+        noReleasesYet: true
+      });
+    }
+
     // Find Windows installer asset (.exe)
-    const exeAsset = (releaseData.assets || []).find(a => 
+    const exeAsset = (releaseData.assets || []).find(a =>
       a.name.endsWith('.exe') && !a.name.endsWith('.blockmap')
-    ) || (releaseData.assets || [])[0];
+    ) || (releaseData.assets || [])[0] || null;
 
     const hasUpdate = compareVersions(remoteVersion, currentVersion) > 0;
 
@@ -100,7 +143,7 @@ const checkUpdates = async (req, res) => {
       hasUpdate,
       releaseTitle: releaseData.name || `الإصدار ${remoteTag}`,
       releaseNotes: releaseData.body || 'تحسينات وإصلاحات عامة في أداء المنظومة.',
-      publishedAt: releaseData.published_at,
+      publishedAt: releaseData.published_at || null,
       downloadUrl: exeAsset ? exeAsset.browser_download_url : releaseData.html_url,
       fileName: exeAsset ? exeAsset.name : `NeprasPro-ERP-Setup-${remoteVersion}.exe`,
       fileSizeBytes: exeAsset ? exeAsset.size : 0,
