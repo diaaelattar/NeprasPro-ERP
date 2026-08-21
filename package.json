@@ -1,6 +1,6 @@
 {
   "name": "nepras-pro",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "NeprasPro School ERP Desktop App — Enterprise Edition",
   "author": "NeprasPro Educational ERP (Copyright © 2026)",
   "main": "electron/main.js",

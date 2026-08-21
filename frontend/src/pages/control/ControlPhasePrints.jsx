@@ -168,7 +168,7 @@ export default function ControlPhasePrints({
   const fetchControlMarks = async (termNum = 1) => {
     if (!gradeId) return;
     try {
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks?gradeId=${gradeId}&term=${termNum}`);
+      const res = await fetch(`http://${_apiHost}:3001/api/control/marks?gradeId=${gradeId}&term=${termNum}`);
       const data = await res.json();
       if (data.success && data.marks) {
         const map = {};
@@ -206,7 +206,7 @@ export default function ControlPhasePrints({
   const fetchResultsSummary = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/results-summary?gradeId=${gradeId}`);
+      const res = await fetch(`http://${_apiHost}:3001/api/control/results-summary?gradeId=${gradeId}`);
       const data = await res.json();
       if (data.success) {
         setReportResults(data);
@@ -283,7 +283,7 @@ export default function ControlPhasePrints({
     if (schoolInfo && Object.keys(schoolInfo).length > 0) {
       setLocalSchoolInfo(schoolInfo);
     } else {
-      fetch(`http://\$\{_apiHost\}:3001/api/setup/status`)
+      fetch(`http://${_apiHost}:3001/api/setup/status`)
         .then(r => r.json())
         .then(d => {
           if (d?.institution) setLocalSchoolInfo(d.institution);

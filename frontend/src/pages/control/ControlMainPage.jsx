@@ -198,7 +198,7 @@ export default function ControlMainPage({
 
   const fetchSchoolInfo = async () => {
     try {
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/setup/status`);
+      const res = await fetch(`http://${_apiHost}:3001/api/setup/status`);
       const data = await res.json();
       if (data && data.institution) {
         setSchoolInfo(data.institution);
@@ -3216,7 +3216,7 @@ function MarksEntryPanel({
         payload.writtenMarks = item.is_absent || item.is_exempt ? 0 : numVal;
       }
 
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks/single`, {
+      const res = await fetch(`http://${_apiHost}:3001/api/control/marks/single`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -3341,7 +3341,7 @@ function MarksEntryPanel({
     setAutoSaveStatus('saving');
 
     try {
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks`, {
+      const res = await fetch(`http://${_apiHost}:3001/api/control/marks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ marks: payload, term, academicYearId: 1 })
@@ -3375,7 +3375,7 @@ function MarksEntryPanel({
   const fetchMarksAndStudents = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks?gradeId=${gradeId}&term=${term}&classId=${selectedClassId}`);
+      const res = await fetch(`http://${_apiHost}:3001/api/control/marks?gradeId=${gradeId}&term=${term}&classId=${selectedClassId}`);
       const data = await res.json();
       if (data.success) {
         setStudents(data.students || []);
@@ -3514,7 +3514,7 @@ function MarksEntryPanel({
         });
       });
 
-      const res = await fetch(`http://\$\{_apiHost\}:3001/api/control/marks`, {
+      const res = await fetch(`http://${_apiHost}:3001/api/control/marks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ marks: marksPayload, term, academicYearId: 1 })

@@ -121,11 +121,12 @@ const syncStudents = async (req, res) => {
       students.forEach(s => {
         const existing = _get(sqliteDb, "SELECT id FROM control_students WHERE national_id = ? OR student_id = ?", [s.national_id, s.id]);
         if (existing) {
+          const isMerged = s.is_merged === 1 || s.is_merged === '1' || s.is_merged === 'true' || s.is_merged === true;
           sqliteDb.run(`
             UPDATE control_students
             SET student_id = ?, grade_id = ?, second_language = ?, inclusion_status = ?, synced_at = datetime('now')
             WHERE id = ?
-          `, [s.id, s.grade_id, s.second_language || 'لا يوجد', s.is_merged ? (s.merge_type || 'دمج') : 'عادي', existing.id]);
+          `, [s.id, s.grade_id, s.second_language || 'لا يوجد', isMerged ? (s.merge_type || 'دمج') : 'عادي', existing.id]);
           updated++;
         } else {
           // Compute incremental seat number if seat numbers already exist for this grade
@@ -138,10 +139,11 @@ const syncStudents = async (req, res) => {
           const maxSec2Obj = _get(sqliteDb, "SELECT MAX(secret_code_term2) AS maxSec2 FROM control_students WHERE grade_id = ?", [s.grade_id]);
           const newSec2 = (maxSec2Obj && maxSec2Obj.maxSec2 > 0) ? (maxSec2Obj.maxSec2 + 1) : null;
 
+          const isMerged = s.is_merged === 1 || s.is_merged === '1' || s.is_merged === 'true' || s.is_merged === true;
           sqliteDb.run(`
             INSERT INTO control_students (student_id, national_id, grade_id, seat_number, secret_code_term1, secret_code_term2, second_language, inclusion_status, synced_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-          `, [s.id, s.national_id, s.grade_id, newSeat, newSec1, newSec2, s.second_language || 'لا يوجد', s.is_merged ? (s.merge_type || 'دمج') : 'عادي']);
+          `, [s.id, s.national_id, s.grade_id, newSeat, newSec1, newSec2, s.second_language || 'لا يوجد', isMerged ? (s.merge_type || 'دمج') : 'عادي']);
           inserted++;
         }
       });
