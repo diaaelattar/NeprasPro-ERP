@@ -3,6 +3,7 @@
 //  الترويسة الثلاثية القياسية + الفرز بالنوع والفصول + التذييل الرسمي الرباعي
 // ════════════════════════════════════════════════════════════════
 import React, { useMemo } from 'react';
+import { isBoy } from '../../../utils/studentSorter';
 
 const HEALTH_CHECKS = [
   { id: 'vision',   label: 'البصر' },
@@ -62,8 +63,8 @@ function HealthListPreview({ students = [], meta = {}, schoolInfo = {} }) {
       }
 
       // 2. فرز النوع المختار
-      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
-      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
+      const isBoyA = isBoy(a);
+      const isBoyB = isBoy(b);
 
       if (order === 'boys_first') {
         if (isBoyA && !isBoyB) return -1;

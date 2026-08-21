@@ -163,11 +163,79 @@ h2 { font-size: 22px; font-weight: 800; color: var(--text-primary); margin-botto
   display: flex; flex-direction: column;
   box-shadow: -2px 0 8px rgba(0,0,0,0.15);
   overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dashboard-sidebar.collapsed {
+  width: 64px;
+}
+
+.dashboard-sidebar.collapsed .sidebar-brand span,
+.dashboard-sidebar.collapsed .school-tagline,
+.dashboard-sidebar.collapsed .nav-item span,
+.dashboard-sidebar.collapsed .nav-submenu,
+.dashboard-sidebar.collapsed .section-scope-panel,
+.dashboard-sidebar.collapsed .user-name-mini,
+.dashboard-sidebar.collapsed .sidebar-footer div > div:last-child,
+.dashboard-sidebar.collapsed .logout-btn-text {
+  display: none !important;
+}
+
+.dashboard-sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 14px 4px;
+  gap: 0;
+}
+
+.dashboard-sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 12px 0;
+  border-right: none;
+  border-left: 3px solid transparent;
+}
+
+.dashboard-sidebar.collapsed .nav-item.active {
+  border-left-color: var(--sidebar-active-border, #f59e0b);
+}
+
+.dashboard-sidebar.collapsed .sidebar-footer {
+  padding: 8px 4px;
+}
+
+.dashboard-sidebar.collapsed .user-info-mini {
+  justify-content: center;
+  padding: 6px 0;
+  margin-bottom: 6px;
+}
+
+.dashboard-sidebar.collapsed .logout-btn {
+  padding: 8px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.sidebar-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.sidebar-toggle-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
 }
 
 .sidebar-brand {
   display: flex; align-items: center; gap: 10px;
-  padding: 18px 16px 10px;
+  padding: 16px 14px 10px;
   font-size: 16px; font-weight: 800;
   color: #fff;
   border-bottom: 2px solid var(--sidebar-active-border, #f59e0b);
@@ -335,3 +403,45 @@ h2 { font-size: 22px; font-weight: 800; color: var(--text-primary); margin-botto
 .pulse-animation { animation: pulseGlow 2s infinite ease-in-out; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 0.8s linear infinite; }
+
+/* ─── CUSTOM SCROLLBARS ─── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid #f1f5f9;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+.custom-scroll-container {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  max-height: calc(100vh - 270px);
+  scrollbar-width: thin;
+  scrollbar-color: #0284c7 #e2e8f0;
+}
+.custom-scroll-container::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.custom-scroll-container::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 6px;
+}
+.custom-scroll-container::-webkit-scrollbar-thumb {
+  background: #0284c7;
+  border-radius: 6px;
+}
+.custom-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #0369a1;
+}
+

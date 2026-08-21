@@ -3,7 +3,7 @@ import {
   Database, Shield, Layers, ArrowLeft, ArrowRight, CheckCircle2, 
   Activity, Settings, Lock, FileText, UserPlus, HelpCircle,
   GraduationCap, Users, UserCheck, Calendar, DollarSign, BookOpen, FileSpreadsheet,
-  ShieldAlert, ShieldCheck
+  ShieldAlert, ShieldCheck, Sliders, RefreshCw, Award, Menu, PanelLeftClose, PanelLeftOpen, LogOut
 } from 'lucide-react';
 import './App.css';
 import StudentsList   from './pages/students/StudentsList';
@@ -43,6 +43,23 @@ function App() {
   const [initialized, setInitialized] = useState(false);
   const [schoolName, setSchoolName] = useState('');
   const [schoolLogo, setSchoolLogo] = useState(null);
+
+  // Sidebar Hamburger / Collapsed state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('nepras_sidebar_collapsed') === 'true';
+    } catch (_) {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('nepras_sidebar_collapsed', String(next)); } catch (_) {}
+      return next;
+    });
+  };
 
   // Online Auto-Updater state
   const [updateInfo,      setUpdateInfo]      = useState(null);
@@ -698,81 +715,343 @@ function App() {
     return (
       <div className="dashboard-container">
         {/* Sidebar */}
-        <aside className="dashboard-sidebar">
-          <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {schoolLogo ? (
-              <img 
-                src={schoolLogo} 
-                alt="Logo" 
-                style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6 }} 
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
-            ) : (
-              <span style={{ fontSize: 22 }}>🏛️</span>
-            )}
-            <span>نبراس برو ERP</span>
+        <aside className={`dashboard-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+          <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: sidebarCollapsed ? 'pointer' : 'default', overflow: 'hidden' }} onClick={sidebarCollapsed ? toggleSidebar : undefined}>
+              {schoolLogo ? (
+                <img 
+                  src={schoolLogo} 
+                  alt="Logo" 
+                  style={{ width: 30, height: 30, objectFit: 'contain', borderRadius: 6, flexShrink: 0 }} 
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              ) : (
+                <span style={{ fontSize: 20, flexShrink: 0 }}>🏛️</span>
+              )}
+              {!sidebarCollapsed && <span style={{ whiteSpace: 'nowrap' }}>نبراس برو ERP</span>}
+            </div>
+            <button
+              className="sidebar-toggle-btn"
+              onClick={toggleSidebar}
+              title={sidebarCollapsed ? 'توسيع القائمة الجانبية' : 'طي القائمة الجانبية'}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
           </div>
-          <p className="school-tagline">{schoolName}</p>
+          {!sidebarCollapsed && <p className="school-tagline">{schoolName}</p>}
 
           <nav className="sidebar-nav">
             {/* 1. STUDENTS DOMAIN WORKSPACE */}
             {activeWorkspace?.domain === 'students' && (
               <>
-                <div className={`nav-item ${isStudentsModule ? 'active' : ''}`}
-                     onClick={goToStudentsList}>
-                  <GraduationCap size={18} /> <span>شئون الطلاب والقبول</span>
+                <div
+                  className={`nav-item ${isStudentsModule ? 'active' : ''}`}
+                  onClick={goToStudentsList}
+                  title={sidebarCollapsed ? 'شئون الطلاب والقبول' : ''}
+                >
+                  <GraduationCap size={18} /> {!sidebarCollapsed && <span>شئون الطلاب والقبول</span>}
                 </div>
-                <div className="nav-submenu">
-                  <div className={`nav-subitem ${currentPage === 'students-list' ? 'active' : ''}`}
-                       onClick={goToStudentsList}>
-                    <span>•</span> <span>قائمة الطلاب والقيد</span>
+                {!sidebarCollapsed && (
+                  <div className="nav-submenu">
+                    <div className={`nav-subitem ${currentPage === 'students-list' ? 'active' : ''}`}
+                         onClick={goToStudentsList}>
+                      <span>•</span> <span>قائمة الطلاب والقيد</span>
+                    </div>
+                    <div className={`nav-subitem ${currentPage === 'students-quick-edit' ? 'active' : ''}`}
+                         onClick={goToQuickEdit}>
+                      <span>•</span> <span>تعديل سريع</span>
+                    </div>
+                    <div className={`nav-subitem ${currentPage === 'students-distribute' ? 'active' : ''}`}
+                         onClick={goToDistribute}>
+                      <span>•</span> <span>توزيع الفصول</span>
+                    </div>
+                    <div className={`nav-subitem ${currentPage === 'students-transfers' ? 'active' : ''}`}
+                         onClick={goToTransfers}>
+                      <span>•</span> <span>التحويلات المدرسية</span>
+                    </div>
+                    <div className={`nav-subitem ${currentPage === 'student-absence' ? 'active' : ''}`}
+                         onClick={() => setCurrentPage('student-absence')}>
+                      <span>•</span> <span>إنذارات الغياب والقيد</span>
+                    </div>
+                    <div className={`nav-subitem ${currentPage === 'students-reports' ? 'active' : ''}`}
+                         onClick={() => setCurrentPage('students-reports')}>
+                      <span>•</span> <span>التقارير وسجلات القيد</span>
+                    </div>
+                    <div className={`nav-subitem ${currentPage === 'emis-sync' ? 'active' : ''}`}
+                         onClick={goToEMISSync}>
+                      <span>•</span> <span>🔗 مزامنة EMIS</span>
+                    </div>
                   </div>
-                  <div className={`nav-subitem ${currentPage === 'students-quick-edit' ? 'active' : ''}`}
-                       onClick={goToQuickEdit}>
-                    <span>•</span> <span>تعديل سريع</span>
-                  </div>
-                  <div className={`nav-subitem ${currentPage === 'students-distribute' ? 'active' : ''}`}
-                       onClick={goToDistribute}>
-                    <span>•</span> <span>توزيع الفصول</span>
-                  </div>
-                  <div className={`nav-subitem ${currentPage === 'students-transfers' ? 'active' : ''}`}
-                       onClick={goToTransfers}>
-                    <span>•</span> <span>التحويلات المدرسية</span>
-                  </div>
-                  <div className={`nav-subitem ${currentPage === 'student-absence' ? 'active' : ''}`}
-                       onClick={() => setCurrentPage('student-absence')}>
-                    <span>•</span> <span>إنذارات الغياب والقيد</span>
-                  </div>
-                  <div className={`nav-subitem ${currentPage === 'students-reports' ? 'active' : ''}`}
-                       onClick={() => setCurrentPage('students-reports')}>
-                    <span>•</span> <span>التقارير وسجلات القيد</span>
-                  </div>
-                  <div className={`nav-subitem ${currentPage === 'emis-sync' ? 'active' : ''}`}
-                       onClick={goToEMISSync}>
-                    <span>•</span> <span>🔗 مزامنة EMIS</span>
-                  </div>
-                </div>
+                )}
               </>
             )}
 
             {/* 2. STAFF / HR DOMAIN WORKSPACE */}
             {activeWorkspace?.domain === 'staff' && (
-              <div className={`nav-item active`} style={{ opacity: 0.85 }}>
-                <Users size={18} /> <span>شئون العاملين 🔒 (قيد التطوير)</span>
+              <div className={`nav-item active`} style={{ opacity: 0.85 }} title={sidebarCollapsed ? 'شئون العاملين' : ''}>
+                <Users size={18} /> {!sidebarCollapsed && <span>شئون العاملين 🔒</span>}
               </div>
             )}
 
             {/* 3. FINANCE DOMAIN WORKSPACE */}
             {activeWorkspace?.domain === 'finance' && (
-              <div className={`nav-item active`} style={{ opacity: 0.85 }}>
-                <DollarSign size={18} /> <span>الحسابات والخزينة 🔒 (قيد التطوير)</span>
+              <div className={`nav-item active`} style={{ opacity: 0.85 }} title={sidebarCollapsed ? 'الحسابات والخزينة' : ''}>
+                <DollarSign size={18} /> {!sidebarCollapsed && <span>الحسابات والخزينة 🔒</span>}
               </div>
             )}
 
             {/* 4. CONTROL DOMAIN WORKSPACE */}
             {activeWorkspace?.domain === 'control' && (
-              <div className={`nav-item active`} style={{ opacity: 0.85 }}>
-                <Shield size={18} /> <span>الكنترول والامتحانات 🔒 (قيد التطوير)</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+                {/* Header Badge */}
+                <div
+                  title={sidebarCollapsed ? 'كنترول المرحلة الابتدائية' : ''}
+                  style={{
+                    padding: sidebarCollapsed ? '8px 0' : '8px 12px',
+                    background: 'rgba(99, 102, 241, 0.15)', borderRadius: '8px', color: '#818cf8', fontWeight: 900,
+                    fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
+                    gap: '8px', marginBottom: '4px'
+                  }}
+                >
+                  <ShieldCheck size={18} color="#818cf8" />
+                  {!sidebarCollapsed && <span>كنترول المرحلة الابتدائية</span>}
+                </div>
+
+                {/* 1. Setup Tab */}
+                <div
+                  className={`nav-item ${controlActiveTab === 'setup' ? 'active' : ''}`}
+                  onClick={() => { setCurrentPage('control'); setControlActiveTab('setup'); setControlSubTabSetup('subjects'); }}
+                  title={sidebarCollapsed ? '1️⃣ تجهيز الكنترول والضوابط' : ''}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <Sliders size={16} /> {!sidebarCollapsed && <span>1️⃣ تجهيز الكنترول والضوابط</span>}
+                </div>
+                {!sidebarCollapsed && controlActiveTab === 'setup' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '22px', marginBottom: '6px' }}>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSetup('subjects'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSetup === 'subjects' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSetup === 'subjects' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      📚 المواد وضوابط القرار 151
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSetup('seats'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSetup === 'seats' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSetup === 'seats' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🎫 أرقام الجلوس
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSetup('committees'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSetup === 'committees' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSetup === 'committees' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🏛️ توزيع اللجان والمقار
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSetup('prints'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSetup === 'prints' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSetup === 'prints' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🖨️ مطبوعات التجهيز واللجان
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Term 1 Tab */}
+                <div
+                  className={`nav-item ${controlActiveTab === 'term1' ? 'active' : ''}`}
+                  onClick={() => { setCurrentPage('control'); setControlActiveTab('term1'); setControlSubTabTerm1('work'); }}
+                  title={sidebarCollapsed ? '2️⃣ الفصل الدراسي الأول' : ''}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <BookOpen size={16} /> {!sidebarCollapsed && <span>2️⃣ الفصل الدراسي الأول</span>}
+                </div>
+                {!sidebarCollapsed && controlActiveTab === 'term1' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '22px', marginBottom: '6px' }}>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm1('work'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm1 === 'work' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm1 === 'work' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      📊 رصد أعمال السنة (40)
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm1('exam'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm1 === 'exam' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm1 === 'exam' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      ✍️ رصد الامتحان التحريري (60)
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm1('secret'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm1 === 'secret' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm1 === 'secret' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🔒 الأرقام السرية المشفرة
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm1('search'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm1 === 'search' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm1 === 'search' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🔍 كشف وبحث الطلاب
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm1('prints'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm1 === 'prints' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm1 === 'prints' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🖨️ مطبوعات الفصل الأول
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. Term 2 Tab */}
+                <div
+                  className={`nav-item ${controlActiveTab === 'term2' ? 'active' : ''}`}
+                  onClick={() => { setCurrentPage('control'); setControlActiveTab('term2'); setControlSubTabTerm2('work'); }}
+                  title={sidebarCollapsed ? '3️⃣ الفصل الدراسي الثاني' : ''}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <BookOpen size={16} /> {!sidebarCollapsed && <span>3️⃣ الفصل الدراسي الثاني</span>}
+                </div>
+                {!sidebarCollapsed && controlActiveTab === 'term2' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '22px', marginBottom: '6px' }}>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm2('work'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm2 === 'work' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm2 === 'work' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      📊 رصد أعمال السنة (40)
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm2('exam'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm2 === 'exam' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm2 === 'exam' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      ✍️ رصد الامتحان التحريري (60)
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm2('secret'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm2 === 'secret' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm2 === 'secret' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🔒 الأرقام السرية المشفرة
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm2('search'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm2 === 'search' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm2 === 'search' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🔍 كشف وبحث الطلاب
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabTerm2('prints'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabTerm2 === 'prints' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabTerm2 === 'prints' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🖨️ مطبوعات الفصل الثاني والشهادات
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Second Round Tab */}
+                <div
+                  className={`nav-item ${controlActiveTab === 'secondRound' ? 'active' : ''}`}
+                  onClick={() => { setCurrentPage('control'); setControlActiveTab('secondRound'); setControlSubTabSecondRound('seats'); }}
+                  title={sidebarCollapsed ? '4️⃣ الدور الثاني والتخلفات' : ''}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <RefreshCw size={16} /> {!sidebarCollapsed && <span>4️⃣ الدور الثاني والتخلفات</span>}
+                </div>
+                {!sidebarCollapsed && controlActiveTab === 'secondRound' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '22px', marginBottom: '6px' }}>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSecondRound('seats'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSecondRound === 'seats' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSecondRound === 'seats' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🎫 أرقام جلوس ولجان الدور الثاني
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSecondRound('exam'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSecondRound === 'exam' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSecondRound === 'exam' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      ✍️ رصد درجات الدور الثاني
+                    </div>
+                    <div
+                      onClick={() => { setCurrentPage('control'); setControlSubTabSecondRound('prints'); }}
+                      style={{
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 800, cursor: 'pointer',
+                        background: controlSubTabSecondRound === 'prints' ? 'rgba(255,255,255,0.15)' : 'transparent',
+                        color: controlSubTabSecondRound === 'prints' ? '#67e8f9' : '#cbd5e1'
+                      }}
+                    >
+                      🖨️ مطبوعات الدور الثاني
+                    </div>
+                  </div>
+                )}
+
+                {/* 5. Close & Annual Results Tab */}
+                <div
+                  className={`nav-item ${controlActiveTab === 'close' ? 'active' : ''}`}
+                  onClick={() => { setCurrentPage('control'); setControlActiveTab('close'); }}
+                  title={sidebarCollapsed ? '5️⃣ النتيجة السنوية والاعتماد' : ''}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <Award size={16} /> {!sidebarCollapsed && <span>5️⃣ النتيجة السنوية والاعتماد</span>}
+                </div>
               </div>
             )}
 
@@ -780,20 +1059,24 @@ function App() {
             {activeWorkspace?.domain === 'admin' && (
               <>
                 <div className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
-                     onClick={goToDashboard}>
-                  <Layers size={18} /> <span>لوحة القيادة والمتابعة</span>
+                     onClick={goToDashboard}
+                     title={sidebarCollapsed ? 'لوحة القيادة والمتابعة' : ''}>
+                  <Layers size={18} /> {!sidebarCollapsed && <span>لوحة القيادة والمتابعة</span>}
                 </div>
                 <div className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`}
-                     onClick={() => { setCurrentPage('settings'); setSelectedStudentId(null); }}>
-                  <Settings size={18} /> <span>إعدادات المؤسسة والهياكل</span>
+                     onClick={() => { setCurrentPage('settings'); setSelectedStudentId(null); }}
+                     title={sidebarCollapsed ? 'إعدادات المؤسسة والهياكل' : ''}>
+                  <Settings size={18} /> {!sidebarCollapsed && <span>إعدادات المؤسسة والهياكل</span>}
                 </div>
                 <div className={`nav-item ${currentPage === 'users' ? 'active' : ''}`}
-                     onClick={() => { setCurrentPage('users'); setSelectedStudentId(null); }}>
-                  <Lock size={18} /> <span>المستخدمون والصلاحيات</span>
+                     onClick={() => { setCurrentPage('users'); setSelectedStudentId(null); }}
+                     title={sidebarCollapsed ? 'المستخدمون والصلاحيات' : ''}>
+                  <Lock size={18} /> {!sidebarCollapsed && <span>المستخدمون والصلاحيات</span>}
                 </div>
                 <div className={`nav-item ${currentPage === 'backups' ? 'active' : ''}`}
-                     onClick={() => { setCurrentPage('backups'); setSelectedStudentId(null); }}>
-                  <Database size={18} /> <span>النسخ الاحتياطي</span>
+                     onClick={() => { setCurrentPage('backups'); setSelectedStudentId(null); }}
+                     title={sidebarCollapsed ? 'النسخ الاحتياطي' : ''}>
+                  <Database size={18} /> {!sidebarCollapsed && <span>النسخ الاحتياطي</span>}
                 </div>
               </>
             )}
@@ -828,21 +1111,30 @@ function App() {
           )}
 
           <div className="sidebar-footer">
-            <div className="user-info-mini">
+            <div className="user-info-mini" title={sidebarCollapsed ? (currentUser?.full_name || currentUser?.username) : ''}>
               <span className="user-avatar-mini">👤</span>
-              <div style={{ overflow: 'hidden', flex: 1 }}>
-                <div className="user-name-mini">{currentUser?.full_name || currentUser?.username}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {isSuperAdmin ? '🛡️ مدير النظام' :
-                   isHR ? '👔 شئون العاملين' :
-                   isDataEntry ? '📚 شئون الطلاب' :
-                   isAccountant ? '💰 الحسابات' :
-                   isControl ? '📋 الكنترول' :
-                   '👁 مشاهد'}
+              {!sidebarCollapsed && (
+                <div style={{ overflow: 'hidden', flex: 1 }}>
+                  <div className="user-name-mini">{currentUser?.full_name || currentUser?.username}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {isSuperAdmin ? '🛡️ مدير النظام' :
+                     isHR ? '👔 شئون العاملين' :
+                     isDataEntry ? '📚 شئون الطلاب' :
+                     isAccountant ? '💰 الحسابات' :
+                     isControl ? '📋 الكنترول' :
+                     '👁 مشاهد'}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
-            <button className="logout-btn" onClick={() => { setIsLoggedIn(false); setCurrentUser(null); setActiveSectionId('all'); setCurrentPage('dashboard'); }}>تسجيل الخروج</button>
+            <button
+              className="logout-btn"
+              onClick={() => { setIsLoggedIn(false); setCurrentUser(null); setActiveSectionId('all'); setCurrentPage('dashboard'); }}
+              title="تسجيل الخروج"
+            >
+              <LogOut size={16} />
+              {!sidebarCollapsed && <span className="logout-btn-text" style={{ marginRight: 6 }}>تسجيل الخروج</span>}
+            </button>
           </div>
         </aside>
 
@@ -858,15 +1150,39 @@ function App() {
             gap: 16,
             flexWrap: 'wrap'
           }}>
-            <HeaderScopeBar 
-              onNavigate={(page) => { 
-                setCurrentPage(page); 
-                setSelectedStudentId(null); 
-              }} 
-              isSuperAdmin={isSuperAdmin}
-              updateInfo={updateInfo}
-              onOpenUpdateModal={() => setUpdateModalOpen(true)}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+              <button
+                onClick={toggleSidebar}
+                className="sidebar-toggle-btn"
+                title={sidebarCollapsed ? 'توسيع القائمة الجانبية (Ctrl+B)' : 'طي القائمة الجانبية (Ctrl+B)'}
+                style={{
+                  background: 'var(--bg-card, #fff)',
+                  border: '1px solid var(--border-color, #e2e8f0)',
+                  borderRadius: 8,
+                  width: 36,
+                  height: 36,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: 'var(--text-primary, #1e293b)',
+                  boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.05))',
+                  flexShrink: 0
+                }}
+              >
+                <Menu size={20} color="#0284c7" />
+              </button>
+
+              <HeaderScopeBar 
+                onNavigate={(page) => { 
+                  setCurrentPage(page); 
+                  setSelectedStudentId(null); 
+                }} 
+                isSuperAdmin={isSuperAdmin}
+                updateInfo={updateInfo}
+                onOpenUpdateModal={() => setUpdateModalOpen(true)}
+              />
+            </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button
@@ -1179,12 +1495,19 @@ function App() {
             <StudentAbsenceManager onBack={goToStudentsList} />
           )}
 
-          {/* ── Control Room & Exams Module (Locked in Trial) ─────────────── */}
+          {/* ── Control Room & Exams Module (Primary Stage Control) ─────────────── */}
           {(currentPage === 'control' || activeWorkspace?.domain === 'control') && (
-            <LockedModuleView 
-              moduleTitle="الكنترول العام والامتحانات" 
-              icon="📋"
-              onGoToStudents={goToStudentsList}
+            <ControlMainPage 
+              externalActiveTab={controlActiveTab}
+              setExternalActiveTab={setControlActiveTab}
+              externalSubTabSetup={controlSubTabSetup}
+              setExternalSubTabSetup={setControlSubTabSetup}
+              externalSubTabTerm1={controlSubTabTerm1}
+              setExternalSubTabTerm1={setControlSubTabTerm1}
+              externalSubTabTerm2={controlSubTabTerm2}
+              setExternalSubTabTerm2={setControlSubTabTerm2}
+              externalSubTabSecondRound={controlSubTabSecondRound}
+              setExternalSubTabSecondRound={setControlSubTabSecondRound}
             />
           )}
 

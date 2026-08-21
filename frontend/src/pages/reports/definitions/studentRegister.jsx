@@ -97,11 +97,9 @@ function StudentRegisterPreview({ students = [], meta = {}, schoolInfo = {} }) {
           
           {/* Standard Official 3-Column Ministerial Header (Repeated on every page) */}
           <div className="report-official-header" style={{ marginBottom: 6, paddingBottom: 5, borderBottom: '2px solid #1e3a8a', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div className="header-col-right" style={{ textAlign: 'right', fontSize: 10, lineHeight: 1.35, fontWeight: 700, width: '32%' }}>
-              <div>جمهورية مصر العربية</div>
-              <div>وزارة التربية والتعليم والتعليم الفني</div>
-              <div>مديرية التربية والتعليم بمحافظة: <strong>{governorate || '................'}</strong></div>
-              <div>إدارة: <strong>{cleanAdmin ? `${cleanAdmin} التعليمية` : '................'}</strong></div>
+            <div className="header-col-right" style={{ textAlign: 'right', fontSize: 11, lineHeight: 1.45, fontWeight: 700, width: '32%' }}>
+              <div>محافظة: <strong>{governorate || '................'}</strong></div>
+              <div>إدارة: <strong>{cleanAdmin ? (cleanAdmin.includes('إدارة') ? cleanAdmin : `${cleanAdmin} التعليمية`) : '................'}</strong></div>
               <div>مدرسة: <strong>{cleanSchool || '................'}</strong></div>
             </div>
 

@@ -3,8 +3,8 @@ import MacroGradesPreview from './MacroGradesPreview';
 
 const primaryLandscapeSheet = {
   id:          'primary_landscape',
-  name:        'سجل أعمال السنة للصفوف الأولى (عرضي)',
-  desc:        'سجل رصد وتقييمات أعمال السنة للصفوف الأولى بالمظهر العرضي (ماكرو إكسيل)',
+  name:        'سجل أعمال السنة للمرحلة الابتدائية (عرضي)',
+  desc:        'سجل رصد وتقييمات أعمال السنة لطلاب المرحلة الابتدائية بالمظهر العرضي (ماكرو إكسيل)',
   category:    'سجلات رصد أعمال السنة',
   icon:        '📄',
   orientation: 'landscape',
@@ -23,7 +23,7 @@ const primaryLandscapeSheet = {
     `/api/students/export/class-list?classId=${f.classId}&gradeId=${f.gradeId}&academicYearId=${f.academicYearId}&mode=primary_landscape&status=all`,
 
   excelFileName: (f, meta) =>
-    `سجل_أعمال_السنة_صفوف_أولى_عرضي_${meta.selectedClassroom?.class_name || 'الفصل'}.xlsm`,
+    `سجل_أعمال_السنة_ابتدائي_عرضي_${meta.selectedClassroom?.class_name || 'الفصل'}.xlsm`,
 
   buildQuery: (f) => {
     const q = new URLSearchParams({
@@ -40,7 +40,7 @@ const primaryLandscapeSheet = {
   },
 
   PreviewComponent: (props) => (
-    <MacroGradesPreview {...props} title="سجل أعمال السنة للصفوف الأولى (عرضي)" />
+    <MacroGradesPreview {...props} title="سجل أعمال السنة للمرحلة الابتدائية (عرضي)" />
   ),
 };
 

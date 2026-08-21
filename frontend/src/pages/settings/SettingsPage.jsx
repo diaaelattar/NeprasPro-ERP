@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Settings, Users, Shield, Lock, UserPlus, Key, Save, Trash2, 
   Edit3, CheckCircle2, AlertCircle, X, ShieldAlert, BookOpen, Plus,
-  Calendar, Building, Printer, RotateCcw
+  Calendar, Building, Printer, RotateCcw, Table, LayoutGrid, Search,
+  Layers, FileSpreadsheet, Download
 } from 'lucide-react';
 import API_BASE_URL from '../../config/api';
 import { useToast } from '../../context/ToastContext';
@@ -96,6 +97,10 @@ export default function SettingsPage({
 
   // Classrooms tab states
   const [classrooms, setClassrooms] = useState([]);
+  const [stageClassrooms, setStageClassrooms] = useState([]);
+  const [stageClassroomsLoading, setStageClassroomsLoading] = useState(false);
+  const [classroomSearchQuery, setClassroomSearchQuery] = useState('');
+  const [classroomViewMode, setClassroomViewMode] = useState('both'); // 'table' | 'cards' | 'both'
   const [classroomFilters, setClassroomFilters] = useState({
     academicYearId: '',
     sectionId: '',
@@ -389,8 +394,7 @@ export default function SettingsPage({
               setBulkForm(f => ({
                 ...f,
                 namingStyle: style,
-                prefix: prefix || f.prefix,
-                count: Math.max(f.count, list.length + 1)
+                prefix: prefix || f.prefix
               }));
             }
           }
@@ -401,11 +405,37 @@ export default function SettingsPage({
       .catch(() => toast.error('تعذر الاتصال بالخادم لتحميل الفصول.'));
   };
 
+  const loadStageClassrooms = () => {
+    const yearId = classroomFilters.academicYearId || (formOpts.academicYears?.[0]?.id ? String(formOpts.academicYears[0].id) : '');
+    if (!yearId) {
+      setStageClassrooms([]);
+      return;
+    }
+    const stageId = classroomFilters.stageId || selectedStageId;
+    const secId = classroomFilters.sectionId || selectedSectionId;
+
+    let url = `${API}/classrooms?academicYearId=${yearId}`;
+    if (stageId) url += `&stageId=${stageId}`;
+    else if (secId) url += `&sectionId=${secId}`;
+
+    setStageClassroomsLoading(true);
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          setStageClassrooms(data.classrooms || []);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setStageClassroomsLoading(false));
+  };
+
   useEffect(() => {
     if (activeTab === 'classrooms') {
       loadClassrooms();
+      loadStageClassrooms();
     }
-  }, [activeTab, classroomFilters.gradeId, classroomFilters.academicYearId]);
+  }, [activeTab, classroomFilters.gradeId, classroomFilters.stageId, classroomFilters.sectionId, classroomFilters.academicYearId]);
 
   const handleOpenAdd = () => {
     setEditingUser(null);
@@ -692,6 +722,7 @@ export default function SettingsPage({
       toast.error('لم يتم إضافة أي فصل. ربما تكون جميع الأسماء المقترحة مسجلة بالفعل.');
     }
     loadClassrooms();
+    loadStageClassrooms();
   };
 
   const handleSaveEditClassroom = async () => {
@@ -713,6 +744,7 @@ export default function SettingsPage({
       toast.success('تم تحديث بيانات الفصل بنجاح.');
       setEditingClassroom(null);
       loadClassrooms();
+      loadStageClassrooms();
     } catch (err) { toast.error(err.message); }
   };
 
@@ -724,6 +756,7 @@ export default function SettingsPage({
       if (!res.ok) throw new Error(data.error || 'فشل حذف الفصل.');
       toast.success(data.message || 'تم حذف الفصل بنجاح.');
       loadClassrooms();
+      loadStageClassrooms();
     } catch (err) { toast.error(err.message); }
   };
 
@@ -759,6 +792,7 @@ export default function SettingsPage({
 
       toast.success(data.message || 'تم حذف كافة فصول الصف بنجاح.');
       loadClassrooms();
+      loadStageClassrooms();
     } catch (err) {
       toast.error(err.message);
     }
@@ -1233,7 +1267,7 @@ export default function SettingsPage({
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '16px 20px' }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6 }}>📦 الإصدار المثبت حالياً</div>
                 <div style={{ fontSize: 22, fontWeight: 900, color: '#1e293b', letterSpacing: '-0.5px' }}>
-                  v{updateInfo?.currentVersion || '1.3.1'}
+                  v{updateInfo?.currentVersion || '1.4.0'}
                 </div>
                 <div style={{ fontSize: 11.5, color: '#94a3b8', marginTop: 4 }}>منظومة نبراس برو التعليمية</div>
               </div>
@@ -1813,8 +1847,74 @@ export default function SettingsPage({
               </div>
             </div>
 
-            {/* ── Bulk Creation Panel (shown only when grade+year selected) ── */}
-            {classroomFilters.gradeId && classroomFilters.academicYearId && (
+            {/* ── View Switcher & Stage Review Header Bar ── */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 8, background: 'rgba(255, 255, 255, 0.04)', padding: 4, borderRadius: 10, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <button
+                  type="button"
+                  onClick={() => setClassroomViewMode('table')}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none',
+                    background: classroomViewMode === 'table' ? 'var(--primary-color, #4f46e5)' : 'transparent',
+                    color: classroomViewMode === 'table' ? '#fff' : 'var(--text-secondary)',
+                    transition: 'all 0.2s ease'
+                  }}>
+                  <Table size={15} /> كشاف فصول المرحلة ({stageClassrooms.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClassroomViewMode('cards')}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none',
+                    background: classroomViewMode === 'cards' ? 'var(--primary-color, #4f46e5)' : 'transparent',
+                    color: classroomViewMode === 'cards' ? '#fff' : 'var(--text-secondary)',
+                    transition: 'all 0.2s ease'
+                  }}>
+                  <LayoutGrid size={15} /> بطاقات الصف المحدد {classroomFilters.gradeId ? `(${classrooms.length})` : ''}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClassroomViewMode('both')}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none',
+                    background: classroomViewMode === 'both' ? 'var(--primary-color, #4f46e5)' : 'transparent',
+                    color: classroomViewMode === 'both' ? '#fff' : 'var(--text-secondary)',
+                    transition: 'all 0.2s ease'
+                  }}>
+                  <Layers size={15} /> عرض كلاهما
+                </button>
+              </div>
+
+              {stageClassrooms.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (stageClassrooms.length === 0) return;
+                      let csv = "\uFEFFم,الصف الدراسي,رقم الفصل,مسمى الفصل,صيغة المطبوعات والشهادات,الكود الوزاري,السعة الاستيعابية,الطلاب المقيدين,نسبة الإشغال\n";
+                      stageClassrooms.forEach((c, idx) => {
+                        const pct = Math.min(100, Math.round(((c.enrolledCount || 0) / (c.capacity || 1)) * 100));
+                        csv += `"${idx + 1}","${c.grade_name_ar || ''}","${c.class_number || ''}","${c.class_name || ''}","${c.formatted_name || ''}","${c.class_code || ''}","${c.capacity || 40}","${c.enrolledCount || 0}","${pct}%"\n`;
+                      });
+                      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.setAttribute('download', `كشاف_فصول_المرحلة_${new Date().toISOString().slice(0, 10)}.csv`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="btn-secondary"
+                    style={{ padding: '6px 14px', fontSize: 12.5, gap: 6, display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                    <Download size={14} /> تصدير الكشاف (Excel)
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* ── Bulk Creation Panel (shown only when grade+year selected and cards/both mode) ── */}
+            {(classroomViewMode === 'cards' || classroomViewMode === 'both') && classroomFilters.gradeId && classroomFilters.academicYearId && (
               <div className="glass-panel" style={{ padding: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <div>
@@ -1834,8 +1934,8 @@ export default function SettingsPage({
                         : 'إجمالي عدد الفصول المطلوب للصف'}
                     </label>
                     <input type="number" className="field-input"
-                      min={classrooms.length > 0 ? classrooms.length + 1 : 1} max={50} value={bulkForm.count}
-                      onChange={e => setBulkForm(f => ({ ...f, count: Math.min(50, Math.max(classrooms.length > 0 ? classrooms.length + 1 : 1, parseInt(e.target.value) || 1)) }))} />
+                      min={1} max={50} value={bulkForm.count}
+                      onChange={e => setBulkForm(f => ({ ...f, count: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) }))} />
                   </div>
 
                   {/* Capacity */}
@@ -1879,135 +1979,311 @@ export default function SettingsPage({
               </div>
             )}
 
-            {/* ── Existing Classrooms Grid ── */}
-            {classroomFilters.gradeId ? (
-              classrooms.length > 0 ? (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <h3 className="section-title" style={{ margin: 0 }}>
-                      🏫 الفصول المسجلة ({classrooms.length} فصل مرتبة تصاعدياً)
-                    </h3>
-                    <button
-                      className="btn-delete"
-                      onClick={() => handleDeleteAllGradeClassrooms(false)}
-                      style={{
-                        background: 'rgba(239, 68, 68, 0.15)',
-                        color: '#ef4444',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        padding: '6px 14px',
-                        borderRadius: 8,
-                        fontSize: 13,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}>
-                      <Trash2 size={14} /> حذف كافة فصول هذا الصف
-                    </button>
+            {/* ── STAGE REVIEW TABLE (كشاف فصول المرحلة الشامل للمراجعة) ── */}
+            {(classroomViewMode === 'table' || classroomViewMode === 'both' || !classroomFilters.gradeId) && (
+              <div className="glass-panel" style={{ padding: 22 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <h3 className="section-title" style={{ margin: 0 }}>
+                        📋 كشاف فصول المرحلة للمراجعة الشاملة
+                      </h3>
+                      <span style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '3px 10px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                        {stageClassrooms.length} فصل مسجل
+                      </span>
+                    </div>
+                    <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                      جدول المراجعة والحصر الموحد لجميع فصول الصفوف التابعة للمرحلة المحددة
+                    </p>
                   </div>
-                  <div className="classrooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
-                    {classrooms.map(c => {
-                      const percent = Math.min(100, Math.round((c.enrolledCount / (c.capacity || 1)) * 100));
-                      const progressColor = percent > 90 ? '#ef4444' : percent > 75 ? '#f59e0b' : '#10b981';
-                      const isEditing = editingClassroom === c.id;
 
-                      return (
-                        <div key={c.id} className="glass-panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                          {isEditing ? (
-                            // ── Inline Edit Mode ──
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                              <div className="field-group">
-                                <label className="field-label">رقم الفصل (ترتيب عددي)</label>
-                                <input type="number" className="field-input" min={1} max={99} value={editForm.classNumber}
-                                  onChange={e => setEditForm(f => ({ ...f, classNumber: e.target.value }))} />
-                              </div>
-                              <div className="field-group">
-                                <label className="field-label">مسمى الفصل المخصص (اختياري)</label>
-                                <input type="text" className="field-input" value={editForm.className} placeholder={`فصل ${editForm.classNumber || 1}`}
-                                  onChange={e => setEditForm(f => ({ ...f, className: e.target.value }))} />
-                              </div>
-                              <div className="field-group">
-                                <label className="field-label">السعة (أقصى حد 49)</label>
-                                <input type="number" className="field-input" min={1} max={49} value={editForm.capacity}
-                                  onChange={e => setEditForm(f => ({ ...f, capacity: Math.min(49, Math.max(1, parseInt(e.target.value) || 1)) }))} />
-                              </div>
-                              <div style={{ display: 'flex', gap: 8 }}>
-                                <button className="btn-save" style={{ flex: 1, justifyContent: 'center', padding: '7px 0' }}
-                                  onClick={handleSaveEditClassroom}><Save size={14} /> حفظ</button>
-                                <button className="btn-cancel" style={{ flex: 1, justifyContent: 'center', padding: '7px 0' }}
-                                  onClick={() => setEditingClassroom(null)}><X size={14} /> إلغاء</button>
-                              </div>
-                            </div>
-                          ) : (
-                            // ── View Mode ──
-                            <>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div>
-                                  <h4 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 0.5, margin: 0 }}>
-                                    🏫 فصل {c.class_number || c.class_name}
-                                  </h4>
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                                    <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
-                                      🖨️ في المطبوعات: {c.formatted_name || c.class_name}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ position: 'relative', minWidth: 220 }}>
+                      <Search size={15} style={{ position: 'absolute', right: 10, top: 10, color: 'var(--text-muted)' }} />
+                      <input
+                        type="text"
+                        placeholder="بحث بالصف، المسمى، الكود..."
+                        value={classroomSearchQuery}
+                        onChange={e => setClassroomSearchQuery(e.target.value)}
+                        className="field-input"
+                        style={{ paddingRight: 32, paddingLeft: 10, height: 36, fontSize: 12.5 }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Summary Indicators */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 18 }}>
+                  <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>🏫 إجمالي الفصول:</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>{stageClassrooms.length} فصل</span>
+                  </div>
+                  <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>👥 الطلاب المقيدين:</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: '#10b981' }}>
+                      {stageClassrooms.reduce((acc, c) => acc + (c.enrolledCount || 0), 0)} طالب
+                    </span>
+                  </div>
+                  <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>🪑 الطاقة الاستيعابية:</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: '#38bdf8' }}>
+                      {stageClassrooms.reduce((acc, c) => acc + (c.capacity || 0), 0)} مقعد
+                    </span>
+                  </div>
+                  <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>📊 متوسط الكثافة:</span>
+                    <span style={{ fontSize: 16, fontWeight: 800, color: '#f59e0b' }}>
+                      {stageClassrooms.length > 0
+                        ? (stageClassrooms.reduce((acc, c) => acc + (c.enrolledCount || 0), 0) / stageClassrooms.length).toFixed(1)
+                        : 0} طالب/فصل
+                    </span>
+                  </div>
+                </div>
+
+                {/* Review Table */}
+                {stageClassrooms.length > 0 ? (
+                  <div style={{ overflowX: 'auto', borderRadius: 8, border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255, 255, 255, 0.05)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, width: 45 }}>#</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>الصف الدراسي</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>رقم الفصل</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>مسمى الفصل</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>صيغة المطبوعات والشهادات</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>الكود الوزاري</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>السعة</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>المقيدين</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>نسبة الإشغال</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700 }}>الحالة</th>
+                          <th style={{ padding: '10px 12px', fontSize: 12, fontWeight: 700, textAlign: 'center', width: 90 }}>إجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stageClassrooms
+                          .filter(c => {
+                            if (!classroomSearchQuery.trim()) return true;
+                            const q = classroomSearchQuery.trim().toLowerCase();
+                            const gName = (c.grade_name_ar || '').toLowerCase();
+                            const cName = (c.class_name || '').toLowerCase();
+                            const fName = (c.formatted_name || '').toLowerCase();
+                            const code = (c.class_code || '').toLowerCase();
+                            const num = String(c.class_number || '');
+                            return gName.includes(q) || cName.includes(q) || fName.includes(q) || code.includes(q) || num.includes(q);
+                          })
+                          .map((c, idx) => {
+                            const pct = Math.min(100, Math.round(((c.enrolledCount || 0) / (c.capacity || 1)) * 100));
+                            const statusColor = pct > 90 ? '#ef4444' : pct > 75 ? '#f59e0b' : '#10b981';
+                            const remaining = Math.max(0, (c.capacity || 0) - (c.enrolledCount || 0));
+
+                            return (
+                              <tr key={c.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                                <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                <td style={{ padding: '10px 12px', fontSize: 12.5, fontWeight: 700 }}>
+                                  <span style={{ background: 'rgba(99, 102, 241, 0.12)', color: '#818cf8', padding: '3px 9px', borderRadius: 6 }}>
+                                    {c.grade_name_ar || '—'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                                  {c.class_number || '—'}
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 12.5, fontWeight: 600 }}>
+                                  {c.class_name || `فصل ${c.class_number}`}
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 12.5, fontWeight: 700, color: '#10b981' }}>
+                                  {c.formatted_name || c.class_name}
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 12, fontFamily: 'monospace', color: '#6366f1' }}>
+                                  {c.class_code || '—'}
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 12.5, fontWeight: 600 }}>
+                                  {c.capacity} طالب
+                                </td>
+                                <td style={{ padding: '10px 12px', fontSize: 12.5, fontWeight: 700, color: c.enrolledCount > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                  {c.enrolledCount || 0} طالب
+                                </td>
+                                <td style={{ padding: '10px 12px', minWidth: 120 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 3, overflow: 'hidden' }}>
+                                      <div style={{ width: `${pct}%`, height: '100%', background: statusColor, borderRadius: 3 }} />
+                                    </div>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: statusColor, minWidth: 32 }}>{pct}%</span>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '10px 12px' }}>
+                                  {remaining === 0 ? (
+                                    <span style={{ fontSize: 11, background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                                      مكتمل
                                     </span>
-                                    {c.class_code && (
-                                      <span style={{ fontSize: 11, background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontFamily: 'monospace' }}>
-                                        🏷️ كود: {c.class_code}
+                                  ) : (
+                                    <span style={{ fontSize: 11, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>
+                                      متاح ({remaining} شاغر)
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                    <button
+                                      className="action-btn view"
+                                      title="تعديل الفصل"
+                                      onClick={() => {
+                                        setEditingClassroom(c.id);
+                                        setEditForm({ classNumber: c.class_number || 1, className: c.class_name, capacity: c.capacity });
+                                      }}>
+                                      <Edit3 size={13} />
+                                    </button>
+                                    <button
+                                      className="action-btn view"
+                                      title="حذف الفصل"
+                                      style={{ borderColor: 'rgba(239,68,68,0.2)', color: '#ef4444' }}
+                                      onClick={() => handleDeleteClassroom(c)}>
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="table-empty" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                    <Table size={40} opacity={0.25} style={{ marginBottom: 10 }} />
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 13.5, margin: 0 }}>
+                      لا توجد فصول مسجلة لهذه المرحلة حتى الآن. اختر الصف الدراسي أعلاه لإضافة وتجهيز الفصول.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Existing Classrooms Grid (Cards View) ── */}
+            {(classroomViewMode === 'cards' || classroomViewMode === 'both') && (
+              classroomFilters.gradeId ? (
+                classrooms.length > 0 ? (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                      <h3 className="section-title" style={{ margin: 0 }}>
+                        🏫 فصول الصف المحدد ({classrooms.length} فصل)
+                      </h3>
+                      <button
+                        className="btn-delete"
+                        onClick={() => handleDeleteAllGradeClassrooms(false)}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          color: '#ef4444',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          padding: '6px 14px',
+                          borderRadius: 8,
+                          fontSize: 13,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6
+                        }}>
+                        <Trash2 size={14} /> حذف كافة فصول هذا الصف
+                      </button>
+                    </div>
+                    <div className="classrooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
+                      {classrooms.map(c => {
+                        const percent = Math.min(100, Math.round((c.enrolledCount / (c.capacity || 1)) * 100));
+                        const progressColor = percent > 90 ? '#ef4444' : percent > 75 ? '#f59e0b' : '#10b981';
+                        const isEditing = editingClassroom === c.id;
+
+                        return (
+                          <div key={c.id} className="glass-panel" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            {isEditing ? (
+                              // ── Inline Edit Mode ──
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div className="field-group">
+                                  <label className="field-label">رقم الفصل (ترتيب عددي)</label>
+                                  <input type="number" className="field-input" min={1} max={99} value={editForm.classNumber}
+                                    onChange={e => setEditForm(f => ({ ...f, classNumber: e.target.value }))} />
+                                </div>
+                                <div className="field-group">
+                                  <label className="field-label">مسمى الفصل المخصص (اختياري)</label>
+                                  <input type="text" className="field-input" value={editForm.className} placeholder={`فصل ${editForm.classNumber || 1}`}
+                                    onChange={e => setEditForm(f => ({ ...f, className: e.target.value }))} />
+                                </div>
+                                <div className="field-group">
+                                  <label className="field-label">السعة (أقصى حد 49)</label>
+                                  <input type="number" className="field-input" min={1} max={49} value={editForm.capacity}
+                                    onChange={e => setEditForm(f => ({ ...f, capacity: Math.min(49, Math.max(1, parseInt(e.target.value) || 1)) }))} />
+                                </div>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                  <button className="btn-save" style={{ flex: 1, justifyContent: 'center', padding: '7px 0' }}
+                                    onClick={handleSaveEditClassroom}><Save size={14} /> حفظ</button>
+                                  <button className="btn-cancel" style={{ flex: 1, justifyContent: 'center', padding: '7px 0' }}
+                                    onClick={() => setEditingClassroom(null)}><X size={14} /> إلغاء</button>
+                                </div>
+                              </div>
+                            ) : (
+                              // ── View Mode ──
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                  <div>
+                                    <h4 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: 0.5, margin: 0 }}>
+                                      🏫 فصل {c.class_number || c.class_name}
+                                    </h4>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                      <span style={{ fontSize: 12, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '2px 8px', borderRadius: 6, fontWeight: 700 }}>
+                                        🖨️ في المطبوعات: {c.formatted_name || c.class_name}
                                       </span>
-                                    )}
+                                      {c.class_code && (
+                                        <span style={{ fontSize: 11, background: 'rgba(99, 102, 241, 0.12)', color: '#6366f1', padding: '2px 8px', borderRadius: 6, fontWeight: 700, fontFamily: 'monospace' }}>
+                                          🏷️ كود: {c.class_code}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="row-actions">
+                                    <button className="action-btn view" title="تعديل"
+                                      onClick={() => { setEditingClassroom(c.id); setEditForm({ classNumber: c.class_number || 1, className: c.class_name, capacity: c.capacity }); }}>
+                                      <Edit3 size={13} />
+                                    </button>
+                                    <button className="action-btn view" title="حذف" style={{ borderColor: 'rgba(239,68,68,0.2)', color: '#ef4444' }}
+                                      onClick={() => handleDeleteClassroom(c)}>
+                                      <Trash2 size={13} />
+                                    </button>
                                   </div>
                                 </div>
-                                <div className="row-actions">
-                                  <button className="action-btn view" title="تعديل"
-                                    onClick={() => { setEditingClassroom(c.id); setEditForm({ classNumber: c.class_number || 1, className: c.class_name, capacity: c.capacity }); }}>
-                                    <Edit3 size={13} />
-                                  </button>
-                                  <button className="action-btn view" title="حذف" style={{ borderColor: 'rgba(239,68,68,0.2)', color: '#ef4444' }}
-                                    onClick={() => handleDeleteClassroom(c)}>
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              </div>
 
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span>👥 السعة:</span>
-                                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.capacity} طالب</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span>👥 السعة:</span>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.capacity} طالب</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span>📊 المسجلون:</span>
+                                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.enrolledCount}</span>
+                                  </div>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <span>📊 المسجلون:</span>
-                                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.enrolledCount}</span>
-                                </div>
-                              </div>
 
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 3, overflow: 'hidden' }}>
-                                  <div style={{ width: `${percent}%`, height: '100%', background: progressColor, borderRadius: 3, transition: 'width 0.4s ease' }} />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 3, overflow: 'hidden' }}>
+                                    <div style={{ width: `${percent}%`, height: '100%', background: progressColor, borderRadius: 3, transition: 'width 0.4s ease' }} />
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
+                                    <span>نسبة الإشغال:</span>
+                                    <span style={{ color: progressColor, fontWeight: 600 }}>{percent}%</span>
+                                  </div>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)' }}>
-                                  <span>نسبة الإشغال:</span>
-                                  <span style={{ color: progressColor, fontWeight: 600 }}>{percent}%</span>
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="table-empty glass-panel" style={{ padding: '60px 20px' }}>
-                  <BookOpen size={48} opacity={0.25} style={{ marginBottom: 12 }} />
-                  <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>لا توجد فصول مضافة لهذا الصف حالياً — استخدم الأداة أعلاه لإنشائها</p>
-                </div>
-              )
-            ) : (
-              <div className="table-empty glass-panel" style={{ padding: '60px 20px' }}>
-                <Settings size={48} opacity={0.25} style={{ marginBottom: 12 }} />
-                <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>يرجى اختيار العام الدراسي والصف لعرض فصوله وإعدادها</p>
-              </div>
+                ) : (
+                  <div className="table-empty glass-panel" style={{ padding: '60px 20px' }}>
+                    <BookOpen size={48} opacity={0.25} style={{ marginBottom: 12 }} />
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>لا توجد فصول مضافة لهذا الصف حالياً — استخدم الأداة أعلاه لإنشائها</p>
+                  </div>
+                )
+              ) : null
             )}
           </div>
         )}

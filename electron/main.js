@@ -292,6 +292,15 @@ ipcMain.on('emis:open-folder', () => {
   shell.openPath(docsFolder);
 });
 
+ipcMain.on('control:open-reports-folder', (event, subPath) => {
+  const baseReportsFolder = path.join(require('os').homedir(), 'Documents', 'تقارير_كنترول_نبراس');
+  const targetFolder = subPath ? path.join(baseReportsFolder, String(subPath).replace(/[/\\?%*:|"<>]/g, '_')) : baseReportsFolder;
+  if (!fs.existsSync(targetFolder)) {
+    fs.mkdirSync(targetFolder, { recursive: true });
+  }
+  shell.openPath(targetFolder);
+});
+
 // ── Online Auto-Updater Handlers ─────────────────────────────────────────────
 const https = require('https');
 const http = require('http');

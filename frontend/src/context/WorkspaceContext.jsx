@@ -37,8 +37,7 @@ export const DOMAIN_METADATA = {
     accent: '#ec4899',
     desc: 'أرقام الجلوس، توزيع اللجان، الأرقام السرية، رصد الدرجات، والشيتات والشهادات',
     defaultScope: 'stage',
-    supportedScopes: ['stage', 'section'],
-    isLocked: true
+    supportedScopes: ['stage', 'section']
   },
   finance: {
     key: 'finance',

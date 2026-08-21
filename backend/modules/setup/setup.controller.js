@@ -43,6 +43,7 @@ const getStatus = async (req, res) => {
         governorate: row.governorate || '',
         directorate: row.directorate || '',
         logoUrl: row.logo_url || row.logoUrl || '/app-logo.png',
+        institution: row
       });
     }
     return res.json({ success: true, databaseConfigured: true, initialized: false, dbMode: db.getMode(), logoUrl: '/app-logo.png' });

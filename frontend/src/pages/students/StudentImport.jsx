@@ -147,9 +147,17 @@ export default function StudentImport({ onBack, activeSectionId }) {
       fd.append('file', file);
       fd.append('mode', importMode);
 
-      const res  = await fetch(`${API}/students/import/preview`, { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      let res;
+      try {
+        res = await fetch(`${API}/students/import/preview`, { method: 'POST', body: fd });
+      } catch (netErr) {
+        throw new Error('تعذر الاتصال بالخادم المحلي (Failed to fetch). يرجى التأكد من تشغيل البرنامج وإعادة المحاولة.');
+      }
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `فشل قراءة الملف من الخادم (${res.status})`);
+      }
 
       const initMap = {};
       if (data.fieldToCol) {
@@ -158,7 +166,7 @@ export default function StudentImport({ onBack, activeSectionId }) {
       setHeaders(data.headers || []);
       setColMapping(initMap);
       setPreviewCells(data.preview || []);
-      setValidationResults(data.results);
+      setValidationResults(data.results || []);
       setValidSummary(data.summary || { total: 0, valid: 0, errors: 0 });
       setImportMetadata(data.metadata || null);
       setStep(2);
@@ -194,12 +202,20 @@ export default function StudentImport({ onBack, activeSectionId }) {
       fd.append('mapping', JSON.stringify(colMapping));
       fd.append('mode', importMode);
 
-      const res  = await fetch(`${API}/students/import/preview`, { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      let res;
+      try {
+        res = await fetch(`${API}/students/import/preview`, { method: 'POST', body: fd });
+      } catch (netErr) {
+        throw new Error('تعذر الاتصال بالخادم المحلي (Failed to fetch). يرجى التأكد من تشغيل البرنامج وإعادة المحاولة.');
+      }
 
-      setValidationResults(data.results);
-      setValidSummary(data.summary);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `فشل التحقق من مطابقة الأعمدة (${res.status})`);
+      }
+
+      setValidationResults(data.results || []);
+      setValidSummary(data.summary || { total: 0, valid: 0, errors: 0 });
       setImportMetadata(data.metadata || null);
       setStep(3);
     } catch (err) {
@@ -302,15 +318,23 @@ export default function StudentImport({ onBack, activeSectionId }) {
     setError('');
     try {
       const rowsToImport = validationResults.filter(r => r.status === 'valid').map(r => r.data);
-      if (rowsToImport.length === 0) throw new Error('لا توجد سجلات صالحة.');
+      if (rowsToImport.length === 0) throw new Error('لا توجد سجلات صالحة للاستيراد.');
 
-      const res  = await fetch(`${API}/students/import/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: rowsToImport, mode: importMode }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+      let res;
+      try {
+        res = await fetch(`${API}/students/import/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: rowsToImport, mode: importMode }),
+        });
+      } catch (netErr) {
+        throw new Error('تعذر الاتصال بالخادم المحلي (Failed to fetch). يرجى التأكد من تشغيل البرنامج وإعادة المحاولة.');
+      }
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `فشل استيراد البيانات في قاعدة البيانات (${res.status})`);
+      }
 
       setImportResults(data);
       setStep(4);

@@ -2,6 +2,7 @@
 //  Report Definition: قائمة فصل كاملة البيانات (8 أعمدة تفصيلية)
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
+import { sortStudentsByGenderAndName } from '../../../utils/studentSorter';
 
 const STATUS_LABELS = {
   promoted:     'منقول',
@@ -18,24 +19,7 @@ function FullClassListPreview({ students = [], meta = {}, schoolInfo = {} }) {
 
   // ── Sort Students according to user preference (genderOrder: boys_first / girls_first / alphabetical) ──
   const sortedStudents = React.useMemo(() => {
-    const list = [...(students || [])];
-    const order = meta.genderOrder || meta.filters?.genderOrder || 'none';
-
-    return list.sort((a, b) => {
-      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
-      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
-
-      if (order === 'boys_first') {
-        if (isBoyA && !isBoyB) return -1;
-        if (!isBoyA && isBoyB) return 1;
-      } else if (order === 'girls_first') {
-        if (!isBoyA && isBoyB) return -1;
-        if (isBoyA && !isBoyB) return 1;
-      }
-
-      // Sort alphabetically by Arabic name
-      return String(a.full_name_ar || '').localeCompare(String(b.full_name_ar || ''), 'ar', { sensitivity: 'base' });
-    });
+    return sortStudentsByGenderAndName(students, meta.genderOrder || meta.filters?.genderOrder || 'none');
   }, [students, meta.genderOrder, meta.filters]);
 
   const totalStudents = sortedStudents.length;

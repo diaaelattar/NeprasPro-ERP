@@ -7,6 +7,7 @@
 const puppeteer = require('puppeteer');
 const db = require('../../config/db');
 const { getSchoolMasterInfo, calculateAgeOnOct1st } = require('../../utils/schoolHelper');
+const { getSqlGenderOrderClause } = require('../../utils/genderHelper');
 
 // ─── sql.js helpers ───────────────────────────────────────────────────────────
 const _all = (sqliteDb, sql, params = []) => {
@@ -790,7 +791,7 @@ exports.printRegister41Pdf = async (req, res) => {
     const school = getSchoolMasterInfo(sqliteDb);
 
     // ── العام الدراسي: من الطلب أو النشط حالياً
-    const { gradeId, academicYearId } = req.body || req.query || {};
+    const { gradeId, academicYearId, genderOrder } = req.body || req.query || {};
     const yearRow = academicYearId
       ? _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE id = ? LIMIT 1`, [Number(academicYearId)])
       : _get(sqliteDb, `SELECT id, year_label FROM academic_years WHERE is_current = 1 LIMIT 1`);
@@ -807,8 +808,9 @@ exports.printRegister41Pdf = async (req, res) => {
     const now     = new Date();
     const dateStr = now.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' });
 
-    // ── بناء شرط الصف ديناميكياً
+    // ── بناء شرط الصف وترتيب النوع ديناميكياً
     const gradeCondition = gradeId ? `AND s.grade_id = ${Number(gradeId)}` : 'AND g.grade_number = 1';
+    const orderClause = getSqlGenderOrderClause(genderOrder, 's');
 
     const students = _all(sqliteDb, `
       SELECT
@@ -833,7 +835,7 @@ exports.printRegister41Pdf = async (req, res) => {
           OR s.enrollment_status = '')
         AND (s.enrollment_status NOT IN ('retained', 'باق', 'باق للإعادة', 'disconnected', 'منقطع', 'excluded', 'مستبعد')
           AND s.status NOT IN ('retained', 'باق', 'باق للإعادة', 'disconnected', 'منقطع', 'excluded', 'مستبعد'))
-      ORDER BY s.full_name_ar ASC`, [Number(yearId)]);
+      ORDER BY ${orderClause}`, [Number(yearId)]);
 
     const enriched = students.map((stu, idx) => {
       const yearForCalc = stu.academic_year || academicYear;

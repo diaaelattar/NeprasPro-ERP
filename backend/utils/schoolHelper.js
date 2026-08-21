@@ -39,7 +39,10 @@ function getSchoolMasterInfo(sqliteDb) {
     const gov = (inst.governorate_name || inst.governorate || '').trim();
     const dir = (inst.directorate_name || inst.directorate || '').trim();
     const name = (inst.school_name || '').trim();
-    const director = (inst.director_name || inst.staff_director_name || '').trim();
+    const director = (inst.staff_director_name || inst.director_name || '').trim();
+    const activeYearRow = _get(sqliteDb, `SELECT name_ar, name_en, year_label FROM academic_years WHERE is_active = 1 ORDER BY id DESC LIMIT 1`)
+      || _get(sqliteDb, `SELECT name_ar, name_en, year_label FROM academic_years ORDER BY id DESC LIMIT 1`);
+    const activeYearName = activeYearRow?.year_label || activeYearRow?.name_ar || '2026 / 2027';
 
     return {
       id: inst.id || 1,
@@ -48,6 +51,8 @@ function getSchoolMasterInfo(sqliteDb) {
       school_name_en: inst.school_name_en || '',
       governorate: gov,
       directorate: dir,
+      academic_year_name: activeYearName,
+      academicYear: activeYearName,
       governorate_id: inst.governorate_id || null,
       administration_id: inst.administration_id || null,
       education_type: inst.education_type || 'رسمي',

@@ -3,6 +3,7 @@
 //  الترويسة الثلاثية القياسية + الفرز الشامل + التذييل الرسمي الرباعي
 // ════════════════════════════════════════════════════════════════
 import React, { useMemo } from 'react';
+import { isBoy } from '../../../utils/studentSorter';
 
 const toArNum = (num) => {
   if (num === 0 || num === '0' || num === null || num === undefined || num === '') return '-';
@@ -62,8 +63,8 @@ function ParentStaffAffiliationPreview({ students = [], meta = {}, schoolInfo = 
       }
 
       // 2. فرز النوع
-      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
-      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
+      const isBoyA = isBoy(a);
+      const isBoyB = isBoy(b);
 
       if (order === 'boys_first') {
         if (isBoyA && !isBoyB) return -1;

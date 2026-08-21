@@ -46,14 +46,12 @@ import hundredMillionHealth     from './definitions/hundredMillionHealth';
 import medicalExemptionList     from './definitions/medicalExemptionList';
 
 // ── سجلات رصد أعمال السنة (التمبلت المخصص) ──────────────────────────
-import primaryLandscapeSheet     from './definitions/primaryLandscapeSheet';
 import primaryPortraitSheet      from './definitions/primaryPortraitSheet';
-import upperPrimaryLandscapeSheet from './definitions/upperPrimaryLandscapeSheet';
-import upperPrimaryPortraitSheet from './definitions/upperPrimaryPortraitSheet';
-import prepLandscapeSheet        from './definitions/prepLandscapeSheet';
+import primaryLandscapeSheet     from './definitions/primaryLandscapeSheet';
 import prepPortraitSheet         from './definitions/prepPortraitSheet';
-import secLandscapeSheet         from './definitions/secLandscapeSheet';
+import prepLandscapeSheet        from './definitions/prepLandscapeSheet';
 import secPortraitSheet          from './definitions/secPortraitSheet';
+import secLandscapeSheet         from './definitions/secLandscapeSheet';
 import gradesSheet               from './definitions/gradesSheet';
 
 // ── الإحصائيات والتحليلات الرسمية ──────────────────────────────────
@@ -90,8 +88,6 @@ const REPORTS = [
   // ── 4. سجلات رصد أعمال السنة (تصدير التمبلت المخصص) ────────────
   primaryPortraitSheet,
   primaryLandscapeSheet,
-  upperPrimaryPortraitSheet,
-  upperPrimaryLandscapeSheet,
   prepPortraitSheet,
   prepLandscapeSheet,
   secPortraitSheet,

@@ -13,26 +13,47 @@ export default function MacroGradesPreview({ students = [], meta = {}, schoolInf
         return (
           <div key={pageIdx} className={`printable-page-block${pageIdx > 0 ? ' page-break-before' : ''}`}>
             
-            <div className="report-official-header" dir="rtl">
-              <div className="header-col-right">
-                <div>وزارة التربية والتعليم</div>
-                <div>محافظة: <strong>{schoolInfo.governorate || '................'}</strong></div>
-                <div>إدارة: <strong>{schoolInfo.directorate || '................'} التعليمية</strong></div>
-                <div>مدرسة: <strong>{schoolInfo.schoolName || '................'}</strong></div>
+            <div className="report-official-header" dir="rtl" style={{
+              display: 'grid',
+              gridTemplateColumns: '32% 38% 30%',
+              alignItems: 'start',
+              paddingBottom: 8,
+              borderBottom: '2px solid #1e293b',
+              marginBottom: 10,
+              fontSize: 12
+            }}>
+              <div className="header-col-right" style={{ textAlign: 'right', lineHeight: 1.6 }}>
+                <div style={{ fontWeight: 700 }}>جمهورية مصر العربية</div>
+                <div>وزارة التربية والتعليم والتعليم الفني</div>
+                <div>مديرية التربية والتعليم بـ <strong>{schoolInfo.governorate || '................'}</strong></div>
+                <div>إدارة <strong>{schoolInfo.directorate || '................'}</strong> التعليمية</div>
+                <div>مدرسة: <strong>{schoolInfo.schoolName || schoolInfo.school_name || '................'}</strong></div>
               </div>
 
-              <div className="header-col-center">
-                <h2 className="report-title-main">
-                  {title} — فصل: {classroomLabel || selectedClassroom?.class_name || selectedGrade?.grade_name_ar || '................'}
-                </h2>
-                <div className="report-subtitle-meta">
+              <div className="header-col-center" style={{ textAlign: 'center' }}>
+                <div style={{
+                  fontSize: 16,
+                  fontWeight: 800,
+                  color: '#0f172a',
+                  borderBottom: '1.5px solid #0f172a',
+                  display: 'inline-block',
+                  paddingBottom: 2,
+                  marginBottom: 6
+                }}>
+                  {title}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1e3a8a', marginBottom: 3 }}>
+                  فصل: {classroomLabel || selectedClassroom?.class_name || selectedGrade?.grade_name_ar || 'جميع الفصول'}
+                </div>
+                <div style={{ fontSize: 11, color: '#475569', fontWeight: 600 }}>
                   العام الدراسي: {selectedYear?.year_label || '................'} | عدد الطلاب: {totalStudents} طالب
                 </div>
               </div>
 
-              <div className="header-col-left">
-                <div style={{ fontSize: 11, color: '#475569' }}>الصف: <strong>{selectedGrade?.grade_name_ar || 'جميع الصفوف'}</strong></div>
-                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>التاريخ: {new Date().toLocaleDateString('ar-EG')}</div>
+              <div className="header-col-left" style={{ textAlign: 'left', lineHeight: 1.6 }}>
+                <div>الصف: <strong>{selectedGrade?.grade_name_ar || 'المرحلة الابتدائية'}</strong></div>
+                <div>تاريخ الطباعة: {new Date().toLocaleDateString('ar-EG')}</div>
+                <div style={{ fontSize: 10, color: '#64748b' }}>كود النموذج: REC-PRIM-01</div>
               </div>
             </div>
 

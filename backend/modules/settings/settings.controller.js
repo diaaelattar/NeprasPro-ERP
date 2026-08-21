@@ -331,7 +331,7 @@ const { formatClassroomLabel, extractClassNumber } = require('../../utils/classr
 // GET /api/settings/classrooms
 const getClassrooms = async (req, res) => {
   if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
-  const { gradeId, academicYearId } = req.query;
+  const { gradeId, stageId, sectionId, academicYearId } = req.query;
   try {
     const sqliteDb = db.getSQLiteDb();
     let query = `
@@ -352,11 +352,19 @@ const getClassrooms = async (req, res) => {
       query += ' AND c.grade_id = ?';
       params.push(gradeId);
     }
+    if (stageId) {
+      query += ' AND g.stage_id = ?';
+      params.push(stageId);
+    }
+    if (sectionId) {
+      query += ' AND st.section_id = ?';
+      params.push(sectionId);
+    }
     if (academicYearId) {
       query += ' AND c.academic_year_id = ?';
       params.push(academicYearId);
     }
-    query += ' ORDER BY COALESCE(c.class_number, CAST(c.class_name AS INTEGER), c.id) ASC, c.id ASC';
+    query += ' ORDER BY g.grade_number ASC, g.id ASC, COALESCE(c.class_number, CAST(c.class_name AS INTEGER), c.id) ASC, c.id ASC';
     const classrooms = _all(sqliteDb, query, params);
     
     // For each classroom, calculate formatted_name and current enrolled students

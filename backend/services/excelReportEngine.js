@@ -221,17 +221,32 @@ async function generatePrimaryPortraitSheet({ school, className, yearLabel, stud
     let sheet2 = zip.file('xl/worksheets/sheet2.xml') ? await zip.file('xl/worksheets/sheet2.xml').async('string') : null;
     let sheet3 = zip.file('xl/worksheets/sheet3.xml') ? await zip.file('xl/worksheets/sheet3.xml').async('string') : null;
 
-    sheet1 = setInlineStringCell(sheet1, 'A1', `محافظة : ${school.governorate || ''}`);
-    sheet1 = setInlineStringCell(sheet1, 'A2', `إدارة : ${school.directorate || ''}`);
-    sheet1 = setInlineStringCell(sheet1, 'A3', `مدرسة : ${school.school_name || ''}`);
-    sheet1 = setInlineStringCell(sheet1, 'C2', `فصل : ${className}`);
-    sheet1 = setInlineStringCell(sheet1, 'C3', `للعام الدراسي : ${yearLabel}`);
+    const gov = (school.governorate || '').trim();
+    const dir = (school.directorate || '').trim();
+    const schName = (school.school_name || school.schoolName || '').trim();
+    const cls = (className || '').trim();
+    const yr = (yearLabel || '').trim();
+
+    sheet1 = setInlineStringCell(sheet1, 'A1', `محافظة : ${gov}`);
+    sheet1 = setInlineStringCell(sheet1, 'B1', `محافظة : ${gov}`);
+
+    sheet1 = setInlineStringCell(sheet1, 'A2', `إدارة : ${dir}`);
+    sheet1 = setInlineStringCell(sheet1, 'B2', `إدارة : ${dir}`);
+    sheet1 = setInlineStringCell(sheet1, 'C2', `فصل : ${cls}`);
+    sheet1 = setInlineStringCell(sheet1, 'D2', `فصل : ${cls}`);
+    sheet1 = setInlineStringCell(sheet1, 'E2', `فصل : ${cls}`);
+
+    sheet1 = setInlineStringCell(sheet1, 'A3', `مدرسة : ${schName}`);
+    sheet1 = setInlineStringCell(sheet1, 'B3', `مدرسة : ${schName}`);
+    sheet1 = setInlineStringCell(sheet1, 'C3', `للعام الدراسي : ${yr}`);
+    sheet1 = setInlineStringCell(sheet1, 'D3', `للعام الدراسي : ${yr}`);
+    sheet1 = setInlineStringCell(sheet1, 'E3', `للعام الدراسي : ${yr}`);
 
     if (sheet2) {
-      sheet2 = setInlineStringCell(sheet2, 'F2', `سجل غياب فصل / ${className} - العام الدراسي: ${yearLabel} - مدرسة: ${school.school_name || ''}`);
+      sheet2 = setInlineStringCell(sheet2, 'F2', `سجل غياب فصل / ${cls} - العام الدراسي: ${yr} - مدرسة: ${schName}`);
     }
     if (sheet3) {
-      sheet3 = setInlineStringCell(sheet3, 'C2', `كشف متوسط تقييمات الفصل الدراسي الأول ونسبة الحضور فصل : ${className} - العام الدراسي: ${yearLabel}`);
+      sheet3 = setInlineStringCell(sheet3, 'C2', `كشف متوسط تقييمات الفصل الدراسي الأول ونسبة الحضور فصل : ${cls} - العام الدراسي: ${yr}`);
     }
 
     const STATUS_LABELS = { promoted: 'منقول', retained: 'باقٍ للإعادة', suspended: 'موقوف قيده' };
@@ -472,11 +487,41 @@ async function generateMacroGradesReport({ templateName, school, className, year
     await patchContentTypeToWorkbook(zip);
 
     let sheet1 = await zip.file('xl/worksheets/sheet1.xml').async('string');
-    
-    // Inject headers:
-    sheet1 = setInlineStringCell(sheet1, 'A1', `محافظة : ${school.governorate || ''}`);
-    sheet1 = setInlineStringCell(sheet1, 'D2', `مدرسة : ${school.school_name || ''}`);
-    sheet1 = setInlineStringCell(sheet1, 'B3', `للعام الدراسي ${yearLabel}`);
+    let sheet2 = zip.file('xl/worksheets/sheet2.xml') ? await zip.file('xl/worksheets/sheet2.xml').async('string') : null;
+    let sheet3 = zip.file('xl/worksheets/sheet3.xml') ? await zip.file('xl/worksheets/sheet3.xml').async('string') : null;
+
+    const gov = (school.governorate || '').trim();
+    const dir = (school.directorate || '').trim();
+    const schName = (school.school_name || school.schoolName || '').trim();
+    const cls = (className || '').trim();
+    const yr = (yearLabel || '').trim();
+
+    // ── 1. Comprehensive Header Injections across all possible template cell layouts ──
+    // Row 1: محافظة
+    sheet1 = setInlineStringCell(sheet1, 'A1', `محافظة : ${gov}`);
+    sheet1 = setInlineStringCell(sheet1, 'B1', `محافظة : ${gov}`);
+
+    // Row 2: إدارة & فصل
+    sheet1 = setInlineStringCell(sheet1, 'A2', `إدارة : ${dir}`);
+    sheet1 = setInlineStringCell(sheet1, 'B2', `إدارة : ${dir}`);
+    sheet1 = setInlineStringCell(sheet1, 'C2', `فصل : ${cls}`);
+    sheet1 = setInlineStringCell(sheet1, 'D2', `فصل : ${cls}`);
+    sheet1 = setInlineStringCell(sheet1, 'E2', `فصل : ${cls}`);
+
+    // Row 3: مدرسة & العام الدراسي
+    sheet1 = setInlineStringCell(sheet1, 'A3', `مدرسة : ${schName}`);
+    sheet1 = setInlineStringCell(sheet1, 'B3', `مدرسة : ${schName}`);
+    sheet1 = setInlineStringCell(sheet1, 'C3', `للعام الدراسي : ${yr}`);
+    sheet1 = setInlineStringCell(sheet1, 'D3', `للعام الدراسي : ${yr}`);
+    sheet1 = setInlineStringCell(sheet1, 'E3', `للعام الدراسي : ${yr}`);
+
+    // Sub-sheets if present (Attendance / Summary)
+    if (sheet2) {
+      sheet2 = setInlineStringCell(sheet2, 'F2', `سجل غياب فصل / ${cls} - العام الدراسي: ${yr} - مدرسة: ${schName}`);
+    }
+    if (sheet3) {
+      sheet3 = setInlineStringCell(sheet3, 'C2', `كشف متوسط تقييمات الفصل الدراسي الأول ونسبة الحضور فصل : ${cls} - العام الدراسي: ${yr}`);
+    }
 
     const STATUS_LABELS = { promoted: 'منقول', retained: 'باقٍ للإعادة', suspended: 'موقوف قيده' };
 

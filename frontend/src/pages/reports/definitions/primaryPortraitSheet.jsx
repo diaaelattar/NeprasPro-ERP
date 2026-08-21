@@ -3,8 +3,8 @@ import MacroGradesPreview from './MacroGradesPreview';
 
 const primaryPortraitSheet = {
   id:          'primary_portrait',
-  name:        'سجل أعمال السنة للصفوف الأولى (طولي)',
-  desc:        'سجل رصد وتقييمات أعمال السنة للصفوف الأولى بالمظهر الطولي (ماكرو إكسيل)',
+  name:        'سجل أعمال السنة للمرحلة الابتدائية (طولي)',
+  desc:        'سجل رصد وتقييمات أعمال السنة لطلاب المرحلة الابتدائية بالمظهر الطولي (ماكرو إكسيل)',
   category:    'سجلات رصد أعمال السنة',
   icon:        '📋',
   orientation: 'portrait',
@@ -23,7 +23,7 @@ const primaryPortraitSheet = {
     `/api/students/export/class-list?classId=${f.classId}&gradeId=${f.gradeId}&academicYearId=${f.academicYearId}&mode=primary_portrait&status=all`,
 
   excelFileName: (f, meta) =>
-    `سجل_أعمال_السنة_صفوف_أولى_طولي_${meta.selectedClassroom?.class_name || 'الفصل'}.xlsm`,
+    `سجل_أعمال_السنة_ابتدائي_طولي_${meta.selectedClassroom?.class_name || 'الفصل'}.xlsm`,
 
   buildQuery: (f) => {
     const q = new URLSearchParams({
@@ -40,7 +40,7 @@ const primaryPortraitSheet = {
   },
 
   PreviewComponent: (props) => (
-    <MacroGradesPreview {...props} title="سجل أعمال السنة للصفوف الأولى (طولي)" />
+    <MacroGradesPreview {...props} title="سجل أعمال السنة للمرحلة الابتدائية (طولي)" />
   ),
 };
 

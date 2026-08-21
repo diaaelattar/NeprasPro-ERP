@@ -127,12 +127,12 @@ export default function UpdateModal({
           <div className="update-version-banner">
             <div className="update-version-col">
               <span className="update-version-label">الإصدار الحالي مثبت</span>
-              <span className="update-version-val">v{updateInfo.currentVersion || '1.3.1'}</span>
+              <span className="update-version-val">v{updateInfo.currentVersion || '1.4.0'}</span>
             </div>
             <ArrowRight size={20} className="update-arrow-icon" style={{ transform: 'rotate(180deg)' }} />
             <div className="update-version-col">
               <span className="update-version-label">الإصدار الجديد متاح</span>
-              <span className="update-version-val new">v{updateInfo.latestVersion || '1.3.2'}</span>
+              <span className="update-version-val new">v{updateInfo.latestVersion || '1.4.1'}</span>
             </div>
           </div>
 

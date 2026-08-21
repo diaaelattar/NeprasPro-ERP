@@ -101,7 +101,17 @@ export default function ReportsPage({ activeSectionId }) {
       ? (selectedStage?.stage_name ? `المرحلة ال${selectedStage.stage_name}` : 'جميع صفوف المرحلة')
       : selectedGrade?.grade_name_ar;
 
-  const meta = { selectedYear, selectedGrade, selectedStage, selectedClassroom: selectedClassroomEnhanced, classroomLabel, gradeLabel, formOpts };
+  const meta = {
+    selectedYear,
+    selectedGrade,
+    selectedStage,
+    selectedClassroom: selectedClassroomEnhanced,
+    classroomLabel,
+    gradeLabel,
+    formOpts,
+    genderOrder: filters.genderOrder || 'none',
+    filters
+  };
 
   /* ─── Boot ───────────────────────────────────────────────────── */
   useEffect(() => {

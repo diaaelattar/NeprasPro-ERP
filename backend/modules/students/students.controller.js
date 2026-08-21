@@ -2,6 +2,7 @@ const excelReportEngine = require('../../services/excelReportEngine');
 const db = require('../../config/db');
 const { formatClassroomLabel, extractClassNumber } = require('../../utils/classroomFormatter');
 const { getSchoolMasterInfo, calculateAgeOnOct1st, detectSiblingsAndTwins, autoLinkSiblingsAndTwins } = require('../../utils/schoolHelper');
+const { normalizeGender, getSqlGenderOrderClause } = require('../../utils/genderHelper');
 
 // ─── sql.js helpers ───────────────────────────────────────────────────────────
 const _all = (sqliteDb, sql, params = []) => {
@@ -403,10 +404,8 @@ const getStudents = async (req, res) => {
 
     // ── Dynamic ORDER BY (Boys first / Girls first / Alphabetical) ────
     let orderClause = '';
-    if (genderOrder === 'boys_first') {
-      orderClause = `(CASE WHEN s.gender = 'ذكر' THEN 1 WHEN s.gender = 'أنثى' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
-    } else if (genderOrder === 'girls_first') {
-      orderClause = `(CASE WHEN s.gender = 'أنثى' THEN 1 WHEN s.gender = 'ذكر' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
+    if (genderOrder === 'boys_first' || genderOrder === 'girls_first') {
+      orderClause = getSqlGenderOrderClause(genderOrder, 's');
     } else {
       const ALLOWED_SORT = {
         name:     's.full_name_ar',
@@ -746,7 +745,7 @@ const createStudent = async (req, res) => {
           division_id, specialization_id, language_id_1, language_id_2, disability_id,
           is_orphan, orphan_type, father_status, mother_status,
           social_research_number, social_research_date, orphan_notes
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `, [
         sectionId, stageId, gradeId, academicYearId, studentCode,
         fullNameAr, fullNameEn||null, birthDate||null, birthPlace||null,
@@ -992,12 +991,7 @@ const exportExcelTemplate = async (req, res) => {
       where.push(`(s.is_talented = 1 OR (s.talent_description IS NOT NULL AND s.talent_description != '') OR EXISTS (SELECT 1 FROM student_special_cases ssc JOIN special_case_types sct ON sct.id = ssc.case_type_id WHERE ssc.student_id = s.id AND ssc.is_active = 1 AND sct.code IN ('sport_talent', 'art_talent', 'quran_hafiz', 'national_merit', 'gifted', 'scholarship')) )`);
     }
 
-    let genderSortClause = 's.full_name_ar ASC';
-    if (genderOrder === 'boys_first') {
-      genderSortClause = `(CASE WHEN s.gender = 'ذكر' THEN 1 WHEN s.gender = 'أنثى' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
-    } else if (genderOrder === 'girls_first') {
-      genderSortClause = `(CASE WHEN s.gender = 'أنثى' THEN 1 WHEN s.gender = 'ذكر' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
-    }
+    const genderSortClause = getSqlGenderOrderClause(genderOrder, 's');
 
     let orderClause = genderSortClause;
     if (!classId || classId === 'all' || classId === 'all_grade' || classId === 'all_stage') {
@@ -1104,12 +1098,7 @@ const exportFullClassListExcel = async (req, res) => {
     else { where.push("s.status != 'suspended'"); }
     if (academicYearId) { where.push('s.academic_year_id = ?'); params.push(academicYearId); }
 
-    let genderSortClause = 's.full_name_ar ASC';
-    if (genderOrder === 'boys_first') {
-      genderSortClause = `(CASE WHEN s.gender = 'ذكر' THEN 1 WHEN s.gender = 'أنثى' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
-    } else if (genderOrder === 'girls_first') {
-      genderSortClause = `(CASE WHEN s.gender = 'أنثى' THEN 1 WHEN s.gender = 'ذكر' THEN 2 ELSE 3 END) ASC, s.full_name_ar ASC`;
-    }
+    const genderSortClause = getSqlGenderOrderClause(genderOrder, 's');
 
     const whereStr = where.join(' AND ');
     const students = _all(sqliteDb, `
@@ -1253,10 +1242,10 @@ const exportClassListExcel = async (req, res) => {
 
       
     const MACRO_TEMPLATES = {
-      'primary_portrait': 'كشف_رصد_صفوف_أولى_بالطول.xltm',
-      'primary_landscape': 'كشف_رصد_صفوف_أولى_بالعرض.xltm',
-      'upper_primary_portrait': 'كشف_رصد_صفوف_عليا_بالطول.xltm',
-      'upper_primary_landscape': 'كشف_رصد_صفوف_عليا_بالعرض.xltm',
+      'primary_portrait': 'كشف_ابتدائي_بالطول.xltm',
+      'primary_landscape': 'كشف_ابتدائي_بالعرض.xltm',
+      'upper_primary_portrait': 'كشف_ابتدائي_بالطول.xltm',
+      'upper_primary_landscape': 'كشف_ابتدائي_بالعرض.xltm',
       'prep_portrait': 'كشف_رصد_اعدادى_بالطول.xltm',
       'prep_landscape': 'كشف_رصد_اعدادى_بالعرض.xltm',
       'sec_portrait': 'كشف_رصد_ثانوى_بالطول.xltm',
@@ -1456,19 +1445,19 @@ const importPreview = async (req, res) => {
     const years       = _all(sqliteDb, 'SELECT id, year_label FROM academic_years');
     const nats        = _all(sqliteDb, 'SELECT id, name FROM nationalities');
 
-    const secMap   = Object.fromEntries(sections.map(s => [s.name.trim(), s.id]));
+    const secMap   = Object.fromEntries(sections.map(s => [(s.name || '').trim(), s.id]));
     const stageMap = {};
     stages.forEach(s => {
-      const key = `${s.section_id}||${s.stage_name.trim()}`;
+      const key = `${s.section_id}||${(s.stage_name || '').trim()}`;
       stageMap[key] = s.id;
     });
     const gradeMap = {};
     grades.forEach(g => {
-      const key = `${g.stage_id}||${g.grade_name_ar.trim()}`;
+      const key = `${g.stage_id}||${(g.grade_name_ar || '').trim()}`;
       gradeMap[key] = g.id;
     });
-    const yearMap  = Object.fromEntries(years.map(y => [y.year_label.trim(), y.id]));
-    const natMap   = Object.fromEntries(nats.map(n => [n.name.trim(), n.id]));
+    const yearMap  = Object.fromEntries(years.map(y => [(y.year_label || '').trim(), y.id]));
+    const natMap   = Object.fromEntries(nats.map(n => [(n.name || '').trim(), n.id]));
 
     // Column mapping from uploaded file header row
     const { mapping, mode } = req.body; // mode: 'new' | 'update'
@@ -1685,6 +1674,12 @@ const importPreview = async (req, res) => {
         }
       }
 
+      // Normalize gender and auto-repair if possible
+      const normG = normalizeGender(gender, nationalId);
+      if (normG.isValid) {
+        gender = normG.name;
+      }
+
       const errors = [];
       const warnings = [];
 
@@ -1789,28 +1784,28 @@ const importPreview = async (req, res) => {
       if (searchStageStr) {
         let matchedStage = null;
         if (sectionId) {
-          matchedStage = stages.find(s => s.section_id === sectionId && s.stage_name.trim() === searchStageStr);
+          matchedStage = stages.find(s => s.section_id === sectionId && (s.stage_name || '').trim() === searchStageStr);
         }
         if (!matchedStage) {
           matchedStage = stages.find(s => {
             if (sectionId && s.section_id !== sectionId) return false;
-            const dbName = s.stage_name.trim();
+            const dbName = (s.stage_name || '').trim();
             if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
             if ((searchStageStr.includes('اعداد') || searchStageStr.includes('إعداد')) && !searchStageStr.includes('دول') && (dbName.includes('اعداد') || dbName.includes('إعداد')) && !dbName.includes('دول')) return true;
             if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
             if (searchStageStr.includes('ثانو') && dbName.includes('ثانو')) return true;
-            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل')) && (dbStage.includes('روض') || dbStage.includes('طفل'))) return true;
+            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل') || searchStageStr.includes('kg') || searchStageStr.includes('KG')) && (dbName.includes('روض') || dbName.includes('طفل') || dbName.includes('kg') || dbName.includes('KG'))) return true;
             return false;
           });
         }
         if (!matchedStage) {
           matchedStage = stages.find(s => {
-            const dbName = s.stage_name.trim();
+            const dbName = (s.stage_name || '').trim();
             if (searchStageStr.includes('ابتدائ') && dbName.includes('ابتدائ')) return true;
             if ((searchStageStr.includes('اعداد') || searchStageStr.includes('إعداد')) && !searchStageStr.includes('دول') && (dbName.includes('اعداد') || dbName.includes('إعداد')) && !dbName.includes('دول')) return true;
             if (searchStageStr.includes('دول') && dbName.includes('دول')) return true;
             if (searchStageStr.includes('ثانو') && dbName.includes('ثانو')) return true;
-            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل')) && (dbName.includes('روض') || dbName.includes('طفل'))) return true;
+            if ((searchStageStr.includes('روض') || searchStageStr.includes('طفل') || searchStageStr.includes('kg') || searchStageStr.includes('KG')) && (dbName.includes('روض') || dbName.includes('طفل') || dbName.includes('kg') || dbName.includes('KG'))) return true;
             return false;
           });
         }
@@ -1822,7 +1817,7 @@ const importPreview = async (req, res) => {
 
       if (!sectionId) sectionId = Object.values(secMap)[0] || 1;
       if (!stageId) {
-        const nationalStage = stages.find(s => !s.stage_name.includes('دول'));
+        const nationalStage = stages.find(s => !(s.stage_name || '').includes('دول'));
         stageId = nationalStage?.id || stages[0]?.id || null;
       }
 
@@ -1843,7 +1838,7 @@ const importPreview = async (req, res) => {
           const targetNum = getGradeNum(cleanGrade);
           const matchedGradeKey = Object.keys(gradeMap).find(key => {
             if (!key.startsWith(`${stageId}||`)) return false;
-            const dbGrade = key.split('||')[1];
+            const dbGrade = key.split('||')[1] || '';
             if (targetNum > 0 && getGradeNum(dbGrade) === targetNum) return true;
             const normClean = cleanGrade.replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/\s+/g, '');
             const normDb = dbGrade.replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/\s+/g, '');
@@ -1856,10 +1851,12 @@ const importPreview = async (req, res) => {
       if (!stageId) errors.push(`المرحلة "${stageName || 'غير المحددة'}" لم تطابق مسميات المنظومة`);
       if (!gradeId) errors.push(`الصف "${gradeName || 'غير المحدد'}" لم يطابق مسميات المنظومة`);
 
-      academicYearId = yearMap[academicYear] || defaultActiveYear?.id || 1;
+      const cleanYear = (academicYear || '').trim().replace('-', '/');
+      academicYearId = yearMap[academicYear] || yearMap[cleanYear] || defaultActiveYear?.id || 1;
 
       if (nationality) {
-        nationalityId = natMap[nationality];
+        const cleanNat = nationality.trim();
+        nationalityId = natMap[cleanNat] || (cleanNat.includes('مصر') ? 1 : null);
       }
 
       // ── Flexible Classroom Matching & Auto-Creation ──
@@ -1874,7 +1871,7 @@ const importPreview = async (req, res) => {
         if (!cls) {
           const allCls = _all(sqliteDb, 'SELECT id, class_name FROM classes WHERE grade_id = ? AND academic_year_id = ?', [gradeId, academicYearId]);
           cls = allCls.find(c => {
-            const cn = c.class_name.trim();
+            const cn = (c.class_name || '').trim();
             return cn.includes(cleanCls) || cleanCls.includes(cn);
           });
         }
@@ -1945,7 +1942,12 @@ const importPreview = async (req, res) => {
       fieldToCol,
       preview,
       results,
-      summary: { total: results.length, valid: validCount, errors: errorCount }
+      summary: { total: results.length, valid: validCount, errors: errorCount },
+      metadata: {
+        sections: sections.map(s => ({ id: s.id, name: s.name })),
+        stages: stages.map(st => ({ id: st.id, name: st.stage_name, sectionId: st.section_id })),
+        grades: grades.map(g => ({ id: g.id, name: g.grade_name_ar, stageId: g.stage_id }))
+      }
     });
   } catch (err) {
     console.error('Import preview error:', err);
@@ -2052,7 +2054,7 @@ const importExecute = async (req, res) => {
             sectionId, stageId, gradeId, academicYearId, studentCode,
             fullNameAr, fullNameEn||null, fn, fa, gf, fam,
             birthDate||null, birthPlace||null,
-            nationalityId || 1, nationalId||null, gender || 'ذكر', normalizeReligion(religion) || 'مسلم',
+            nationalityId || 1, nationalId||null, (normalizeGender(gender, nationalId).name || 'ذكر'), normalizeReligion(religion) || 'مسلم',
             finalGuardianName, guardianRelation||'أب', guardianNationalId||null,
             guardianPhone||null, guardianJob||null,
             motherName||null, mFn, mSn, mTn, mFn4,
@@ -3676,10 +3678,10 @@ const exportReportPdf = async (req, res) => {
     let xlsmBuf;
     
     const MACRO_TEMPLATES = {
-      'primary_portrait': 'كشف_رصد_صفوف_أولى_بالطول.xltm',
-      'primary_landscape': 'كشف_رصد_صفوف_أولى_بالعرض.xltm',
-      'upper_primary_portrait': 'كشف_رصد_صفوف_عليا_بالطول.xltm',
-      'upper_primary_landscape': 'كشف_رصد_صفوف_عليا_بالعرض.xltm',
+      'primary_portrait': 'كشف_ابتدائي_بالطول.xltm',
+      'primary_landscape': 'كشف_ابتدائي_بالعرض.xltm',
+      'upper_primary_portrait': 'كشف_ابتدائي_بالطول.xltm',
+      'upper_primary_landscape': 'كشف_ابتدائي_بالعرض.xltm',
       'prep_portrait': 'كشف_رصد_اعدادى_بالطول.xltm',
       'prep_landscape': 'كشف_رصد_اعدادى_بالعرض.xltm',
       'sec_portrait': 'كشف_رصد_ثانوى_بالطول.xltm',
@@ -3751,10 +3753,10 @@ const openInExcel = async (req, res) => {
     let xlsmBuf;
     
     const MACRO_TEMPLATES = {
-      'primary_portrait': 'كشف_رصد_صفوف_أولى_بالطول.xltm',
-      'primary_landscape': 'كشف_رصد_صفوف_أولى_بالعرض.xltm',
-      'upper_primary_portrait': 'كشف_رصد_صفوف_عليا_بالطول.xltm',
-      'upper_primary_landscape': 'كشف_رصد_صفوف_عليا_بالعرض.xltm',
+      'primary_portrait': 'كشف_ابتدائي_بالطول.xltm',
+      'primary_landscape': 'كشف_ابتدائي_بالعرض.xltm',
+      'upper_primary_portrait': 'كشف_ابتدائي_بالطول.xltm',
+      'upper_primary_landscape': 'كشف_ابتدائي_بالعرض.xltm',
       'prep_portrait': 'كشف_رصد_اعدادى_بالطول.xltm',
       'prep_landscape': 'كشف_رصد_اعدادى_بالعرض.xltm',
       'sec_portrait': 'كشف_رصد_ثانوى_بالطول.xltm',
@@ -4879,6 +4881,87 @@ const autoLinkSiblings = (req, res) => {
   }
 };
 
+// ─── Gender Diagnostics & Auto-Repair ─────────────────────────────────────────
+const getGenderAudit = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+    const totalStudents = _get(sqliteDb, 'SELECT COUNT(*) as n FROM students WHERE deleted_at IS NULL')?.n || 0;
+    const boysCount = _get(sqliteDb, "SELECT COUNT(*) as n FROM students WHERE deleted_at IS NULL AND gender = 'ذكر'")?.n || 0;
+    const girlsCount = _get(sqliteDb, "SELECT COUNT(*) as n FROM students WHERE deleted_at IS NULL AND gender = 'أنثى'")?.n || 0;
+
+    const invalidStudents = _all(sqliteDb, `
+      SELECT id, student_code, full_name_ar, national_id, gender,
+             CASE 
+               WHEN LENGTH(TRIM(national_id)) = 14 AND CAST(SUBSTR(TRIM(national_id), 13, 1) AS INTEGER) % 2 = 1 THEN 'ذكر'
+               WHEN LENGTH(TRIM(national_id)) = 14 AND CAST(SUBSTR(TRIM(national_id), 13, 1) AS INTEGER) % 2 = 0 THEN 'أنثى'
+               ELSE NULL
+             END AS suggested_gender
+      FROM students
+      WHERE deleted_at IS NULL AND (gender IS NULL OR gender NOT IN ('ذكر', 'أنثى'))
+    `);
+
+    return res.json({
+      success: true,
+      summary: {
+        totalStudents,
+        boysCount,
+        girlsCount,
+        invalidCount: invalidStudents.length,
+        isHealthy: invalidStudents.length === 0
+      },
+      invalidStudents
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+const fixGenderAnomalies = async (req, res) => {
+  if (!db.isConfigured()) return res.status(400).json({ success: false, error: 'قاعدة البيانات غير مهيأة.' });
+  try {
+    const sqliteDb = db.getSQLiteDb();
+
+    db.runTransaction(() => {
+      // 1. Standardize string typos
+      sqliteDb.run(`
+        UPDATE students
+        SET gender = 'ذكر'
+        WHERE gender IN ('بنين', 'ذكور', 'ولد', '1', 'male', 'MALE', 'm', 'M');
+      `);
+      sqliteDb.run(`
+        UPDATE students
+        SET gender = 'أنثى'
+        WHERE gender IN ('انثى', 'أنثي', 'انثي', 'بنات', 'إناث', 'بنت', '2', 'female', 'FEMALE', 'f', 'F');
+      `);
+
+      // 2. Auto-repair missing or invalid genders from 14-digit Egyptian National ID
+      sqliteDb.run(`
+        UPDATE students
+        SET gender = CASE 
+          WHEN CAST(SUBSTR(TRIM(national_id), 13, 1) AS INTEGER) % 2 = 1 THEN 'ذكر'
+          ELSE 'أنثى'
+        END
+        WHERE (gender IS NULL OR gender = '' OR gender NOT IN ('ذكر', 'أنثى'))
+          AND LENGTH(TRIM(national_id)) = 14
+          AND national_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+      `);
+    });
+
+    const remainingInvalid = _get(sqliteDb, `
+      SELECT COUNT(*) as n FROM students WHERE deleted_at IS NULL AND (gender IS NULL OR gender NOT IN ('ذكر', 'أنثى'))
+    `)?.n || 0;
+
+    return res.json({
+      success: true,
+      message: 'تم تدقيق وتصحيح بيانات النوع/الجنس بنجاح ومطابقتها مع الرقم القومي المصري.',
+      remainingInvalid
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 module.exports = {
   createStudent,
   updateStudent,
@@ -4933,5 +5016,7 @@ module.exports = {
   getRegister41Data,
   getOctoberCensusData,
   getDetectedSiblings,
-  autoLinkSiblings
+  autoLinkSiblings,
+  getGenderAudit,
+  fixGenderAnomalies
 };

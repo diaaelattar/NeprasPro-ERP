@@ -3,6 +3,7 @@
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
 import RegisterStatsPage from '../RegisterStatsPage';
+import { sortStudentsByGenderAndName } from '../../../utils/studentSorter';
 
 const PAGE_SIZE = 22; // 22 students per page chunk for official register print
 

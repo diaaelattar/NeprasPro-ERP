@@ -3,6 +3,7 @@
 //  مصفوفة التوزيع الإحصائي المجمعة (مسلم / مسيحي / بنين / بنات) لكل مرحلة وصف وفصل
 // ════════════════════════════════════════════════════════════════
 import React, { useState, useMemo } from 'react';
+import { sortStudentsByGenderAndName } from '../../../utils/studentSorter';
 
 // تحويل الأرقام إلى أرقام عربية مشرقية معتمدة
 const toArNum = (num) => {
@@ -207,23 +208,7 @@ function ReligionGenderDistributionPreview({ students = [], meta = {}, schoolInf
 
   // ── 2. Sort Students for Detailed Nominal View ──
   const sortedStudents = useMemo(() => {
-    const list = [...(students || [])];
-    const order = meta.genderOrder || meta.filters?.genderOrder || 'none';
-
-    return list.sort((a, b) => {
-      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
-      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
-
-      if (order === 'boys_first') {
-        if (isBoyA && !isBoyB) return -1;
-        if (!isBoyA && isBoyB) return 1;
-      } else if (order === 'girls_first') {
-        if (!isBoyA && isBoyB) return -1;
-        if (isBoyA && !isBoyB) return 1;
-      }
-
-      return String(a.full_name_ar || '').localeCompare(String(b.full_name_ar || ''), 'ar', { sensitivity: 'base' });
-    });
+    return sortStudentsByGenderAndName(students, meta.genderOrder || meta.filters?.genderOrder || 'none');
   }, [students, meta.genderOrder, meta.filters]);
 
   return (

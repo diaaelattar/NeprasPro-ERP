@@ -81,6 +81,8 @@ router.post('/print/october-census',               printCtrl.printOctoberCensusP
 router.get('/siblings/detect',                     ctrl.getDetectedSiblings);
 router.post('/siblings/auto-link',                 ctrl.autoLinkSiblings);
 router.get('/duplicates',                         ctrl.getDuplicateStudents);
+router.get('/diagnostics/gender-audit',            ctrl.getGenderAudit);
+router.post('/diagnostics/gender-fix',             ctrl.fixGenderAnomalies);
 
 router.get('/:id',                                ctrl.getStudent);
 router.post('/',                                  ctrl.createStudent);

@@ -5,6 +5,7 @@
 
 const ExcelJS = require('exceljs');
 const db = require('../../../config/db');
+const { getSchoolMasterInfo } = require('../../../utils/schoolHelper');
 const { CONTROL_REPORTS_REGISTRY } = require('./control.reports.registry');
 
 // SQLite helpers
@@ -114,6 +115,7 @@ const getControlReportData = async (req, res) => {
       success: true,
       report: reportMeta,
       data: {
+        school: getSchoolMasterInfo(sqliteDb),
         grade,
         term: tVal,
         subjects,

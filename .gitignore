@@ -15,3 +15,8 @@ build/mac/
 build/*.exe
 build/*.AppImage
 build/*.deb
+files (21)/
+files (21).zip
+*.zip
+debug_wb.txt
+

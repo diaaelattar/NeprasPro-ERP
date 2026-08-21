@@ -1502,6 +1502,135 @@ const _migrateSQLiteSchema = (dbInstance) => {
     `);
     console.log('[DB Migration] High-performance indexes verified.');
 
+    // ── 15.B Decree 151 Primary Control Schema & Components (القرار الوزاري 151) ──
+    dbInstance.run(`
+      CREATE TABLE IF NOT EXISTS evaluation_components (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        component_code    TEXT UNIQUE NOT NULL,
+        name              TEXT NOT NULL,
+        category          TEXT NOT NULL, -- 'exam' | 'evaluation'
+        max_degree        REAL NOT NULL,
+        term_scope        TEXT NOT NULL, -- 'term_full', 'month_1', 'month_2', 'continuous'
+        applies_to_method TEXT NOT NULL DEFAULT 'numeric_100',
+        display_order     INTEGER DEFAULT 0,
+        is_active         INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS rating_scale (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        rating_name           TEXT NOT NULL,
+        min_percent           REAL,
+        max_percent_exclusive REAL,
+        action_description    TEXT,
+        display_order         INTEGER DEFAULT 0,
+        is_percent_confirmed  INTEGER DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS exam_secret_codes (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        control_student_id     INTEGER NOT NULL REFERENCES control_students(id) ON DELETE CASCADE,
+        exam_sitting           TEXT NOT NULL, -- 'نصف_العام', 'آخر_العام', 'دور_ثان'
+        term_id                INTEGER,
+        secret_code            TEXT NOT NULL,
+        assigned_by_staff_id   INTEGER,
+        assigned_at            TEXT DEFAULT (datetime('now')),
+        is_revealed            INTEGER DEFAULT 0,
+        revealed_at            TEXT,
+        revealed_by_staff_id   INTEGER,
+        UNIQUE(control_student_id, exam_sitting),
+        UNIQUE(exam_sitting, term_id, secret_code)
+      );
+    `);
+
+    // Seed evaluation_components if empty
+    let evalCompCount = 0;
+    try {
+      const stmtE = dbInstance.prepare("SELECT COUNT(*) AS c FROM evaluation_components");
+      if (stmtE.step()) evalCompCount = stmtE.getAsObject().c || 0;
+      stmtE.free();
+    } catch (e) {}
+
+    if (evalCompCount === 0) {
+      const defaultEvalComponents = [
+        ['END_TERM_EXAM', 'امتحان نهاية الفصل الدراسي', 'exam', 60.0, 'term_full', 'numeric_100', 4],
+        ['MONTHLY_TEST_1', 'الاختبار الشهري الأول', 'evaluation', 10.0, 'month_1', 'numeric_100', 1],
+        ['MONTHLY_TEST_2', 'الاختبار الشهري الثاني', 'evaluation', 10.0, 'month_2', 'numeric_100', 2],
+        ['WEEKLY_EVAL', 'التقييمات الأسبوعية', 'evaluation', 5.0, 'continuous', 'numeric_100', 3],
+        ['HOMEWORK', 'كراسة الواجب', 'evaluation', 5.0, 'continuous', 'numeric_100', 5],
+        ['ACTIVITY', 'كراسة النشاط والملاحظة', 'evaluation', 5.0, 'continuous', 'numeric_100', 6],
+        ['ATTENDANCE_BEHAVIOR', 'المواظبة والسلوك', 'evaluation', 5.0, 'continuous', 'numeric_100', 7]
+      ];
+      defaultEvalComponents.forEach(([code, name, cat, maxD, scope, appMethod, ord]) => {
+        try {
+          dbInstance.run(
+            "INSERT OR IGNORE INTO evaluation_components (component_code, name, category, max_degree, term_scope, applies_to_method, display_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [code, name, cat, maxD, scope, appMethod, ord]
+          );
+        } catch (e) {}
+      });
+    }
+
+    // Seed rating_scale if empty
+    let ratingCount = 0;
+    try {
+      const stmtR = dbInstance.prepare("SELECT COUNT(*) AS c FROM rating_scale");
+      if (stmtR.step()) ratingCount = stmtR.getAsObject().c || 0;
+      stmtR.free();
+    } catch (e) {}
+
+    if (ratingCount === 0) {
+      const defaultRatings = [
+        ['ممتاز', 85.0, null, 'أنشطة إثرائية', 1, 1],
+        ['جيد جداً', 75.0, 85.0, 'رعاية وتحفيز', 2, 1],
+        ['جيد', 65.0, 75.0, 'رفع كفاءة', 3, 1],
+        ['مقبول', 50.0, 65.0, 'رفع مستوى', 4, 1],
+        ['دون المستوى', null, 50.0, 'أنشطة علاجية ودور ثان', 5, 1]
+      ];
+      defaultRatings.forEach(([name, minP, maxP, act, ord, conf]) => {
+        try {
+          dbInstance.run(
+            "INSERT INTO rating_scale (rating_name, min_percent, max_percent_exclusive, action_description, display_order, is_percent_confirmed) VALUES (?, ?, ?, ?, ?, ?)",
+            [name, minP, maxP, act, ord, conf]
+          );
+        } catch (e) {}
+      });
+    }
+
+    // Ensure all required columns exist on exam_subjects, control_marks, and control_results_summary
+    const safeAddColumn = (tbl, col, def) => {
+      try {
+        const stmtT = dbInstance.prepare(`PRAGMA table_info(${tbl})`);
+        const info = [];
+        while (stmtT.step()) info.push(stmtT.getAsObject().name);
+        stmtT.free();
+        if (!info.includes(col)) {
+          dbInstance.run(`ALTER TABLE ${tbl} ADD COLUMN ${col} ${def};`);
+        }
+      } catch (e) {}
+    };
+
+    safeAddColumn('exam_subjects', 'evaluation_method', "TEXT DEFAULT 'numeric_100'");
+    safeAddColumn('exam_subjects', 'pass_threshold_percent', "REAL DEFAULT 50.0");
+    safeAddColumn('exam_subjects', 'min_exam_pass_mark', "REAL DEFAULT 18.0");
+
+    safeAddColumn('control_marks', 'month1_mark', "REAL DEFAULT 0");
+    safeAddColumn('control_marks', 'month2_mark', "REAL DEFAULT 0");
+    safeAddColumn('control_marks', 'weekly_mark', "REAL DEFAULT 0");
+    safeAddColumn('control_marks', 'homework_mark', "REAL DEFAULT 0");
+    safeAddColumn('control_marks', 'activity_mark', "REAL DEFAULT 0");
+    safeAddColumn('control_marks', 'behavior_mark', "REAL DEFAULT 0");
+    safeAddColumn('control_marks', 'pass_fail_result', "TEXT");
+    safeAddColumn('control_marks', 'rating_label', "TEXT");
+
+    safeAddColumn('control_results_summary', 'term1_rating', "TEXT");
+    safeAddColumn('control_results_summary', 'term2_rating', "TEXT");
+    safeAddColumn('control_results_summary', 'final_degree', "REAL DEFAULT 0");
+    safeAddColumn('control_results_summary', 'final_rating', "TEXT");
+    safeAddColumn('control_results_summary', 'min_term2_exam_met', "INTEGER DEFAULT 1");
+    safeAddColumn('control_results_summary', 'attendance_percent', "REAL DEFAULT 100.0");
+    safeAddColumn('control_results_summary', 'meets_attendance_threshold', "INTEGER DEFAULT 1");
+
+
     // 16. Full Relational Architecture & Financial Module Tables
     dbInstance.run(`
       CREATE TABLE IF NOT EXISTS fee_structures (
@@ -1680,6 +1809,38 @@ const _migrateSQLiteSchema = (dbInstance) => {
     //     INSERT OR IGNORE ensures existing data is NEVER overwritten on update.
     // ──────────────────────────────────────────────────────────────────────────
     _seedLookupData(dbInstance);
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 20. Data Hygiene & Auto-Repair: Gender Standardization & National ID Recovery
+    // ──────────────────────────────────────────────────────────────────────────
+    try {
+      // 1. Standardize string typos and synonyms
+      dbInstance.run(`
+        UPDATE students
+        SET gender = 'ذكر'
+        WHERE gender IN ('بنين', 'ذكور', 'ولد', '1', 'male', 'MALE', 'm', 'M');
+      `);
+      dbInstance.run(`
+        UPDATE students
+        SET gender = 'أنثى'
+        WHERE gender IN ('انثى', 'أنثي', 'انثي', 'بنات', 'إناث', 'بنت', '2', 'female', 'FEMALE', 'f', 'F');
+      `);
+
+      // 2. Auto-repair missing or invalid genders from 14-digit Egyptian National ID
+      dbInstance.run(`
+        UPDATE students
+        SET gender = CASE 
+          WHEN CAST(SUBSTR(TRIM(national_id), 13, 1) AS INTEGER) % 2 = 1 THEN 'ذكر'
+          ELSE 'أنثى'
+        END
+        WHERE (gender IS NULL OR gender = '' OR gender NOT IN ('ذكر', 'أنثى'))
+          AND LENGTH(TRIM(national_id)) = 14
+          AND national_id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]';
+      `);
+      console.log('[DB Migration] Gender standardization & National ID auto-repair applied.');
+    } catch (gErr) {
+      console.error('[DB Migration] Gender auto-repair error:', gErr.message);
+    }
 
     _flushSQLite();
 
@@ -2682,14 +2843,12 @@ const seedDefaultExamSubjects = (dbInstance) => {
       if (gName.includes('الأول الابتدائي') || gName.includes('الثاني الابتدائي')) {
         // Primary 1 & 2
         subList = [
-          { name: 'لغة عربية',     code: 'AR',   cat: 'أساسية',     work: 100, exam: 0,  added: 1, passPercent: 50.0, activity: false },
-          { name: 'رياضيات',       code: 'MATH', cat: 'أساسية',     work: 100, exam: 0,  added: 1, passPercent: 50.0, activity: false },
-          { name: 'لغة إنجليزية', code: 'ENG',  cat: 'أساسية',     work: 100, exam: 0,  added: 1, passPercent: 50.0, activity: false },
-          { name: 'تربية دينية',  code: 'REL',  cat: 'أساسية',     work: 100, exam: 0,  added: 1, passPercent: 70.0, activity: false },
-          { name: 'تربية بدنية',  code: 'PE',   cat: 'نشاط',       work: 0,   exam: 0,  added: 0, passPercent: 50.0, activity: true  },
-          { name: 'تربية فنية',   code: 'ART',  cat: 'نشاط',       work: 0,   exam: 0,  added: 0, passPercent: 50.0, activity: true  },
-          { name: 'موسيقى',       code: 'MUS',  cat: 'نشاط',       work: 0,   exam: 0,  added: 0, passPercent: 50.0, activity: true  },
-          { name: 'مستوى رفيع',   code: 'AL',   cat: 'مستوى رفيع', work: 100, exam: 0,  added: 0, passPercent: 50.0, activity: false }
+          { name: 'اللغة العربية',     code: 'AR',   cat: 'أساسية',     work: 40, exam: 60,  added: 1, passPercent: 50.0, activity: false },
+          { name: 'الرياضيات',       code: 'MATH', cat: 'أساسية',     work: 40, exam: 60,  added: 1, passPercent: 50.0, activity: false },
+          { name: 'اللغة الإنجليزية', code: 'ENG',  cat: 'أساسية',     work: 40, exam: 60,  added: 1, passPercent: 50.0, activity: false },
+          { name: 'التربية الدينية',  code: 'REL',  cat: 'دينية',      work: 40, exam: 60,  added: 0, passPercent: 70.0, activity: false },
+          { name: 'التربية البدنية والصحية',  code: 'PE',   cat: 'نشاط',       work: 0,   exam: 0,  added: 0, passPercent: 50.0, activity: true  },
+          { name: 'أنشطة التوكاتسو',  code: 'TOK',  cat: 'نشاط',       work: 0,   exam: 0,  added: 0, passPercent: 50.0, activity: true  }
         ];
       } else if (gName.includes('الثالث الابتدائي')) {
         // Primary 3

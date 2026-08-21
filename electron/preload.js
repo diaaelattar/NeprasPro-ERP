@@ -4,6 +4,7 @@ const api = {
   ping: () => ipcRenderer.invoke('ping'),
   openEmisPortal: (target) => ipcRenderer.send('emis:open-portal', target),
   openExportFolder: () => ipcRenderer.send('emis:open-folder'),
+  openReportsFolder: (subPath) => ipcRenderer.send('control:open-reports-folder', subPath),
   sendEmisSyncData: (payload) => ipcRenderer.send('emis:sync-data', payload),
   syncEmisPromise: (payload) => ipcRenderer.invoke('emis:sync-data-promise', payload),
   getRegisteredCodes: () => ipcRenderer.invoke('emis:get-registered-codes'),

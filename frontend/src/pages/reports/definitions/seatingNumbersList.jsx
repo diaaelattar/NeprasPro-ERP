@@ -4,6 +4,7 @@
 // ════════════════════════════════════════════════════════════════
 import React from 'react';
 import { calculateAgeOnOct1st } from '../../../constants/lookupOptions';
+import { sortStudentsByGenderAndName, isBoy, isGirl } from '../../../utils/studentSorter';
 
 function SeatingNumbers12DPreview({ students = [], meta = {}, schoolInfo = {} }) {
   const { selectedGrade, selectedYear } = meta;
@@ -15,32 +16,15 @@ function SeatingNumbers12DPreview({ students = [], meta = {}, schoolInfo = {} })
   const academicYear = selectedYear?.year_label || schoolInfo.academicYear || schoolInfo.academic_year || '2025/2026';
 
   // Statistical Counts for Badges
-  const totalBoys = students.filter(s => (s.gender || '').trim() === 'ذكر' || (s.gender || '').trim() === 'بنين').length;
-  const totalGirls = students.filter(s => (s.gender || '').trim() === 'أنثى' || (s.gender || '').trim() === 'بنات').length;
+  const totalBoys = students.filter(isBoy).length;
+  const totalGirls = students.filter(isGirl).length;
   const muslims = students.filter(s => (s.religion || '').trim().includes('مسلم')).length;
   const christians = students.filter(s => (s.religion || '').trim().includes('مسيح')).length;
   const mergedCount = students.filter(s => s.is_merged === 1 || s.is_merged === '1' || s.disability_id > 0).length;
 
   // ── Sort Students according to user preference (genderOrder: boys_first / girls_first / alphabetical) ──
   const sortedStudents = React.useMemo(() => {
-    const list = [...(students || [])];
-    const order = meta.genderOrder || meta.filters?.genderOrder || 'none';
-
-    return list.sort((a, b) => {
-      const isBoyA = (a.gender || '').trim() === 'ذكر' || (a.gender || '').trim() === 'بنين';
-      const isBoyB = (b.gender || '').trim() === 'ذكر' || (b.gender || '').trim() === 'بنين';
-
-      if (order === 'boys_first') {
-        if (isBoyA && !isBoyB) return -1;
-        if (!isBoyA && isBoyB) return 1;
-      } else if (order === 'girls_first') {
-        if (!isBoyA && isBoyB) return -1;
-        if (isBoyA && !isBoyB) return 1;
-      }
-
-      // Sort alphabetically by Arabic name
-      return String(a.full_name_ar || '').localeCompare(String(b.full_name_ar || ''), 'ar', { sensitivity: 'base' });
-    });
+    return sortStudentsByGenderAndName(students, meta.genderOrder || meta.filters?.genderOrder || 'none');
   }, [students, meta.genderOrder, meta.filters]);
 
   // ── Compute Statistics Matrix for Page 2 (Grouped by Class / Grade) ──

@@ -8,10 +8,10 @@ import {
   FileSpreadsheet, Printer, Lock, KeyRound, Eye, Download, ShieldCheck, 
   FileText, CheckCircle2, AlertCircle, Sparkles, Filter, RefreshCw 
 } from 'lucide-react';
-
+import { MinisterialPrintHeader, MinisterialPrintFooter } from '../../components/common/MinisterialPrintHeader';
 import API_BASE_URL from '../../config/api';
 
-export default function ControlReportsPanel({ gradeId, term, setMsg, initialCategory = 'all' }) {
+export default function ControlReportsPanel({ gradeId, term, setMsg, initialCategory = 'all', schoolInfo = null }) {
   const API = `${API_BASE_URL}/control`;
   
   const [reports, setReports] = useState([]);
@@ -227,7 +227,7 @@ export default function ControlReportsPanel({ gradeId, term, setMsg, initialCate
 
       {/* Live Preview Section */}
       {selectedReport && reportData && (
-        <div style={{ background: '#fff', padding: '20px', borderRadius: '14px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}>
+        <div style={{ background: '#fff', padding: '24px 28px', borderRadius: '14px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '2px solid #f1f5f9', paddingBottom: '10px' }}>
             <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 900, color: '#1e1b4b', display: 'flex', alignItems: 'center', gap: '8px' }}>
               🔍 معاينة حية: {selectedReport.title} ({reportData.students?.length || 0} طالب)
@@ -237,7 +237,7 @@ export default function ControlReportsPanel({ gradeId, term, setMsg, initialCate
                 onClick={() => window.print()}
                 style={{ background: '#312e81', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: '6px', fontWeight: 800, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
-                <Printer size={15} /> طباعة PDF
+                <Printer size={15} /> طباعة المستند
               </button>
               <button
                 onClick={() => handleExportExcel(selectedReport.id)}
@@ -248,7 +248,17 @@ export default function ControlReportsPanel({ gradeId, term, setMsg, initialCate
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto', maxHeight: '450px' }}>
+          {/* Standard 3-Column Ministerial Header */}
+          <MinisterialPrintHeader
+            schoolInfo={schoolInfo || reportData.school || {}}
+            documentTitle={selectedReport.title}
+            gradeName={reportData.grade?.grade_name_ar || ''}
+            subTitle={term === 1 ? 'الفصل الدراسي الأول' : term === 2 ? 'الفصل الدراسي الثاني' : 'العام الدراسي'}
+            termName={term === 1 ? 'الأول' : term === 2 ? 'الثاني' : 'كامل العام'}
+            docCode={`NP-CTL-${selectedReport.id.toUpperCase()}`}
+          />
+
+          <div style={{ overflowX: 'auto', maxHeight: '450px', border: '1px solid #cbd5e1', borderRadius: '8px', marginBottom: '16px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', textAlign: 'right' }}>
               <thead>
                 <tr style={{ background: '#0f172a', color: '#fff' }}>
@@ -267,7 +277,7 @@ export default function ControlReportsPanel({ gradeId, term, setMsg, initialCate
                 </tr>
               </thead>
               <tbody>
-                {reportData.students?.slice(0, 30).map((st, idx) => (
+                {reportData.students?.slice(0, 50).map((st, idx) => (
                   <tr key={st.control_student_id} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 0 ? '#fff' : '#f8fafc' }}>
                     <td style={{ padding: '7px', textAlign: 'center', fontWeight: 700 }}>{idx + 1}</td>
                     <td style={{ padding: '7px', fontWeight: 800, color: '#0284c7' }}>{st.seat_number || '-'}</td>
@@ -292,6 +302,9 @@ export default function ControlReportsPanel({ gradeId, term, setMsg, initialCate
               </tbody>
             </table>
           </div>
+
+          {/* Standard 4-Role Ministerial Footer */}
+          <MinisterialPrintFooter />
         </div>
       )}
 
